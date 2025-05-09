@@ -135,7 +135,7 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi):
     J = np.ones((Ny, Nx))
 
     # Solid masks
-    solid_mask = phi <= 2*dx
+    solid_mask = phi <= 0
 
     # Flatten indices for masked region
     idxs = np.where(solid_mask)
@@ -163,7 +163,7 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi):
     I_expand = np.broadcast_to(I, FFt.shape)
 
     J_temp = np.clip(np.linalg.det(F), 1e-3, 1e3)
-    J_temp = gaussian_filter(J_temp, sigma=0.5)
+    J_temp = gaussian_filter(J_temp, sigma=1)
     J[idxs] = J_temp
 
     # sigma = mu/J (F F^T - I) + kappa (J-1) I
@@ -181,21 +181,10 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi):
     strain_rate_yy = dX2_dy * 0.0
     strain_rate_xy = 0.5 * (dX1_dy + dX2_dx)
 
-    eta_s = 0.1  # solid damping coefficient
+    eta_s = 0.01  # solid damping coefficient
     sxx[idxs] += eta_s * strain_rate_xx[idxs]
     syy[idxs] += eta_s * strain_rate_yy[idxs]
     sxy[idxs] += eta_s * strain_rate_xy[idxs]
-    
-    # Apply smoothing to stress fields
-    sxx = gaussian_filter(sxx, sigma=0.5)
-    sxy = gaussian_filter(sxy, sigma=0.5)
-    syy = gaussian_filter(syy, sigma=0.5)
-    
-    # Apply solid mask
-    solid_mask = (phi <= 0).astype(float)
-    sxx = solid_mask * sxx
-    sxy = solid_mask * sxy
-    syy = solid_mask * syy
 
     return sxx, sxy, syy, J
 
@@ -211,7 +200,7 @@ def compute_fluid_stress(a, b, mu_f, dx, dy, phi):
 
     # Apply fluid-only mask
     if phi is not None:
-        fluid_mask = phi >= 0
+        fluid_mask = phi > 0
     else:
         fluid_mask = np.ones_like(a, dtype=bool)
 
@@ -241,25 +230,21 @@ def velocity_RK3(a, b, sxx, sxy, syy, rho_local, dx, dy, dt, phi, nu_s):
     rhs_a1, rhs_b1 = velocity_rhs(a, b, sxx, sxy, syy, rho_local, dx, dy, phi, nu_s)
     a1 = a + dt * rhs_a1
     b1 = b + dt * rhs_b1
-    a1, b1 = lid_bc(a1, b1)
 
     rhs_a2, rhs_b2 = velocity_rhs(a1, b1, sxx, sxy, syy, rho_local, dx, dy, phi, nu_s)
     a2 = 0.75 * a + 0.25 * (a1 + dt * rhs_a2)
     b2 = 0.75 * b + 0.25 * (b1 + dt * rhs_b2)
-    a2, b2 = lid_bc(a1, b1)
-
 
     rhs_a3, rhs_b3 = velocity_rhs(a2, b2, sxx, sxy, syy, rho_local, dx, dy, phi, nu_s)
     a_new = (1/3) * a + (2/3) * (a2 + dt * rhs_a3)
     b_new = (1/3) * b + (2/3) * (b2 + dt * rhs_b3)
-    a_new, b_new = lid_bc(a_new, b_new)
 
     return a_new, b_new
 
 def velocity_rhs(a, b, sxx, sxy, syy, rho_local, dx, dy, phi, nu_s):
     # Advection
-    adv_a = -advection_rhs_velocity(a, a, b, dx, dy)
-    adv_b = -advection_rhs_velocity(b, a, b, dx, dy)
+    adv_a = -(a * np.gradient(a, dx, axis=1) + b * np.gradient(a, dy, axis=0))
+    adv_b = -(a * np.gradient(b, dx, axis=1) + b * np.gradient(b, dy, axis=0))
 
     # Stress divergence
     dsxx_dy, dsxx_dx = np.gradient(sxx, dy, dx, edge_order=2)
@@ -320,76 +305,7 @@ def lid_bc(u, v):
 
     return u_bc, v_bc
 
-def advection_rhs_velocity(q, a, b, dx, dy):
-    """
-    Advection of velocity components: d/dx(a*q) + d/dy(b*q)
-    """
-    Ny, Nx = q.shape
-    fx = np.zeros((Ny, Nx))
-    fy = np.zeros((Ny, Nx))
 
-    for j in range(Ny):
-        flux_x = a[j, :] * q[j, :]
-        fx[j, :] = weno_flux_z(flux_x, a[j, :], dx)
-
-    for i in range(Nx):
-        flux_y = b[:, i] * q[:, i]
-        fy[:, i] = weno_flux_z(flux_y, b[:, i], dy)
-
-    return fx + fy
-
-def weno_flux_z(U, vel, dx):
-    """
-    WENO-Z reconstruction for advection flux splitting.
-    """
-    N = len(U)
-    f = vel * U
-    alpha = np.max(np.abs(vel))
-
-    f_plus = 0.5 * (f + alpha * U)
-    f_minus = 0.5 * (f - alpha * U)
-
-    # Periodic extension
-    fpe = np.concatenate([f_plus[-3:], f_plus, f_plus[:3]])
-    fme = np.concatenate([f_minus[-3:], f_minus, f_minus[:3]])
-
-    fhat_plus = np.zeros(N + 1)
-    fhat_minus = np.zeros(N + 1)
-
-    for i in range(N + 1):
-        fhat_plus[i] = weno_z_reconstruct(fpe[i:i+5])
-        fhat_minus[i] = weno_z_reconstruct(fme[i:i+5][::-1])
-
-    dudx = (fhat_plus[1:] - fhat_plus[:-1] + fhat_minus[1:] - fhat_minus[:-1]) / dx
-
-    return dudx
-
-def weno_z_reconstruct(f):
-    """
-    5-point WENO-Z reconstruction at an interface.
-    """
-    eps = 1e-6
-    IS0 = (13/12)*(f[0]-2*f[1]+f[2])**2 + (1/4)*(f[0]-4*f[1]+3*f[2])**2
-    IS1 = (13/12)*(f[1]-2*f[2]+f[3])**2 + (1/4)*(f[1]-f[3])**2
-    IS2 = (13/12)*(f[2]-2*f[3]+f[4])**2 + (1/4)*(3*f[2]-4*f[3]+f[4])**2
-
-    tau5 = np.abs(IS0 - IS2)
-
-    alpha0 = 0.1 * (1 + (tau5 / (IS0 + eps))**2)
-    alpha1 = 0.6 * (1 + (tau5 / (IS1 + eps))**2)
-    alpha2 = 0.3 * (1 + (tau5 / (IS2 + eps))**2)
-
-    alpha_sum = alpha0 + alpha1 + alpha2
-
-    w0 = alpha0 / alpha_sum
-    w1 = alpha1 / alpha_sum
-    w2 = alpha2 / alpha_sum
-
-    q0 = (2*f[0] - 7*f[1] + 11*f[2]) / 6
-    q1 = (-f[1] + 5*f[2] + 2*f[3]) / 6
-    q2 = (2*f[2] + 5*f[3] - f[4]) / 6
-
-    return w0*q0 + w1*q1 + w2*q2
 
 def pressure_poisson_varrho(u_star, v_star, p_old,
                             dx, dy, dt, rho,
@@ -464,10 +380,6 @@ def laplacian_2D(U, dx, dy):
     )
     return lapU
 
-
-import numpy as np
-from scipy.interpolate import RegularGridInterpolator
-from scipy.ndimage import gaussian_filter
 
 def reconstruct_phi_from_reference_map(X1, X2, phi0, X0, Y0):
     """
@@ -570,7 +482,7 @@ def compute_body_force(sxx, sxy, syy, dx, dy, rho):
 # --------------------------
 # Grid Setup
 # --------------------------
-Nx, Ny = 100, 100
+Nx, Ny = 50, 50
 Lx, Ly = 1.0, 1.0
 X, Y, dx, dy = create_grid(Nx, Ny, Lx, Ly)
 
@@ -584,11 +496,11 @@ solid_mask = (phi <= 0).astype(float)
 X1 = X * solid_mask
 X2 = Y * solid_mask
 
-X1 = extrapolate_transverse_layers(X1, phi, dx, dy, 3 * dx, 3)
-X2 = extrapolate_transverse_layers(X2, phi, dx, dy, 3 * dx, 3)
+X1 = extrapolate_transverse_layers(X1, phi, dx, dy, 3 * dx, 5)
+X2 = extrapolate_transverse_layers(X2, phi, dx, dy, 3 * dx, 5)
 
 # Physical Parameters
-mu_s, kappa, rho_s, nu_s = 0.1, 10.0, 1.0, 0.01
+mu_s, kappa, rho_s, nu_s = 0.1, 1000.0, 1.0, 0.01
 mu_f, rho_f = 0.01, 1.0
 w_t = 1.5 * dx
 
@@ -609,31 +521,18 @@ for step in range(1, max_steps + 1):
     
     total_time = step * dt
     # only solve for fluid until total_time ~ 10
-    if total_time > 2:
+    if total_time > 10:
         # Advection of phi
         dt *= 0.1
         
-        phi = advect_phi(phi, a, b, X, Y, dt)
-        phi = apply_phi_BCs(phi)
-        solid_mask = (phi <= 0).astype(float)
 
-        # Advect Reference Maps
-        X1 = advect_phi(X1, a, b, X, Y, dt)
-        X2 = advect_phi(X2, a, b, X, Y, dt)
-        
-        X1 = gaussian_filter(X1, sigma=0.5)
-        X2 = gaussian_filter(X2, sigma=0.5)
-
-        X1 *= solid_mask
-        X2 *= solid_mask
-
-        X1 = extrapolate_transverse_layers(X1, phi, dx, dy, 3 * dx, 5)
-        X2 = extrapolate_transverse_layers(X2, phi, dx, dy, 3 * dx, 5)
         
 
         # Compute Stress Fields
         sigma_sxx, sigma_sxy, sigma_syy, J = compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi)
         sigma_fxx, sigma_fxy, sigma_fyy = compute_fluid_stress(a, b, mu_f, dx, dy, phi)
+        
+
 
         H = heaviside_smooth_alt(phi, w_t)
         sigma_xx = (1 - H) * sigma_sxx + H * sigma_fxx
@@ -656,22 +555,40 @@ for step in range(1, max_steps + 1):
     a_star, b_star = lid_bc(a_star, b_star)
 
     # Pressure Solve
-    p = pressure_poisson_varrho(a_star, b_star, p, dx, dy, dt, rho_local, 250, 1e-5, 1.5)
+    p = pressure_poisson_varrho(a_star, b_star, p, dx, dy, dt, rho_local, 100, 1e-5)
 
     # Use Rhie-Chow projection with body force
     a_new, b_new = rhie_chow_projection(
         a_star, b_star, p, dx, dy, dt, rho_local, sigma_xx, sigma_xy, sigma_yy
     )
+    # a = a_new
+    # b = b_new
+    # smooth velocity fields
     a = gaussian_filter(a_new, sigma=0.5)
     b = gaussian_filter(b_new, sigma=0.5)
-    
-    # smooth velocity fields
     # a, b = filter_velocity_in_fluid(a_new, b_new, phi, sigma=0.5)
     a, b = lid_bc(a, b)
     
+    if total_time > 10:
+        phi = advect_phi(phi, a, b, X, Y, dt)
+        phi = apply_phi_BCs(phi)
+        solid_mask = (phi <= 0).astype(float)
+        
+        X1 *= solid_mask
+        X2 *= solid_mask
+
+        # Advect Reference Maps
+        X1 = advect_phi(X1, a, b, X, Y, dt)
+        X2 = advect_phi(X2, a, b, X, Y, dt)
+
+
+        X1 = extrapolate_transverse_layers(X1, phi, dx, dy, 3 * dx, 5)
+        X2 = extrapolate_transverse_layers(X2, phi, dx, dy, 3 * dx, 5)
+    
+    
     if step % 50 == 0 or step == 1:
         vmag = np.sqrt(a**2 + b**2)
-        if total_time > 2:
+        if total_time > 10:
             solid_J = J[phi <= 0]
             print(
             f"[Step {step:05d}] dt={dt:.2e}, "
@@ -694,7 +611,7 @@ for step in range(1, max_steps + 1):
         
         with h5py.File(f"frames/data_{step:05d}.h5", "w") as f:
             f.create_dataset("phi", data=phi)
-            if total_time > 2:
+            if total_time > 10:
                 f.create_dataset("X1", data=X1)
                 f.create_dataset("X2", data=X2)
                 f.create_dataset("J", data=J)
