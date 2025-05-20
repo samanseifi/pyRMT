@@ -7,6 +7,7 @@ from scipy.sparse import diags, kron, identity, csr_matrix, lil_matrix
 from scipy.sparse.linalg import cg
 
 import h5py
+import time
 
 def create_grid(Nx, Ny, Lx, Ly):
     x = np.linspace(0, Lx, Nx)
@@ -288,33 +289,43 @@ def heaviside_smooth_alt(x, w_t):
     
     return H
 
-def velocity_RK4(u, v, X1, X2, mu_s, kappa, eta_s , dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t):
+def velocity_RK4(u, v, X1, X2, mu_s, kappa, eta_s, dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t):
     """
     RK4 integration using stress divergence from blended stress field.
+    Optimized to avoid redundant solid stress computations.
     """
-    def rhs(u_stage, v_stage):
-        sigma_sxx, sigma_sxy, sigma_syy, J = compute_solid_stress(X1, X2, dx, dy, mu_s, 
-                                                                  kappa, phi, u_stage, 
-                                                                  v_stage, eta_s)   
-        return velocity_rhs_blended(u, v, sigma_sxx, sigma_sxy, sigma_syy,
-                                    dx, dy, phi,mu_f, rho_s, rho_f, w_t)
+    # Precompute solid stress for all stages to avoid recomputation
+    def get_stress(u_stage, v_stage):
+        return compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, u_stage, v_stage, eta_s)
 
-    k1u, k1v = rhs(u, v)
+    # Stage 1
+    sigma_sxx1, sigma_sxy1, sigma_syy1, _ = get_stress(u, v)
+    k1u, k1v = velocity_rhs_blended(u, v, sigma_sxx1, sigma_sxy1, sigma_syy1,
+                                    dx, dy, phi, mu_f, rho_s, rho_f, w_t)
 
+    # Stage 2
     u1 = u + 0.5 * dt * k1u
     v1 = v + 0.5 * dt * k1v
-    k2u, k2v = rhs(u1, v1)
+    sigma_sxx2, sigma_sxy2, sigma_syy2, _ = get_stress(u1, v1)
+    k2u, k2v = velocity_rhs_blended(u1, v1, sigma_sxx2, sigma_sxy2, sigma_syy2,
+                                    dx, dy, phi, mu_f, rho_s, rho_f, w_t)
 
+    # Stage 3
     u2 = u + 0.5 * dt * k2u
     v2 = v + 0.5 * dt * k2v
-    k3u, k3v = rhs(u2, v2)
+    sigma_sxx3, sigma_sxy3, sigma_syy3, _ = get_stress(u2, v2)
+    k3u, k3v = velocity_rhs_blended(u2, v2, sigma_sxx3, sigma_sxy3, sigma_syy3,
+                                    dx, dy, phi, mu_f, rho_s, rho_f, w_t)
 
+    # Stage 4
     u3 = u + dt * k3u
     v3 = v + dt * k3v
-    k4u, k4v = rhs(u3, v3)
+    sigma_sxx4, sigma_sxy4, sigma_syy4, _ = get_stress(u3, v3)
+    k4u, k4v = velocity_rhs_blended(u3, v3, sigma_sxx4, sigma_sxy4, sigma_syy4,
+                                    dx, dy, phi, mu_f, rho_s, rho_f, w_t)
 
-    u_new = u + (dt / 6.0) * (k1u + 2*k2u + 2*k3u + k4u)
-    v_new = v + (dt / 6.0) * (k1v + 2*k2v + 2*k3v + k4v)
+    u_new = u + (dt / 6.0) * (k1u + 2 * k2u + 2 * k3u + k4u)
+    v_new = v + (dt / 6.0) * (k1v + 2 * k2v + 2 * k3v + k4v)
 
     return u_new, v_new
 
@@ -537,7 +548,8 @@ def pressure_projection_CG(a_star, b_star, dx, dy, dt, rho):
 
     rhs = (rho * divU / dt).ravel()
     rhs -= np.mean(rhs)  # anchor pressure
-
+    
+    # Build the Poisson matrix if not provided
     A = build_poisson_matrix(Nx, Ny, dx, dy)
 
     p_flat, info = cg(A, rhs, x0=np.zeros_like(rhs), rtol=1e-8, maxiter=1000)
@@ -555,7 +567,6 @@ def pressure_projection_CG(a_star, b_star, dx, dy, dt, rho):
     a = a_star - (dt / rho) * dpdx
     b = b_star - (dt / rho) * dpdy
 
-    a, b = lid_bc(a, b)
     return a, b, p
 
 def apply_reference_map_BCs(X1, X2, u, v, dt):
@@ -620,20 +631,27 @@ if __name__ == "__main__":
     CFL = 0.2
     dt_min_cap = 1e-3
     max_steps = 100000
+    
+    # Pre-compute the Poisson matrix for pressure projection
+    A = build_poisson_matrix(Nx, Ny, dx, dy)
 
     # --------------------------
     # Time Loop
     # --------------------------
+    t0 = time.time()
     for step in range(1, max_steps + 1):
         dt = compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s)
         
         dt *= 0.1
 
+        # Update the level set function from the reference maps
         phi = rebuild_phi_from_reference_map(X1, X2, X, Y, x0=0.6, y0=0.5, R=0.2)
         phi = apply_phi_BCs(phi)
 
+        # Create a solid mask
         solid_mask = (phi < 0).astype(float)
         
+        # Advect the reference maps using semi-Lagrangian RK4
         X1 = advect_semi_lagrangian_rk4(X1, a, b, X, Y, dt)
         X2 = advect_semi_lagrangian_rk4(X2, a, b, X, Y, dt)
         
@@ -643,6 +661,7 @@ if __name__ == "__main__":
         X1 = extrapolate_transverse_layers(X1, phi, dx, dy, 3 * dx, 5)
         X2 = extrapolate_transverse_layers(X2, phi, dx, dy, 3 * dx, 5)
         
+        # Update the velocity fields using RK4
         a_star, b_star = velocity_RK4(a, b, X1, X2, mu_s, kappa, eta_s , dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t)
         a_star, b_star = lid_bc(a_star, b_star)
         
@@ -657,20 +676,23 @@ if __name__ == "__main__":
         a, b = lid_bc(a, b)
         
         if step % 50 == 0 or step == 1:
+            elapsed = time.time() - t0
             vmag = np.sqrt(a**2 + b**2)
             div = divergence_2d(a, b, dx, dy)
             
             # Compute the area of the solid region
             solid_area = np.sum(solid_mask) * dx * dy
             print(
-                    f"[Step {step:05d}] dt={dt:.2e}, "
-                    f"max|v|={np.max(vmag):.3f}, "
-                    f"min(J)={np.min(J):.3f}, "
-                    f"mean(J)={np.mean(J):.3f}, "
-                    f"max|σ_solid|={np.max(np.abs(sigma_sxx)):.2f}, "
-                    f"max divergence = {np.max(np.abs(div)):.2e}, "
-                    f"solid area = {solid_area:.2f}"
-                    )
+                f"[Step {step:05d}] dt={dt:.2e}, "
+                f"max|v|={np.max(vmag):.3f}, "
+                f"min(J)={np.min(J):.3f}, "
+                f"mean(J)={np.mean(J):.3f}, "
+                f"max|σ_solid|={np.max(np.abs(sigma_sxx)):.2f}, "
+                f"max divergence = {np.max(np.abs(div)):.2e}, "
+                f"solid area = {solid_area:.2f}, "
+                f"timing = {elapsed:.3f}s"
+                )
+            t0 = time.time()
 
         # Visualization
         if step == 1 or step % 50 == 0:
