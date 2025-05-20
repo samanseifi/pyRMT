@@ -212,7 +212,7 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, eta_s=0.0):
     J = np.ones((Ny, Nx))
 
     # Solid with a narrow band mask for smoother divergence computation later
-    solid_mask = phi < 5*dx
+    solid_mask = phi < 4*dx
 
     # Flatten indices for masked region
     idxs = np.where(solid_mask)
@@ -239,7 +239,7 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, eta_s=0.0):
     I = np.eye(2)
     I_expand = np.broadcast_to(I, FFt.shape)
     J_temp = np.clip(np.linalg.det(F), 1e-3, 1e3)
-    # J_temp = gaussian_filter(J_temp, 0.5)
+    J_temp = gaussian_filter(J_temp, 0.5)
     J[idxs] = J_temp
     sigma = (mu_s / J_temp)[:, None, None] * (FFt - I_expand) + \
             kappa * (J_temp - 1)[:, None, None] * I_expand
@@ -411,10 +411,14 @@ def velocity_rhs_blended(u, v,
     div_solid_x = dsxx_dx + dsxy_dy
     div_solid_y = dsxy_dx + dsyy_dy
     
-    # --- Apply a solid mask since the stresses came in with a narrow band ---
-    solid_mask = (phi < 0).astype(float)
+    # --- Now apply a solid mask since the stresses came in with a narrow band ---
+    solid_mask = (phi <= 0).astype(float)
     div_solid_x *= solid_mask
     div_solid_y *= solid_mask
+    
+    sigma_sxx_s *= solid_mask
+    sigma_sxy_s *= solid_mask
+    sigma_syy_s *= solid_mask
 
     # --- Fluid stress components (only for jump term) ---
     du_dx = (np.roll(u, -1, axis=1) - np.roll(u, 1, axis=1)) / (2 * dx)
