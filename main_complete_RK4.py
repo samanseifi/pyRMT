@@ -583,110 +583,109 @@ def rebuild_phi_from_reference_map(X1, X2, X, Y, x0, y0, R):
     return phi
 
 
-# --------------------------
-# Grid Setup
-# --------------------------
-Nx, Ny = 128, 128
-Lx, Ly = 1.0, 1.0
-X, Y, dx, dy = create_grid(Nx, Ny, Lx, Ly)
+if __name__ == "__main__":
+    # --------------------------
+    # Grid Setup
+    # --------------------------
+    Nx, Ny = 128, 128
+    Lx, Ly = 1.0, 1.0
+    X, Y, dx, dy = create_grid(Nx, Ny, Lx, Ly)
 
-# --------------------------
-# Initial Fields
-# --------------------------
-phi = initialize_level_set(X, Y, x0=0.6, y0=0.5, R=0.2)
-phi = apply_phi_BCs(phi)
-phi0 = phi.copy()
-solid_mask = (phi < 0).astype(float)
-
-X1 = X.copy()
-X2 = Y.copy()
-X1 = X * solid_mask
-X2 = Y * solid_mask
-
-X1 = extrapolate_transverse_layers(X1, phi, dx, dy, 3 * dx, 5)
-X2 = extrapolate_transverse_layers(X2, phi, dx, dy, 3 * dx, 5)
-
-# Physical Parameters
-mu_s, kappa, rho_s, eta_s = 0.05, 0.0, 1.0, 0.01
-mu_f, rho_f = 0.01, 1.0
-w_t = 4 * dx
-
-# Velocity and Pressure
-a = np.zeros((Nx, Ny))
-b = np.zeros((Nx, Ny))
-p = np.zeros((Nx, Ny))
-
-CFL = 0.2
-dt_min_cap = 1e-3
-max_steps = 100000
-
-# --------------------------
-# Time Loop
-# --------------------------
-for step in range(1, max_steps + 1):
-    dt = compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s)
-    
-    dt *= 0.1
-
-    phi = rebuild_phi_from_reference_map(X1, X2, X, Y, x0=0.6, y0=0.5, R=0.2)
+    # --------------------------
+    # Initial Fields
+    # --------------------------
+    phi = initialize_level_set(X, Y, x0=0.6, y0=0.5, R=0.2)
     phi = apply_phi_BCs(phi)
-
+    phi0 = phi.copy()
     solid_mask = (phi < 0).astype(float)
-    
-    X1 = advect_semi_lagrangian_rk4(X1, a, b, X, Y, dt)
-    X2 = advect_semi_lagrangian_rk4(X2, a, b, X, Y, dt)
-    
-    X1 *= solid_mask
-    X2 *= solid_mask
+
+    X1 = X.copy()
+    X2 = Y.copy()
+    X1 = X * solid_mask
+    X2 = Y * solid_mask
 
     X1 = extrapolate_transverse_layers(X1, phi, dx, dy, 3 * dx, 5)
     X2 = extrapolate_transverse_layers(X2, phi, dx, dy, 3 * dx, 5)
-   
-    # Compute Solid Stress Fields
-    
-    a_star, b_star = velocity_RK4(a, b, X1, X2, mu_s, kappa, eta_s , dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t)
-    a_star, b_star = lid_bc(a_star, b_star)
-    
-    # Just for outputting stresses
-    sigma_sxx, sigma_sxy, sigma_syy, J = compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, eta_s)
 
-    H = heaviside_smooth_alt(phi, w_t)  
-    rho_local = (1 - H) * rho_s + H * rho_f
-    
-    # Apply global pressure projection
-    a, b, p = pressure_projection_CG(a_star, b_star, dx, dy, dt, rho_local)
-    a, b = lid_bc(a, b)
-    
-    if step % 50 == 0 or step == 1:
-        vmag = np.sqrt(a**2 + b**2)
-        div = divergence_2d(a, b, dx, dy)
+    # Physical Parameters
+    mu_s, kappa, rho_s, eta_s = 0.1, 0.0, 1.0, 0.01
+    mu_f, rho_f = 0.01, 1.0
+    w_t = 4 * dx
+
+    # Velocity and Pressure
+    a = np.zeros((Nx, Ny))
+    b = np.zeros((Nx, Ny))
+    p = np.zeros((Nx, Ny))
+
+    CFL = 0.2
+    dt_min_cap = 1e-3
+    max_steps = 100000
+
+    # --------------------------
+    # Time Loop
+    # --------------------------
+    for step in range(1, max_steps + 1):
+        dt = compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s)
         
-        # Compute the area of the solid region
-        solid_area = np.sum(solid_mask) * dx * dy
-        print(
-                f"[Step {step:05d}] dt={dt:.2e}, "
-                f"max|v|={np.max(vmag):.3f}, "
-                f"min(J)={np.min(J):.3f}, "
-                f"mean(J)={np.mean(J):.3f}, "
-                f"max|σ_solid|={np.max(np.abs(sigma_sxx)):.2f}, "
-                f"max divergence = {np.max(np.abs(div)):.2e}, "
-                f"solid area = {solid_area:.2f}"
-                )
+        dt *= 0.1
 
-    # Visualization
-    if step == 1 or step % 50 == 0:
-        div = divergence_2d(a, b, dx, dy)
+        phi = rebuild_phi_from_reference_map(X1, X2, X, Y, x0=0.6, y0=0.5, R=0.2)
+        phi = apply_phi_BCs(phi)
 
-        with h5py.File(f"frames/data_{step:05d}.h5", "w") as f:
-            f.create_dataset("phi", data=phi)
-            f.create_dataset("X1", data=X1)
-            f.create_dataset("X2", data=X2)
-            f.create_dataset("J", data=J)
-            f.create_dataset("a", data=a)
-            f.create_dataset("b", data=b)
-            f.create_dataset("p", data=p)
-            f.create_dataset("sigma_xx", data=sigma_sxx)
-            f.create_dataset("sigma_yy", data=sigma_syy)
-            f.create_dataset("sigma_xy", data=sigma_sxy)
-            f.create_dataset("div_vel", data=div)
+        solid_mask = (phi < 0).astype(float)
+        
+        X1 = advect_semi_lagrangian_rk4(X1, a, b, X, Y, dt)
+        X2 = advect_semi_lagrangian_rk4(X2, a, b, X, Y, dt)
+        
+        X1 *= solid_mask
+        X2 *= solid_mask
+
+        X1 = extrapolate_transverse_layers(X1, phi, dx, dy, 3 * dx, 5)
+        X2 = extrapolate_transverse_layers(X2, phi, dx, dy, 3 * dx, 5)
+        
+        a_star, b_star = velocity_RK4(a, b, X1, X2, mu_s, kappa, eta_s , dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t)
+        a_star, b_star = lid_bc(a_star, b_star)
+        
+        # Just for outputting stresses
+        sigma_sxx, sigma_sxy, sigma_syy, J = compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, eta_s)
+
+        H = heaviside_smooth_alt(phi, w_t)  
+        rho_local = (1 - H) * rho_s + H * rho_f
+        
+        # Apply global pressure projection
+        a, b, p = pressure_projection_CG(a_star, b_star, dx, dy, dt, rho_local)
+        a, b = lid_bc(a, b)
+        
+        if step % 50 == 0 or step == 1:
+            vmag = np.sqrt(a**2 + b**2)
+            div = divergence_2d(a, b, dx, dy)
+            
+            # Compute the area of the solid region
+            solid_area = np.sum(solid_mask) * dx * dy
+            print(
+                    f"[Step {step:05d}] dt={dt:.2e}, "
+                    f"max|v|={np.max(vmag):.3f}, "
+                    f"min(J)={np.min(J):.3f}, "
+                    f"mean(J)={np.mean(J):.3f}, "
+                    f"max|σ_solid|={np.max(np.abs(sigma_sxx)):.2f}, "
+                    f"max divergence = {np.max(np.abs(div)):.2e}, "
+                    f"solid area = {solid_area:.2f}"
+                    )
+
+        # Visualization
+        if step == 1 or step % 50 == 0:
+            div = divergence_2d(a, b, dx, dy)
+
+            with h5py.File(f"frames/data_{step:05d}.h5", "w") as f:
+                f.create_dataset("phi", data=phi)
+                f.create_dataset("X1", data=X1)
+                f.create_dataset("X2", data=X2)
+                f.create_dataset("J", data=J)
+                f.create_dataset("a", data=a)
+                f.create_dataset("b", data=b)
+                f.create_dataset("p", data=p)
+                f.create_dataset("sigma_xx", data=sigma_sxx)
+                f.create_dataset("sigma_yy", data=sigma_syy)
+                f.create_dataset("sigma_xy", data=sigma_sxy)
+                f.create_dataset("div_vel", data=div)
 
