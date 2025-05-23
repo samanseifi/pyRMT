@@ -25,17 +25,15 @@ def apply_phi_BCs(phi):
     """
     Apply periodic boundary conditions to phi (3-cell periodic BCs).
     """
-    # phi[0:3, :] = phi[-6:-3, :]
-    # phi[-3:, :] = phi[3:6, :]
-    # phi[:, 0:3] = phi[:, -6:-3]
-    # phi[:, -3:] = phi[:, 3:6]
+    phi[0:3, :] = phi[-6:-3, :]
+    phi[-3:, :] = phi[3:6, :]
+    phi[:, 0:3] = phi[:, -6:-3]
+    phi[:, -3:] = phi[:, 3:6]
     
-    phi[0, :] = phi[1, :]
-    phi[-1, :] = phi[-2, :]
-    phi[:, 0] = phi[:, 1]
-    phi[:, -1] = phi[:, -2]
-    return phi
-
+    # phi[0, :] = phi[1, :]
+    # phi[-1, :] = phi[-2, :]
+    # phi[:, 0] = phi[:, 1]
+    # phi[:, -1] = phi[:, -2]
     return phi
 
 def extrapolate_transverse_layers(X, phi, dx, dy, initial_band_width, max_layers):
@@ -117,7 +115,6 @@ def semi_implicit_reference_map_update(Xn, u, v, dx, dy, dt):
     X_np1 = Xn - dt * (u * dX_dx + v * dX_dy)
     return X_np1
 
-
 def advect_semi_lagrangian_rk4(q, a, b, X, Y, dt):
     """
     Semi-Lagrangian advection using RK4 backtracking for high accuracy.
@@ -198,7 +195,12 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, eta_s=0.0):
     The solid mask is applied to ensure that the stress is only computed
     in the solid region (phi <= 0).
     The function returns the stress components sxx, sxy, syy and the Jacobian J.
+    
+    Incorporating Maxwell Stresses from electrohydrodynamics (EHD)
+    is not included in this function.
     """
+    X1 = gaussian_filter(X1, 1.0)
+    X2 = gaussian_filter(X2, 1.0)
     
     # Gradients
     dX1_dy, dX1_dx = np.gradient(X1, dy, dx, edge_order=2)
@@ -212,7 +214,7 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, eta_s=0.0):
     J = np.ones((Ny, Nx))
 
     # Solid with a narrow band mask for smoother divergence computation later
-    solid_mask = phi < 4*dx
+    solid_mask = phi <= 0
 
     # Flatten indices for masked region
     idxs = np.where(solid_mask)
@@ -238,8 +240,11 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, eta_s=0.0):
     FFt = np.einsum('nij,njk->nik', F, Ft)
     I = np.eye(2)
     I_expand = np.broadcast_to(I, FFt.shape)
-    J_temp = np.clip(np.linalg.det(F), 1e-3, 1e3)
-    J_temp = gaussian_filter(J_temp, 0.5)
+    J_temp = np.linalg.det(F)
+    J_temp = gaussian_filter(J_temp, 1.0)
+    # clamp to a physically reasonable window
+    J_temp = np.clip(J_temp, 0.5, 2.0)
+
     J[idxs] = J_temp
     sigma = (mu_s / J_temp)[:, None, None] * (FFt - I_expand) + \
             kappa * (J_temp - 1)[:, None, None] * I_expand
@@ -264,6 +269,10 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, eta_s=0.0):
         sxx[idxs] += eta_s * strain_rate_xx[idxs]
         syy[idxs] += eta_s * strain_rate_yy[idxs]
         sxy[idxs] += eta_s * strain_rate_xy[idxs]
+    
+    sxx = gaussian_filter(sxx, 1.0)*solid_mask
+    sxy = gaussian_filter(sxy, 1.0)*solid_mask
+    syy = gaussian_filter(syy, 1.0)*solid_mask
 
     return sxx, sxy, syy, J
 
@@ -412,13 +421,13 @@ def velocity_rhs_blended(u, v,
     div_solid_y = dsxy_dx + dsyy_dy
     
     # --- Now apply a solid mask since the stresses came in with a narrow band ---
-    solid_mask = (phi <= 0).astype(float)
-    div_solid_x *= solid_mask
-    div_solid_y *= solid_mask
+    # solid_mask = (phi <= 0).astype(float)
+    # div_solid_x *= solid_mask
+    # div_solid_y *= solid_mask
     
-    sigma_sxx_s *= solid_mask
-    sigma_sxy_s *= solid_mask
-    sigma_syy_s *= solid_mask
+    # sigma_sxx_s *= solid_mask
+    # sigma_sxy_s *= solid_mask
+    # sigma_syy_s *= solid_mask
 
     # --- Fluid stress components (only for jump term) ---
     du_dx = (np.roll(u, -1, axis=1) - np.roll(u, 1, axis=1)) / (2 * dx)
@@ -562,20 +571,6 @@ def pressure_projection_CG(a_star, b_star, dx, dy, dt, rho):
     a, b = lid_bc(a, b)
     return a, b, p
 
-def apply_reference_map_BCs(X1, X2, u, v, dt):
-    # Handle top wall with moving lid
-    X1[-1, :] = X1[-2, :] + dt * u[-1, :]
-    X2[-1, :] = X2[-2, :] + dt * v[-1, :]
-
-    # No-slip sides and bottom (copy values)
-    X1[0, :]  = X1[1, :]
-    X2[0, :]  = X2[1, :]
-    X1[:, 0]  = X1[:, 1]
-    X2[:, 0]  = X2[:, 1]
-    X1[:, -1] = X1[:, -2]
-    X2[:, -1] = X2[:, -2]
-
-    return X1, X2
 
 def rebuild_phi_from_reference_map(X1, X2, X, Y, x0, y0, R):
     """
@@ -585,6 +580,99 @@ def rebuild_phi_from_reference_map(X1, X2, X, Y, x0, y0, R):
     r = np.sqrt((X1 - x0)**2 + (X2 - y0)**2)
     phi = r - R
     return phi
+
+def reinitialize_phi_PDE(phi_in, dx, dy, num_iters, apply_phi_BCs_func, dt_reinit_factor=0.5):
+    """
+    Reinitializes phi to be a signed distance function using a PDE-based method.
+    Solves: phi_tau + S(phi_initial) * ( |grad(phi)| - 1 ) = 0
+    
+    Args:
+        phi_in (np.ndarray): The level set function to reinitialize. This phi is assumed
+                             to correctly define the interface (phi_in=0), but may not be
+                             an SDF away from it.
+        dx (float): Grid spacing in x.
+        dy (float): Grid spacing in y.
+        num_iters (int): Number of pseudo-time iterations for the reinitialization PDE.
+                         Typically 5-10 iterations are sufficient.
+        apply_phi_BCs_func (callable): Function to apply boundary conditions to phi.
+                                       This function will be called after each iteration.
+                                       Example: `apply_phi_BCs` from your existing code.
+        dt_reinit_factor (float): Factor to determine the pseudo-timestep for reinitialization.
+                                  dt_reinit = dt_reinit_factor * min(dx, dy).
+                                  For stability with this explicit upwind scheme, this
+                                  factor should generally be <= 1.0. A value of 0.5 is common.
+    
+    Returns:
+        np.ndarray: The reinitialized level set function.
+    """
+    phi = phi_in.copy()
+    
+    # S(phi_initial): Determine the sign of the initial phi field.
+    # np.sign(0) is 0, which correctly identifies interface points.
+    phi_initial_sign = np.sign(phi_in)
+
+    # Pseudo-timestep for the reinitialization PDE
+    dt_reinit = dt_reinit_factor * min(dx, dy)
+
+    for _ in range(num_iters):
+        # Pad phi to handle boundaries when computing finite differences.
+        # 'edge' mode replicates border values, a common approach if specific ghost cell
+        # values based on complex BCs are not set up prior to gradient calculation.
+        phi_padded = np.pad(phi, 1, mode='edge') 
+        
+        # Calculate forward and backward differences from the padded array.
+        # These correspond to differences on the original grid dimensions.
+        # Dx_m[j,i] = (phi[j,i] - phi[j,i-1])/dx  (Backward difference in x at point i,j)
+        # Dx_p[j,i] = (phi[j,i+1] - phi[j,i])/dx  (Forward difference in x at point i,j)
+        # Dy_m[j,i] = (phi[j,i] - phi[j-1,i])/dy  (Backward difference in y at point i,j)
+        # Dy_p[j,i] = (phi[j,i+1] - phi[j,i])/dy  (Forward difference in y at point i,j)
+        
+        Dx_m = (phi_padded[1:-1, 1:-1] - phi_padded[1:-1, 0:-2]) / dx
+        Dx_p = (phi_padded[1:-1, 2:]   - phi_padded[1:-1, 1:-1]) / dx
+        Dy_m = (phi_padded[1:-1, 1:-1] - phi_padded[0:-2, 1:-1]) / dy
+        Dy_p = (phi_padded[2:,   1:-1] - phi_padded[1:-1, 1:-1]) / dy
+
+        # Calculate upwinded squared gradients based on S(phi_initial)
+        # These are (phi_x)^2 and (phi_y)^2 in the PDE, chosen with upwinding
+        # to ensure information propagates from the interface.
+        grad_phi_x_sq = np.zeros_like(phi)
+        grad_phi_y_sq = np.zeros_like(phi)
+
+        # --- Upwind scheme based on Sussman, Smereka, Osher (1994) ---
+        # Mask for S(phi_initial) > 0 (points outside the solid, phi should be positive)
+        mask_pos = (phi_initial_sign > 0)
+        grad_phi_x_sq[mask_pos] = np.maximum( np.maximum(Dx_m[mask_pos], 0.)**2,  np.minimum(Dx_p[mask_pos], 0.)**2 )
+        grad_phi_y_sq[mask_pos] = np.maximum( np.maximum(Dy_m[mask_pos], 0.)**2,  np.minimum(Dy_p[mask_pos], 0.)**2 )
+
+        # Mask for S(phi_initial) < 0 (points inside the solid, phi should be negative)
+        mask_neg = (phi_initial_sign < 0)
+        grad_phi_x_sq[mask_neg] = np.maximum( np.minimum(Dx_m[mask_neg], 0.)**2,  np.maximum(Dx_p[mask_neg], 0.)**2 )
+        grad_phi_y_sq[mask_neg] = np.maximum( np.minimum(Dy_m[mask_neg], 0.)**2,  np.maximum(Dy_p[mask_neg], 0.)**2 )
+        
+        # For S(phi_initial) == 0 (interface points themselves):
+        # grad_phi_x_sq and grad_phi_y_sq remain 0 at these points.
+        # This means grad_phi_mag will be 0 for these points.
+        # The update term S(phi_initial) * (grad_phi_mag - 1) becomes 0 * (0 - 1) = 0.
+        # Thus, interface points (where phi_initial_sign == 0) are kept fixed during reinitialization.
+        # This is a desired behavior.
+
+        grad_phi_mag = np.sqrt(grad_phi_x_sq + grad_phi_y_sq)
+        
+        # PDE term: S(phi_initial) * ( |grad(phi)| - 1 )
+        dphi_dtau = phi_initial_sign * (grad_phi_mag - 1.0)
+        
+        # Update phi using Forward Euler in pseudo-time tau
+        phi = phi - dt_reinit * dphi_dtau
+        
+        # Apply the user-specified physical boundary conditions for phi after each iteration.
+        # This is important as the reinitialization PDE itself doesn't know about these BCs,
+        # and the 'edge' padding is a generic numerical BC for derivatives.
+        if apply_phi_BCs_func:
+            phi = apply_phi_BCs_func(phi) # e.g., call your apply_phi_BCs(phi)
+            
+    return phi
+
+
 
 
 if __name__ == "__main__":
@@ -601,7 +689,7 @@ if __name__ == "__main__":
     phi = initialize_level_set(X, Y, x0=0.6, y0=0.5, R=0.2)
     phi = apply_phi_BCs(phi)
     phi0 = phi.copy()
-    solid_mask = (phi < 0).astype(float)
+    solid_mask = (phi <= 0).astype(float)
 
     X1 = X.copy()
     X2 = Y.copy()
@@ -614,7 +702,7 @@ if __name__ == "__main__":
     # Physical Parameters
     mu_s, kappa, rho_s, eta_s = 0.1, 0.0, 1.0, 0.01
     mu_f, rho_f = 0.01, 1.0
-    w_t = 4 * dx
+    w_t = 2 * dx
 
     # Velocity and Pressure
     a = np.zeros((Nx, Ny))
@@ -623,8 +711,28 @@ if __name__ == "__main__":
 
     CFL = 0.2
     dt_min_cap = 1e-3
-    max_steps = 100000
+    max_steps = 82500
 
+    # Load initial conditions
+    with h5py.File("frames_128x128_new/data_69000.h5", "r") as f:
+        phi = f["phi"][:]
+        sigma_xx = f["sigma_xx"][:]
+        sigma_xy = f["sigma_xy"][:]
+        sigma_yy = f["sigma_yy"][:]
+        X1 = f["X1"][:]
+        X2 = f["X2"][:]
+        J = f["J"][:]
+        a = f["a"][:]
+        b = f["b"][:]
+        p = f["p"][:]
+        div_vel = f["div_vel"][:]
+       
+    # phi = reinitialize_phi_PDE(phi, dx, dy, 20, apply_phi_BCs)
+        
+    # a = gaussian_filter(a, 1.0)
+    # b = gaussian_filter(b, 1.0)
+    # a, b = lid_bc(a, b)
+        
     # --------------------------
     # Time Loop
     # --------------------------
@@ -634,9 +742,12 @@ if __name__ == "__main__":
         dt *= 0.1
 
         phi = rebuild_phi_from_reference_map(X1, X2, X, Y, x0=0.6, y0=0.5, R=0.2)
-        phi = apply_phi_BCs(phi)
+        
+        phi = reinitialize_phi_PDE(phi, dx, dy, 20, apply_phi_BCs)
 
-        solid_mask = (phi < 0).astype(float)
+        # phi = apply_phi_BCs(phi)
+
+        solid_mask = (phi <= 0).astype(float)
         
         X1 = advect_semi_lagrangian_rk4(X1, a, b, X, Y, dt)
         X2 = advect_semi_lagrangian_rk4(X2, a, b, X, Y, dt)
@@ -644,8 +755,9 @@ if __name__ == "__main__":
         X1 *= solid_mask
         X2 *= solid_mask
 
-        X1 = extrapolate_transverse_layers(X1, phi, dx, dy, 3 * dx, 5)
-        X2 = extrapolate_transverse_layers(X2, phi, dx, dy, 3 * dx, 5)
+        X1 = extrapolate_transverse_layers(X1, phi, dx, dy, 3 * dx, 3)
+        X2 = extrapolate_transverse_layers(X2, phi, dx, dy, 3 * dx, 3)
+        # X1, X2 = apply_reference_map_BCs(X1, X2, a, b, dt)
         
         a_star, b_star = velocity_RK4(a, b, X1, X2, mu_s, kappa, eta_s , dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t)
         a_star, b_star = lid_bc(a_star, b_star)
@@ -660,7 +772,7 @@ if __name__ == "__main__":
         a, b, p = pressure_projection_CG(a_star, b_star, dx, dy, dt, rho_local)
         a, b = lid_bc(a, b)
         
-        if step % 50 == 0 or step == 1:
+        if step % 100 == 0 or step == 1:
             vmag = np.sqrt(a**2 + b**2)
             div = divergence_2d(a, b, dx, dy)
             
@@ -677,7 +789,7 @@ if __name__ == "__main__":
                     )
 
         # Visualization
-        if step == 1 or step % 50 == 0:
+        if step == 1 or step % 100 == 0:
             div = divergence_2d(a, b, dx, dy)
 
             with h5py.File(f"frames/data_{step:05d}.h5", "w") as f:
