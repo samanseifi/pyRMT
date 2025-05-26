@@ -3,7 +3,7 @@ import numpy as np
 
 from scipy.ndimage import gaussian_filter
 from scipy.interpolate import RegularGridInterpolator
-from scipy.sparse import diags, kron, identity, csr_matrix, lil_matrix
+from scipy.sparse import lil_matrix
 from scipy.sparse.linalg import cg
 
 import h5py
@@ -17,6 +17,9 @@ def create_grid(Nx, Ny, Lx, Ly):
     return X, Y, dx, dy
 
 def initialize_level_set(X, Y, x0, y0, R):
+    """ 
+    Initialize a disc-shaped level set function phi centered at (x0, y0) with radius R.
+    """
     r = np.sqrt((X - x0)**2 + (Y - y0)**2)
     phi = r - R
     return phi
@@ -40,6 +43,20 @@ def extrapolate_transverse_layers(X, phi, dx, dy, initial_band_width, max_layers
     """
     Extrapolate solid reference maps (X1, X2) into fluid region.
     Iteratively extrapolates layer-by-layer near the interface.
+    
+    Seed known values:
+        1.  Copy solid data (phi < 0) into X_ext and mark those cells as “known.”
+    Identify frontier cells:
+        2.  Find unknown cells adjacent (3×3 neighborhood) to any known cell—these form the next “layer.”
+    Weighted local fit:
+        3.  For each frontier cell, gather known neighbors within a radius, weight them by distance,
+            and fit a plane f(x,y) = a + b*x + c*y. Assign f at the cell’s (x, y).
+    Iterate layers:
+        4.  Repeat “identify → fit → mark known” up to max_layers, stopping early if no new cells appear.
+    
+    Result:
+        A smooth extension of your solid’s reference map into the fluid region.
+    
     """
     Ny, Nx = X.shape
     X_ext = X.copy()
@@ -96,24 +113,27 @@ def extrapolate_transverse_layers(X, phi, dx, dy, initial_band_width, max_layers
 
 def compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s):
     """
-    Compute stable timestep based on fluid and solid speeds.
+    Compute stable timestep based on time scales of solid (elastic) and fluid (advective) components.
+
+    Time scales:
+      – Solid elastic wave time scale (dt_solid):  
+        Based on the speed of shear waves in the solid, cs_solid = sqrt(μ_s / ρ_s).  
+        dt_solid ≈ CFL * Δx / cs_solid
+      – Fluid advection time scale (dt_fluid):  
+        Based on the maximum local fluid velocity, u_max = max(|u|).  
+        dt_fluid ≈ CFL * Δx / u_max
+      – dt_min_cap:  
+        User‐provided absolute minimum cap on the timestep.
+
+    The actual timestep is the minimum of these three.
     """
     cs_solid = np.sqrt(mu_s / (rho_s + 1e-12))
     dt_solid = CFL * dx / (cs_solid + 1e-14)
     u_max = np.max(np.sqrt(a**2 + b**2))
     dt_fluid = CFL * dx / (u_max + 1e-6)
     dt = min(dt_solid, dt_fluid, dt_min_cap)
+    
     return dt
-
-def semi_implicit_reference_map_update(Xn, u, v, dx, dy, dt):
-    """
-    Semi-implicit update for reference map fields (Xn: previous X1 or X2).
-    """
-    dX_dx = (np.roll(Xn, -1, axis=1) - np.roll(Xn, 1, axis=1)) / (2 * dx)
-    dX_dy = (np.roll(Xn, -1, axis=0) - np.roll(Xn, 1, axis=0)) / (2 * dy)
-
-    X_np1 = Xn - dt * (u * dX_dx + v * dX_dy)
-    return X_np1
 
 def advect_semi_lagrangian_rk4(q, a, b, X, Y, dt):
     """
@@ -268,6 +288,7 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, eta_s=0.0):
         syy[idxs] += eta_s * strain_rate_yy[idxs]
         sxy[idxs] += eta_s * strain_rate_xy[idxs]
     
+    # Apply Gaussian smoothing to the stress components
     sxx = gaussian_filter(sxx, 1.0)*solid_mask
     sxy = gaussian_filter(sxy, 1.0)*solid_mask
     syy = gaussian_filter(syy, 1.0)*solid_mask
@@ -340,6 +361,7 @@ def velocity_rhs_blended(u, v, p,
     3. Solid stress divergence using the full tensor divergence of the Neo-Hookean Cauchy stress
     4. Interfacial jump term from the difference between fluid and solid stress tensors,
        applied via the gradient of a smooth Heaviside function
+    5. Enforcing incompressibility via a pressure gradient term
 
     ----------
     Mathematical formulation:
@@ -350,7 +372,7 @@ def velocity_rhs_blended(u, v, p,
     Where the total stress is:
         σ = (1 - H) σ_solid + H σ_fluid
 
-    Fluid stress:
+    Deviatoric Fluid stress:
         σ_fluid = 2μ_f D(u) = 2μ_f sym(∇u)
         → ∇·σ_fluid ≈ μ_f ∇²u       (via Laplacian approximation 
                                      assuming incompressibility 
@@ -362,7 +384,7 @@ def velocity_rhs_blended(u, v, p,
              ∂x σ_xy^s + ∂y σ_yy^s]
 
     therefore:
-        ∇·σ = (1 - H) ∇·σ_solid + H ∇·σ_fluid + f_jump
+        ∇·σ = (1 - H) ∇·σ_solid + H ∇·σ_fluid - ∇p + f_jump
     
     where f_jump is the jump term that accounts for the difference in stress across the interface:
         f_jump = (σ_fluid - σ_solid) · ∇H
@@ -370,6 +392,8 @@ def velocity_rhs_blended(u, v, p,
     where:
         - H is a smooth Heaviside function from level set φ
         - ∇H is the interfacial gradient used to localize interfacial forces
+        
+    and - ∇p is the pressure gradient applied to the fluid and the solid enforcing global incompressibility.
 
     ----------
     Parameters:
@@ -380,6 +404,7 @@ def velocity_rhs_blended(u, v, p,
     - mu_f              : dynamic viscosity of the fluid
     - rho_s, rho_f      : densities of solid and fluid
     - w_t               : smoothing width for the Heaviside function
+    - p                 : pressure field
 
     Returns:
     - rhs_u, rhs_v      : right-hand side of the velocity update equations
@@ -418,18 +443,9 @@ def velocity_rhs_blended(u, v, p,
     div_solid_x = dsxx_dx + dsxy_dy
     div_solid_y = dsxy_dx + dsyy_dy
     
-    # Apply gradient of pressure gradient
+    # --- Apply gradient of pressure gradient ---
     dpdx = (np.roll(p, -1, axis=1) - np.roll(p, 1, axis=1)) / (2 * dx)
     dpdy = (np.roll(p, -1, axis=0) - np.roll(p, 1, axis=0)) / (2 * dy)
-    
-    # --- Now apply a solid mask since the stresses came in with a narrow band ---
-    # solid_mask = (phi <= 0).astype(float)
-    # div_solid_x *= solid_mask
-    # div_solid_y *= solid_mask
-    
-    # sigma_sxx_s *= solid_mask
-    # sigma_sxy_s *= solid_mask
-    # sigma_syy_s *= solid_mask
 
     # --- Fluid stress components (only for jump term) ---
     du_dx = (np.roll(u, -1, axis=1) - np.roll(u, 1, axis=1)) / (2 * dx)
@@ -541,6 +557,30 @@ def build_poisson_matrix(Nx, Ny, dx, dy):
     return A.tocsr()
 
 def pressure_projection_CG(a_star, b_star, dx, dy, dt, rho):
+    """
+    Enforce incompressibility by solving ∇²p = (ρ/Δt) ∇·U* with Conjugate Gradient.
+    
+        1) Compute divergence of tentative velocity ∇·U*:
+                (∂u*/∂x + ∂v*/∂y)_{j,i} = (u*_{j,i+1} - u*_{j,i-1})/(2 dx)
+                                        + (v*_{j+1,i} - v*_{j-1,i})/(2 dy)
+
+        2) Build RHS for Poisson: rhs = (ρ/Δt) ∇·U* , then anchor ⟨rhs⟩=0
+        3) Assemble Poisson matrix A discretizing ∇²:
+                ∇²p ≈ (p_{i+1,j} + p_{i-1,j} - 2p_{i,j})/dx²
+                    + (p_{i,j+1} + p_{i,j-1} - 2p_{i,j})/dy²
+
+        4) Solve A p = rhs with Conjugate Gradient
+        5) Reshape back to 2D p_{j,i} and enforce ⟨p⟩=0
+        6) Compute pressure gradients ∇p:
+                ∂p/∂x ≈ (p_{j,i+1} - p_{j,i-1})/(2 dx)
+                ∂p/∂y ≈ (p_{j+1,i} - p_{j-1,i})/(2 dy)
+        7) Correct velocities: U = U* - (Δt/ρ) ∇p
+                u_{j,i} = u*_{j,i} - (Δt/ρ) ∂p/∂x
+                v_{j,i} = v*_{j,i} - (Δt/ρ) ∂p/∂y
+
+        8) Reapply boundary conditions (e.g., moving lid, no-slip)
+    """
+    
     Ny, Nx = a_star.shape
     N = Nx * Ny
 
@@ -623,16 +663,11 @@ def reinitialize_phi_PDE(phi_in, dx, dy, num_iters, apply_phi_BCs_func, dt_reini
         phi_padded = np.pad(phi, 1, mode='edge') 
         
         # Calculate forward and backward differences from the padded array.
-        # These correspond to differences on the original grid dimensions.
-        # Dx_m[j,i] = (phi[j,i] - phi[j,i-1])/dx  (Backward difference in x at point i,j)
-        # Dx_p[j,i] = (phi[j,i+1] - phi[j,i])/dx  (Forward difference in x at point i,j)
-        # Dy_m[j,i] = (phi[j,i] - phi[j-1,i])/dy  (Backward difference in y at point i,j)
-        # Dy_p[j,i] = (phi[j,i+1] - phi[j,i])/dy  (Forward difference in y at point i,j)
-        
-        Dx_m = (phi_padded[1:-1, 1:-1] - phi_padded[1:-1, 0:-2]) / dx
-        Dx_p = (phi_padded[1:-1, 2:]   - phi_padded[1:-1, 1:-1]) / dx
-        Dy_m = (phi_padded[1:-1, 1:-1] - phi_padded[0:-2, 1:-1]) / dy
-        Dy_p = (phi_padded[2:,   1:-1] - phi_padded[1:-1, 1:-1]) / dy
+        # These correspond to differences on the original grid dimensions.        
+        Dx_m = (phi_padded[1:-1, 1:-1] - phi_padded[1:-1, 0:-2]) / dx # (Backward difference in x at point i,j)
+        Dx_p = (phi_padded[1:-1, 2:]   - phi_padded[1:-1, 1:-1]) / dx # (Forward difference in x at point i,j)
+        Dy_m = (phi_padded[1:-1, 1:-1] - phi_padded[0:-2, 1:-1]) / dy # (Backward difference in y at point i,j)
+        Dy_p = (phi_padded[2:,   1:-1] - phi_padded[1:-1, 1:-1]) / dy # (Forward difference in y at point i,j)
 
         # Calculate upwinded squared gradients based on S(phi_initial)
         # These are (phi_x)^2 and (phi_y)^2 in the PDE, chosen with upwinding
@@ -665,17 +700,8 @@ def reinitialize_phi_PDE(phi_in, dx, dy, num_iters, apply_phi_BCs_func, dt_reini
         
         # Update phi using Forward Euler in pseudo-time tau
         phi = phi - dt_reinit * dphi_dtau
-        
-        # Apply the user-specified physical boundary conditions for phi after each iteration.
-        # This is important as the reinitialization PDE itself doesn't know about these BCs,
-        # and the 'edge' padding is a generic numerical BC for derivatives.
-        # if apply_phi_BCs_func:
-        #     phi = apply_phi_BCs_func(phi) # e.g., call your apply_phi_BCs(phi)
             
     return phi
-
-
-
 
 if __name__ == "__main__":
     # --------------------------
@@ -714,15 +740,6 @@ if __name__ == "__main__":
     CFL = 0.2
     dt_min_cap = 1e-3
     max_steps = 82500*3
-
-    # Load initial conditions
-
-       
-    # phi = reinitialize_phi_PDE(phi, dx, dy, 20, apply_phi_BCs)
-        
-    # a = gaussian_filter(a, 1.0)
-    # b = gaussian_filter(b, 1.0)
-    # a, b = lid_bc(a, b)
         
     # --------------------------
     # Time Loop
@@ -736,8 +753,6 @@ if __name__ == "__main__":
         
         # if step % 100 == 0:
         phi = reinitialize_phi_PDE(phi, dx, dy, num_iters=200, apply_phi_BCs_func=None, dt_reinit_factor=0.1)
-
-        # phi = apply_phi_BCs(phi)
 
         solid_mask = (phi <= 0).astype(float)
         
@@ -796,4 +811,3 @@ if __name__ == "__main__":
                 f.create_dataset("sigma_yy", data=sigma_syy)
                 f.create_dataset("sigma_xy", data=sigma_sxy)
                 f.create_dataset("div_vel", data=div)
-
