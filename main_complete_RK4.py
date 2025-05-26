@@ -199,8 +199,6 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, eta_s=0.0):
     Incorporating Maxwell Stresses from electrohydrodynamics (EHD)
     is not included in this function.
     """
-    X1 = gaussian_filter(X1, 1.0)
-    X2 = gaussian_filter(X2, 1.0)
     
     # Gradients
     dX1_dy, dX1_dx = np.gradient(X1, dy, dx, edge_order=2)
@@ -297,37 +295,37 @@ def heaviside_smooth_alt(x, w_t):
     
     return H
 
-def velocity_RK4(u, v, X1, X2, mu_s, kappa, eta_s , dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t):
+def velocity_RK4(u, v, p, X1, X2, mu_s, kappa, eta_s , dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t):
     """
     RK4 integration using stress divergence from blended stress field.
     """
-    def rhs(u_stage, v_stage):
+    def rhs(u_stage, v_stage, p):
         sigma_sxx, sigma_sxy, sigma_syy, J = compute_solid_stress(X1, X2, dx, dy, mu_s, 
                                                                   kappa, phi, u_stage, 
                                                                   v_stage, eta_s)   
-        return velocity_rhs_blended(u, v, sigma_sxx, sigma_sxy, sigma_syy,
+        return velocity_rhs_blended(u, v, p, sigma_sxx, sigma_sxy, sigma_syy,
                                     dx, dy, phi,mu_f, rho_s, rho_f, w_t)
 
-    k1u, k1v = rhs(u, v)
+    k1u, k1v = rhs(u, v, p)
 
     u1 = u + 0.5 * dt * k1u
     v1 = v + 0.5 * dt * k1v
-    k2u, k2v = rhs(u1, v1)
+    k2u, k2v = rhs(u1, v1, p)
 
     u2 = u + 0.5 * dt * k2u
     v2 = v + 0.5 * dt * k2v
-    k3u, k3v = rhs(u2, v2)
+    k3u, k3v = rhs(u2, v2, p)
 
     u3 = u + dt * k3u
     v3 = v + dt * k3v
-    k4u, k4v = rhs(u3, v3)
+    k4u, k4v = rhs(u3, v3, p)
 
     u_new = u + (dt / 6.0) * (k1u + 2*k2u + 2*k3u + k4u)
     v_new = v + (dt / 6.0) * (k1v + 2*k2v + 2*k3v + k4v)
 
     return u_new, v_new
 
-def velocity_rhs_blended(u, v,
+def velocity_rhs_blended(u, v, p,
                          sigma_sxx_s, sigma_sxy_s, sigma_syy_s,
                          dx, dy, phi,
                          mu_f, rho_s, rho_f, w_t):
@@ -420,6 +418,10 @@ def velocity_rhs_blended(u, v,
     div_solid_x = dsxx_dx + dsxy_dy
     div_solid_y = dsxy_dx + dsyy_dy
     
+    # Apply gradient of pressure gradient
+    dpdx = (np.roll(p, -1, axis=1) - np.roll(p, 1, axis=1)) / (2 * dx)
+    dpdy = (np.roll(p, -1, axis=0) - np.roll(p, 1, axis=0)) / (2 * dy)
+    
     # --- Now apply a solid mask since the stresses came in with a narrow band ---
     # solid_mask = (phi <= 0).astype(float)
     # div_solid_x *= solid_mask
@@ -444,8 +446,8 @@ def velocity_rhs_blended(u, v,
     jump_y = (sigma_sxy_f - sigma_sxy_s) * dH_dx + (sigma_syy_f - sigma_syy_s) * dH_dy
 
     # --- Final RHS ---
-    rhs_u = u_adv + ((1 - H) * div_solid_x + H * u_lap + jump_x) / (rho_local + 1e-12)
-    rhs_v = v_adv + ((1 - H) * div_solid_y + H * v_lap + jump_y) / (rho_local + 1e-12)
+    rhs_u = u_adv + ((1 - H) * div_solid_x + H * u_lap - dpdx + jump_x) / (rho_local + 1e-12)
+    rhs_v = v_adv + ((1 - H) * div_solid_y + H * v_lap - dpdy + jump_y) / (rho_local + 1e-12)
 
     return rhs_u, rhs_v
 
@@ -609,7 +611,7 @@ def reinitialize_phi_PDE(phi_in, dx, dy, num_iters, apply_phi_BCs_func, dt_reini
     
     # S(phi_initial): Determine the sign of the initial phi field.
     # np.sign(0) is 0, which correctly identifies interface points.
-    phi_initial_sign = np.sign(phi_in)
+    phi_initial_sign = phi_in / np.sqrt(phi_in**2 + dx**2)  # Avoid division by zero, ensure no NaNs.
 
     # Pseudo-timestep for the reinitialization PDE
     dt_reinit = dt_reinit_factor * min(dx, dy)
@@ -667,8 +669,8 @@ def reinitialize_phi_PDE(phi_in, dx, dy, num_iters, apply_phi_BCs_func, dt_reini
         # Apply the user-specified physical boundary conditions for phi after each iteration.
         # This is important as the reinitialization PDE itself doesn't know about these BCs,
         # and the 'edge' padding is a generic numerical BC for derivatives.
-        if apply_phi_BCs_func:
-            phi = apply_phi_BCs_func(phi) # e.g., call your apply_phi_BCs(phi)
+        # if apply_phi_BCs_func:
+        #     phi = apply_phi_BCs_func(phi) # e.g., call your apply_phi_BCs(phi)
             
     return phi
 
@@ -696,13 +698,13 @@ if __name__ == "__main__":
     X1 = X * solid_mask
     X2 = Y * solid_mask
 
-    X1 = extrapolate_transverse_layers(X1, phi, dx, dy, 3 * dx, 5)
-    X2 = extrapolate_transverse_layers(X2, phi, dx, dy, 3 * dx, 5)
+    X1 = extrapolate_transverse_layers(X1, phi, dx, dy, 3 * dx, 3)
+    X2 = extrapolate_transverse_layers(X2, phi, dx, dy, 3 * dx, 3)
 
     # Physical Parameters
     mu_s, kappa, rho_s, eta_s = 0.1, 0.0, 1.0, 0.01
     mu_f, rho_f = 0.01, 1.0
-    w_t = 2 * dx
+    w_t =4 * dx
 
     # Velocity and Pressure
     a = np.zeros((Nx, Ny))
@@ -711,21 +713,10 @@ if __name__ == "__main__":
 
     CFL = 0.2
     dt_min_cap = 1e-3
-    max_steps = 82500
+    max_steps = 82500*3
 
     # Load initial conditions
-    with h5py.File("frames_128x128_new/data_69000.h5", "r") as f:
-        phi = f["phi"][:]
-        sigma_xx = f["sigma_xx"][:]
-        sigma_xy = f["sigma_xy"][:]
-        sigma_yy = f["sigma_yy"][:]
-        X1 = f["X1"][:]
-        X2 = f["X2"][:]
-        J = f["J"][:]
-        a = f["a"][:]
-        b = f["b"][:]
-        p = f["p"][:]
-        div_vel = f["div_vel"][:]
+
        
     # phi = reinitialize_phi_PDE(phi, dx, dy, 20, apply_phi_BCs)
         
@@ -736,14 +727,15 @@ if __name__ == "__main__":
     # --------------------------
     # Time Loop
     # --------------------------
-    for step in range(1, max_steps + 1):
+    for step in range(82500, max_steps + 1):
         dt = compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s)
         
         dt *= 0.1
 
         phi = rebuild_phi_from_reference_map(X1, X2, X, Y, x0=0.6, y0=0.5, R=0.2)
         
-        phi = reinitialize_phi_PDE(phi, dx, dy, 20, apply_phi_BCs)
+        # if step % 100 == 0:
+        phi = reinitialize_phi_PDE(phi, dx, dy, num_iters=200, apply_phi_BCs_func=None, dt_reinit_factor=0.1)
 
         # phi = apply_phi_BCs(phi)
 
@@ -759,7 +751,7 @@ if __name__ == "__main__":
         X2 = extrapolate_transverse_layers(X2, phi, dx, dy, 3 * dx, 3)
         # X1, X2 = apply_reference_map_BCs(X1, X2, a, b, dt)
         
-        a_star, b_star = velocity_RK4(a, b, X1, X2, mu_s, kappa, eta_s , dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t)
+        a_star, b_star = velocity_RK4(a, b, p, X1, X2, mu_s, kappa, eta_s , dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t)
         a_star, b_star = lid_bc(a_star, b_star)
         
         # Just for outputting stresses
@@ -785,7 +777,7 @@ if __name__ == "__main__":
                     f"mean(J)={np.mean(J):.3f}, "
                     f"max|σ_solid|={np.max(np.abs(sigma_sxx)):.2f}, "
                     f"max divergence = {np.max(np.abs(div)):.2e}, "
-                    f"solid area = {solid_area:.2f}"
+                    f"solid area = {solid_area:.4f}"
                     )
 
         # Visualization
