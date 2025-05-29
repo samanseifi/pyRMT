@@ -4,7 +4,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter
 from scipy.interpolate import RegularGridInterpolator
 from scipy.sparse import lil_matrix
-from scipy.sparse.linalg import cg
+from scipy.sparse.linalg import cg, spsolve
 
 import h5py
 
@@ -556,6 +556,7 @@ def build_poisson_matrix(Nx, Ny, dx, dy):
 
     return A.tocsr()
 
+
 def pressure_projection_CG(a_star, b_star, dx, dy, dt, rho):
     """
     Enforce incompressibility by solving ∇²p = (ρ/Δt) ∇·U* with Conjugate Gradient.
@@ -703,11 +704,59 @@ def reinitialize_phi_PDE(phi_in, dx, dy, num_iters, apply_phi_BCs_func, dt_reini
             
     return phi
 
+def semi_implicit_advect_vector(X1, X2, u, v, dx, dy, dt):
+    """
+    Semi-implicit advection for 2D vector field (X1, X2).
+    Solves: (X^{n+1} - X^n)/dt + u · ∇X^{n+1} = 0 using backward Euler.
+    """
+    Ny, Nx = X1.shape
+    N = Nx * Ny
+
+    def idx(i, j):
+        return i + j * Nx
+
+    # Build a single advection matrix A (same for both components)
+    A = lil_matrix((N, N))
+    for j in range(Ny):
+        for i in range(Nx):
+            k = idx(i, j)
+            u_ij = u[j, i]
+            v_ij = v[j, i]
+            A[k, k] = 1.0
+            A[k, k] += 1e-8  # Regularize diagonal
+
+            if i > 0:
+                A[k, idx(i-1, j)] -= 0.5 * dt * u_ij / dx
+                A[k, k]           += 0.5 * dt * u_ij / dx
+            if i < Nx - 1:
+                A[k, idx(i+1, j)] += 0.5 * dt * u_ij / dx
+                A[k, k]           -= 0.5 * dt * u_ij / dx
+            if j > 0:
+                A[k, idx(i, j-1)] -= 0.5 * dt * v_ij / dy
+                A[k, k]           += 0.5 * dt * v_ij / dy
+            if j < Ny - 1:
+                A[k, idx(i, j+1)] += 0.5 * dt * v_ij / dy
+                A[k, k]           -= 0.5 * dt * v_ij / dy
+
+    A = A.tocsr()
+
+    # Solve for X1
+    X1_flat = X1.ravel()
+    X1_new_flat = spsolve(A, X1_flat)
+    X1_new = X1_new_flat.reshape((Ny, Nx))
+
+    # Solve for X2
+    X2_flat = X2.ravel()
+    X2_new_flat = spsolve(A, X2_flat)
+    X2_new = X2_new_flat.reshape((Ny, Nx))
+
+    return X1_new, X2_new
+
 if __name__ == "__main__":
     # --------------------------
     # Grid Setup
     # --------------------------
-    Nx, Ny = 128, 128
+    Nx, Ny = 256, 256
     Lx, Ly = 1.0, 1.0
     X, Y, dx, dy = create_grid(Nx, Ny, Lx, Ly)
 
@@ -724,11 +773,11 @@ if __name__ == "__main__":
     X1 = X * solid_mask
     X2 = Y * solid_mask
 
-    X1 = extrapolate_transverse_layers(X1, phi, dx, dy, 3 * dx, 3)
-    X2 = extrapolate_transverse_layers(X2, phi, dx, dy, 3 * dx, 3)
+    X1 = extrapolate_transverse_layers(X1, phi, dx, dy, 3 * dx, 2)
+    X2 = extrapolate_transverse_layers(X2, phi, dx, dy, 3 * dx, 2)
 
     # Physical Parameters
-    mu_s, kappa, rho_s, eta_s = 0.1, 0.0, 1.0, 0.01
+    mu_s, kappa, rho_s, eta_s = 0.1, 1.0, 1.0, 0.01
     mu_f, rho_f = 0.01, 1.0
     w_t =4 * dx
 
@@ -739,12 +788,25 @@ if __name__ == "__main__":
 
     CFL = 0.2
     dt_min_cap = 1e-3
-    max_steps = 82500*3
+    max_steps = 82500
+    
+    # with h5py.File("frames/data_63000.h5", "r") as f:
+    #     phi = f["phi"][:]
+    #     sigma_xx = f["sigma_xx"][:]
+    #     sigma_xy = f["sigma_xy"][:]
+    #     sigma_yy = f["sigma_yy"][:]
+    #     X1 = f["X1"][:]
+    #     X2 = f["X2"][:]
+    #     J = f["J"][:]
+    #     a = f["a"][:]
+    #     b = f["b"][:]
+    #     p = f["p"][:]
+    #     div_vel = f["div_vel"][:]
         
     # --------------------------
     # Time Loop
     # --------------------------
-    for step in range(82500, max_steps + 1):
+    for step in range(1, max_steps + 1):
         dt = compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s)
         
         dt *= 0.1
@@ -752,12 +814,13 @@ if __name__ == "__main__":
         phi = rebuild_phi_from_reference_map(X1, X2, X, Y, x0=0.6, y0=0.5, R=0.2)
         
         # if step % 100 == 0:
-        phi = reinitialize_phi_PDE(phi, dx, dy, num_iters=200, apply_phi_BCs_func=None, dt_reinit_factor=0.1)
+        phi = reinitialize_phi_PDE(phi, dx, dy, num_iters=100, apply_phi_BCs_func=None, dt_reinit_factor=0.1)
 
         solid_mask = (phi <= 0).astype(float)
         
         X1 = advect_semi_lagrangian_rk4(X1, a, b, X, Y, dt)
         X2 = advect_semi_lagrangian_rk4(X2, a, b, X, Y, dt)
+        # X1, X2 = semi_implicit_advect_vector(X1, X2, a, b, dx, dy, dt)
         
         X1 *= solid_mask
         X2 *= solid_mask
