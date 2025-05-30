@@ -517,7 +517,7 @@ def velocity_rhs_blended(u, v, p,
     div_solid_x = dsxx_dx + dsxy_dy
     div_solid_y = dsxy_dx + dsyy_dy
     
-    # --- Apply gradient of pressure gradient ---
+    # --- Apply gradient of projected pressure from previus timestep ---
     dpdx = (np.roll(p, -1, axis=1) - np.roll(p, 1, axis=1)) / (2 * dx)
     dpdy = (np.roll(p, -1, axis=0) - np.roll(p, 1, axis=0)) / (2 * dy)
 
