@@ -1,16 +1,30 @@
-# main.py
+# main_complete_RK4.py
+#
+# Copyright (c) 2024 Saman Seifi, PhD
+#
+# This code is simulating the soft disc in a lid driven cavity flow using
+# Reference Map Technique (RMT) with a level set method for the interface.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+
 import numpy as np
+
+import h5py
 
 from scipy.ndimage import gaussian_filter
 from scipy.interpolate import RegularGridInterpolator
 from scipy.sparse import lil_matrix
 from scipy.sparse.linalg import cg, spsolve
 
-from numba import njit, prange
 import pyamg
 
-import h5py
+from numba import njit, prange
 
+# profiling tools
 import cProfile
 import pstats
 
@@ -45,7 +59,8 @@ def apply_phi_BCs(phi):
     # phi[:, -1] = phi[:, -2]
     return phi
 
-def extrapolate_transverse_layers_slow(X, phi, dx, dy, initial_band_width, max_layers):
+@njit(parallel=True)
+def extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, band_width, max_layers):
     """
     Extrapolate solid reference maps (X1, X2) into fluid region.
     Iteratively extrapolates layer-by-layer near the interface.
@@ -64,152 +79,6 @@ def extrapolate_transverse_layers_slow(X, phi, dx, dy, initial_band_width, max_l
         A smooth extension of your solid’s reference map into the fluid region.
     
     """
-    Ny, Nx = X.shape
-    X_ext = X.copy()
-
-    solid_flag = (phi < 0)
-    known_flag = solid_flag.copy()
-
-    Xgrid, Ygrid = np.meshgrid(dx * np.arange(Nx), dy * np.arange(Ny))
-
-    stencil_radius = 4 * np.sqrt(dx**2 + dy**2)
-    max_iter = 20
-
-    for layer in range(max_layers):
-        # Find targets: cells adjacent to known region
-        target_flag = np.zeros_like(X, dtype=bool)
-        for j in range(1, Ny-1):
-            for i in range(1, Nx-1):
-                if not known_flag[j, i] and np.any(known_flag[j-1:j+2, i-1:i+2]):
-                    target_flag[j, i] = True
-
-        if not np.any(target_flag):
-            break
-
-        # Extrapolate
-        for iter in range(max_iter):
-            progress = False
-            for j in range(1, Ny-1):
-                for i in range(1, Nx-1):
-                    if target_flag[j, i]:
-                        # Build stencil
-                        x_pts, y_pts, x_vals, wts = [], [], [], []
-                        for jj in range(max(0, j-4), min(Ny, j+5)):
-                            for ii in range(max(0, i-4), min(Nx, i+5)):
-                                if known_flag[jj, ii]:
-                                    dist = np.sqrt((Xgrid[jj, ii] - Xgrid[j, i])**2 + (Ygrid[jj, ii] - Ygrid[j, i])**2)
-                                    if dist <= stencil_radius:
-                                        wt = np.exp(-(dist / stencil_radius)**2)
-                                        x_pts.append(Xgrid[jj, ii])
-                                        y_pts.append(Ygrid[jj, ii])
-                                        x_vals.append(X_ext[jj, ii])
-                                        wts.append(wt)
-                        if len(x_vals) >= 3:
-                            A = np.vstack([np.ones(len(x_pts)), x_pts, y_pts]).T
-                            W = np.diag(wts)
-                            coeffs = np.linalg.lstsq(W @ A, W @ np.array(x_vals), rcond=None)[0]
-                            X_ext[j, i] = coeffs[0] + coeffs[1] * Xgrid[j, i] + coeffs[2] * Ygrid[j, i]
-                            known_flag[j, i] = True
-                            target_flag[j, i] = False
-                            progress = True
-            if not progress:
-                break
-
-    return X_ext
-
-@njit(parallel=True)
-def extrapolate_transverse_layers(X, phi, dx, dy, band_width, max_layers):
-    Ny, Nx = X.shape
-    X_ext = X.copy()
-    solid_flag = phi < 0
-    known_flag = solid_flag.copy()
-
-    stencil_radius_sq = (4 * np.sqrt(dx**2 + dy**2))**2
-
-    for layer in range(max_layers):
-        target_flag = np.zeros((Ny, Nx), dtype=np.bool_)
-
-        for j in prange(1, Ny - 1):
-            for i in range(1, Nx - 1):
-                if not known_flag[j, i]:
-                    for dj in range(-1, 2):
-                        for di in range(-1, 2):
-                            if known_flag[j + dj, i + di]:
-                                target_flag[j, i] = True
-                                break
-                        if target_flag[j, i]:
-                            break
-
-        if not np.any(target_flag):
-            break
-
-        for j in prange(1, Ny - 1):
-            for i in range(1, Nx - 1):
-                if target_flag[j, i]:
-                    x0 = dx * i
-                    y0 = dy * j
-
-                    A = np.zeros((100, 3))
-                    b = np.zeros(100)
-                    w = np.zeros(100)
-                    count = 0
-
-                    for jj in range(max(0, j - 4), min(Ny, j + 5)):
-                        for ii in range(max(0, i - 4), min(Nx, i + 5)):
-                            if known_flag[jj, ii]:
-                                xi = dx * ii
-                                yi = dy * jj
-                                dist_sq = (xi - x0)**2 + (yi - y0)**2
-
-                                if dist_sq <= stencil_radius_sq:
-                                    A[count, 0] = 1.0
-                                    A[count, 1] = xi
-                                    A[count, 2] = yi
-                                    b[count] = X_ext[jj, ii]
-                                    w[count] = np.exp(-dist_sq / stencil_radius_sq)
-                                    count += 1
-
-                    if count >= 3:
-                        Aw = np.zeros((3, 3))
-                        Bw = np.zeros(3)
-
-                        for n in range(count):
-                            a0 = A[n, 0]
-                            a1 = A[n, 1]
-                            a2 = A[n, 2]
-                            bw = b[n]
-                            ww = w[n]
-
-                            Aw[0, 0] += ww * a0 * a0
-                            Aw[0, 1] += ww * a0 * a1
-                            Aw[0, 2] += ww * a0 * a2
-                            Aw[1, 1] += ww * a1 * a1
-                            Aw[1, 2] += ww * a1 * a2
-                            Aw[2, 2] += ww * a2 * a2
-
-                            Bw[0] += ww * a0 * bw
-                            Bw[1] += ww * a1 * bw
-                            Bw[2] += ww * a2 * bw
-
-                        # Symmetrize Aw
-                        Aw[1, 0] = Aw[0, 1]
-                        Aw[2, 0] = Aw[0, 2]
-                        Aw[2, 1] = Aw[1, 2]
-
-                        # Solve Aw @ coeffs = Bw
-                        det = (Aw[0,0]*(Aw[1,1]*Aw[2,2] - Aw[1,2]*Aw[2,1])
-                            - Aw[0,1]*(Aw[1,0]*Aw[2,2] - Aw[1,2]*Aw[2,0])
-                            + Aw[0,2]*(Aw[1,0]*Aw[2,1] - Aw[1,1]*Aw[2,0]))
-
-                        if np.abs(det) > 1e-10:
-                            coeffs = np.linalg.solve(Aw, Bw)
-                            X_ext[j, i] = coeffs[0] + coeffs[1] * x0 + coeffs[2] * y0
-                            known_flag[j, i] = True
-
-    return X_ext
-
-@njit(parallel=True)
-def extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, band_width, max_layers):
     Ny, Nx = X1.shape
     X1_ext = X1.copy()
     X2_ext = X2.copy()
@@ -329,72 +198,6 @@ def compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s):
     dt = min(dt_solid, dt_fluid, dt_min_cap)
     
     return dt
-
-def advect_semi_lagrangian_rk4_slow(q, a, b, X, Y, dt):
-    """
-    Semi-Lagrangian advection using RK4 backtracking for high accuracy.
-
-    Parameters:
-        q: 2D array of the field to advect.
-        a, b: 2D arrays for x- and y-components of velocity.
-        X, Y: 2D arrays of grid coordinates.
-        dt: time step.
-
-    Returns:
-        q_new: advected field.
-    """
-    def interp(u, x, y):
-        return interpolate_velocity(u, x, y, X, Y)
-
-    # Stage 1
-    k1x = interp(a, X, Y)
-    k1y = interp(b, X, Y)
-
-    # Stage 2
-    X2 = X - 0.5 * dt * k1x
-    Y2 = Y - 0.5 * dt * k1y
-    k2x = interp(a, X2, Y2)
-    k2y = interp(b, X2, Y2)
-
-    # Stage 3
-    X3 = X - 0.5 * dt * k2x
-    Y3 = Y - 0.5 * dt * k2y
-    k3x = interp(a, X3, Y3)
-    k3y = interp(b, X3, Y3)
-
-    # Stage 4
-    X4 = X - dt * k3x
-    Y4 = Y - dt * k3y
-    k4x = interp(a, X4, Y4)
-    k4y = interp(b, X4, Y4)
-
-    # Combine stages to compute final departure points
-    X_back = X - (dt / 6.0) * (k1x + 2*k2x + 2*k3x + k4x)
-    Y_back = Y - (dt / 6.0) * (k1y + 2*k2y + 2*k3y + k4y)
-
-    # Interpolate the field q at the backtracked locations
-    interpolator = RegularGridInterpolator(
-        (Y[:, 0], X[0, :]), q,
-        method='linear', bounds_error=False, fill_value=None
-    )
-    points = np.stack([Y_back.ravel(), X_back.ravel()], axis=-1)
-    q_new = interpolator(points).reshape(q.shape)
-
-    # Optional: fallback to original value if NaNs occur
-    q_new[np.isnan(q_new)] = q[np.isnan(q_new)]
-
-    return q_new
-
-def interpolate_velocity(u, Xq, Yq, X_grid, Y_grid):
-    """
-    Interpolate velocity field `u` at query points (Xq, Yq).
-    """
-    interpolator = RegularGridInterpolator(
-        (Y_grid[:, 0], X_grid[0, :]), u,
-        method='linear', bounds_error=False, fill_value=0.0
-    )
-    points = np.stack([Yq.ravel(), Xq.ravel()], axis=-1)
-    return interpolator(points).reshape(u.shape)
 
 @njit
 def advect_semi_lagrangian_rk4(q, a, b, X, Y, dt, dx, dy):
@@ -827,8 +630,7 @@ def build_poisson_matrix(Nx, Ny, dx, dy):
 
     return A.tocsr()
 
-
-def pressure_projection_CG(a_star, b_star, dx, dy, dt, rho, A):
+def pressure_projection_amg(a_star, b_star, dx, dy, dt, rho, A=None, ml=None, p_prev=None):
     """
     Enforce incompressibility by solving ∇²p = (ρ/Δt) ∇·U* with Conjugate Gradient.
     
@@ -852,40 +654,7 @@ def pressure_projection_CG(a_star, b_star, dx, dy, dt, rho, A):
 
         8) Reapply boundary conditions (e.g., moving lid, no-slip)
     """
-    
-    Ny, Nx = a_star.shape
-    N = Nx * Ny
 
-    divU = np.zeros_like(a_star)
-    divU[1:-1, 1:-1] = (
-        (a_star[1:-1, 2:] - a_star[1:-1, :-2]) / (2 * dx) +
-        (b_star[2:, 1:-1] - b_star[:-2, 1:-1]) / (2 * dy)
-    )
-
-    rhs = (rho * divU / dt).ravel()
-    rhs -= np.mean(rhs)  # anchor pressure
-
-    # A = build_poisson_matrix(Nx, Ny, dx, dy)
-
-    p_flat, info = cg(A, rhs, x0=np.zeros_like(rhs), rtol=1e-8, maxiter=1000)
-    if info != 0:
-        print(f"[CG Warning] Pressure solve did not converge. Info: {info}")
-
-    p = p_flat.reshape((Ny, Nx))
-    p -= np.mean(p)  # anchor again
-
-    dpdx = np.zeros_like(p)
-    dpdy = np.zeros_like(p)
-    dpdx[1:-1, 1:-1] = (p[1:-1, 2:] - p[1:-1, :-2]) / (2 * dx)
-    dpdy[1:-1, 1:-1] = (p[2:, 1:-1] - p[:-2, 1:-1]) / (2 * dy)
-
-    a = a_star - (dt / rho) * dpdx
-    b = b_star - (dt / rho) * dpdy
-
-    a, b = lid_bc(a, b)
-    return a, b, p
-
-def pressure_projection_amg(a_star, b_star, dx, dy, dt, rho, A=None, ml=None, p_prev=None):
     Ny, Nx = a_star.shape
     N = Nx * Ny
 
@@ -930,9 +699,10 @@ def rebuild_phi_from_reference_map(X1, X2, X, Y, x0, y0, R):
 
 def reinitialize_phi_PDE(phi_in, dx, dy, num_iters, apply_phi_BCs_func, dt_reinit_factor=0.5):
     """
-    Reinitializes phi to be a signed distance function using a PDE-based method.
-    Solves: phi_tau + S(phi_initial) * ( |grad(phi)| - 1 ) = 0
-    
+    Reinitializes ϕ to be a signed distance function using a PDE-based method.
+    Solves: 
+                ϕ_τ + S(ϕ₀) * ( |∇ϕ| - 1 ) = 0
+
     Args:
         phi_in (np.ndarray): The level set function to reinitialize. This phi is assumed
                              to correctly define the interface (phi_in=0), but may not be
@@ -948,9 +718,9 @@ def reinitialize_phi_PDE(phi_in, dx, dy, num_iters, apply_phi_BCs_func, dt_reini
                                   dt_reinit = dt_reinit_factor * min(dx, dy).
                                   For stability with this explicit upwind scheme, this
                                   factor should generally be <= 1.0. A value of 0.5 is common.
-    
+
     Returns:
-        np.ndarray: The reinitialized level set function.
+        np.ndarray: The reinitialized level set function phi.
     """
     phi = phi_in.copy()
     
@@ -1081,10 +851,7 @@ if __name__ == "__main__":
     X1 = X * solid_mask
     X2 = Y * solid_mask
 
-    # X1 = extrapolate_transverse_layers(X1, phi, dx, dy, 3 * dx, 2)
-    # X2 = extrapolate_transverse_layers(X2, phi, dx, dy, 3 * dx, 2)
     X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, 3 * dx, 3)
-
 
     # Physical Parameters
     mu_s, kappa, rho_s, eta_s = 0.1, 10.0, 1.0, 0.01
@@ -1096,25 +863,13 @@ if __name__ == "__main__":
     b = np.zeros((Nx, Ny))
     p = np.zeros((Nx, Ny))
 
+    # Precompute the Poisson matrix for pressure projection
     A = build_poisson_matrix(Nx, Ny, dx, dy)
 
     CFL = 0.2
     dt_min_cap = 1e-3
     max_steps = 82000*3
     
-    # with h5py.File("frames/data_164000.h5", "r") as f:
-    #     phi = f["phi"][:]
-    #     sigma_xx = f["sigma_xx"][:]
-    #     sigma_xy = f["sigma_xy"][:]
-    #     sigma_yy = f["sigma_yy"][:]
-    #     X1 = f["X1"][:]
-    #     X2 = f["X2"][:]
-    #     J = f["J"][:]
-    #     a = f["a"][:]
-    #     b = f["b"][:]
-    #     p = f["p"][:]
-    #     div_vel = f["div_vel"][:]
-        
     # --------------------------
     # Time Loop
     # --------------------------
@@ -1132,16 +887,11 @@ if __name__ == "__main__":
         
         X1 = advect_semi_lagrangian_rk4(X1, a, b, X, Y, dt, dx, dy)
         X2 = advect_semi_lagrangian_rk4(X2, a, b, X, Y, dt, dx, dy)
-        # X1, X2 = semi_implicit_advect_vector(X1, X2, a, b, dx, dy, dt)
         
         X1 *= solid_mask
         X2 *= solid_mask
 
-        # X1 = extrapolate_transverse_layers(X1, phi, dx, dy, 3 * dx, 3)
-        # X2 = extrapolate_transverse_layers(X2, phi, dx, dy, 3 * dx, 3)
-
         X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, 3 * dx, 3)
-        # X1, X2 = apply_reference_map_BCs(X1, X2, a, b, dt)
         
         a_star, b_star = velocity_RK4(a, b, p, X1, X2, mu_s, kappa, eta_s , dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t)
         a_star, b_star = lid_bc(a_star, b_star)
