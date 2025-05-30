@@ -6,7 +6,13 @@ from scipy.interpolate import RegularGridInterpolator
 from scipy.sparse import lil_matrix
 from scipy.sparse.linalg import cg, spsolve
 
+from numba import njit, prange
+import pyamg
+
 import h5py
+
+import cProfile
+import pstats
 
 def create_grid(Nx, Ny, Lx, Ly):
     x = np.linspace(0, Lx, Nx)
@@ -39,7 +45,7 @@ def apply_phi_BCs(phi):
     # phi[:, -1] = phi[:, -2]
     return phi
 
-def extrapolate_transverse_layers(X, phi, dx, dy, initial_band_width, max_layers):
+def extrapolate_transverse_layers_slow(X, phi, dx, dy, initial_band_width, max_layers):
     """
     Extrapolate solid reference maps (X1, X2) into fluid region.
     Iteratively extrapolates layer-by-layer near the interface.
@@ -111,6 +117,195 @@ def extrapolate_transverse_layers(X, phi, dx, dy, initial_band_width, max_layers
 
     return X_ext
 
+@njit(parallel=True)
+def extrapolate_transverse_layers(X, phi, dx, dy, band_width, max_layers):
+    Ny, Nx = X.shape
+    X_ext = X.copy()
+    solid_flag = phi < 0
+    known_flag = solid_flag.copy()
+
+    stencil_radius_sq = (4 * np.sqrt(dx**2 + dy**2))**2
+
+    for layer in range(max_layers):
+        target_flag = np.zeros((Ny, Nx), dtype=np.bool_)
+
+        for j in prange(1, Ny - 1):
+            for i in range(1, Nx - 1):
+                if not known_flag[j, i]:
+                    for dj in range(-1, 2):
+                        for di in range(-1, 2):
+                            if known_flag[j + dj, i + di]:
+                                target_flag[j, i] = True
+                                break
+                        if target_flag[j, i]:
+                            break
+
+        if not np.any(target_flag):
+            break
+
+        for j in prange(1, Ny - 1):
+            for i in range(1, Nx - 1):
+                if target_flag[j, i]:
+                    x0 = dx * i
+                    y0 = dy * j
+
+                    A = np.zeros((100, 3))
+                    b = np.zeros(100)
+                    w = np.zeros(100)
+                    count = 0
+
+                    for jj in range(max(0, j - 4), min(Ny, j + 5)):
+                        for ii in range(max(0, i - 4), min(Nx, i + 5)):
+                            if known_flag[jj, ii]:
+                                xi = dx * ii
+                                yi = dy * jj
+                                dist_sq = (xi - x0)**2 + (yi - y0)**2
+
+                                if dist_sq <= stencil_radius_sq:
+                                    A[count, 0] = 1.0
+                                    A[count, 1] = xi
+                                    A[count, 2] = yi
+                                    b[count] = X_ext[jj, ii]
+                                    w[count] = np.exp(-dist_sq / stencil_radius_sq)
+                                    count += 1
+
+                    if count >= 3:
+                        Aw = np.zeros((3, 3))
+                        Bw = np.zeros(3)
+
+                        for n in range(count):
+                            a0 = A[n, 0]
+                            a1 = A[n, 1]
+                            a2 = A[n, 2]
+                            bw = b[n]
+                            ww = w[n]
+
+                            Aw[0, 0] += ww * a0 * a0
+                            Aw[0, 1] += ww * a0 * a1
+                            Aw[0, 2] += ww * a0 * a2
+                            Aw[1, 1] += ww * a1 * a1
+                            Aw[1, 2] += ww * a1 * a2
+                            Aw[2, 2] += ww * a2 * a2
+
+                            Bw[0] += ww * a0 * bw
+                            Bw[1] += ww * a1 * bw
+                            Bw[2] += ww * a2 * bw
+
+                        # Symmetrize Aw
+                        Aw[1, 0] = Aw[0, 1]
+                        Aw[2, 0] = Aw[0, 2]
+                        Aw[2, 1] = Aw[1, 2]
+
+                        # Solve Aw @ coeffs = Bw
+                        det = (Aw[0,0]*(Aw[1,1]*Aw[2,2] - Aw[1,2]*Aw[2,1])
+                            - Aw[0,1]*(Aw[1,0]*Aw[2,2] - Aw[1,2]*Aw[2,0])
+                            + Aw[0,2]*(Aw[1,0]*Aw[2,1] - Aw[1,1]*Aw[2,0]))
+
+                        if np.abs(det) > 1e-10:
+                            coeffs = np.linalg.solve(Aw, Bw)
+                            X_ext[j, i] = coeffs[0] + coeffs[1] * x0 + coeffs[2] * y0
+                            known_flag[j, i] = True
+
+    return X_ext
+
+@njit(parallel=True)
+def extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, band_width, max_layers):
+    Ny, Nx = X1.shape
+    X1_ext = X1.copy()
+    X2_ext = X2.copy()
+
+    solid_flag = phi < 0
+    known_flag = solid_flag.copy()
+
+    stencil_radius_sq = (4 * np.sqrt(dx**2 + dy**2))**2
+
+    for layer in range(max_layers):
+        target_flag = np.zeros((Ny, Nx), dtype=np.bool_)
+
+        for j in prange(1, Ny - 1):
+            for i in range(1, Nx - 1):
+                if not known_flag[j, i]:
+                    for dj in range(-1, 2):
+                        for di in range(-1, 2):
+                            if known_flag[j + dj, i + di]:
+                                target_flag[j, i] = True
+                                break
+                        if target_flag[j, i]:
+                            break
+
+        if not np.any(target_flag):
+            break
+
+        for j in prange(1, Ny - 1):
+            for i in range(1, Nx - 1):
+                if target_flag[j, i]:
+                    x0 = dx * i
+                    y0 = dy * j
+
+                    A = np.zeros((100, 3))
+                    b1 = np.zeros(100)
+                    b2 = np.zeros(100)
+                    w = np.zeros(100)
+                    count = 0
+
+                    for jj in range(max(0, j - 4), min(Ny, j + 5)):
+                        for ii in range(max(0, i - 4), min(Nx, i + 5)):
+                            if known_flag[jj, ii]:
+                                xi = dx * ii
+                                yi = dy * jj
+                                dist_sq = (xi - x0)**2 + (yi - y0)**2
+
+                                if dist_sq <= stencil_radius_sq:
+                                    A[count, 0] = 1.0
+                                    A[count, 1] = xi
+                                    A[count, 2] = yi
+                                    b1[count] = X1_ext[jj, ii]
+                                    b2[count] = X2_ext[jj, ii]
+                                    w[count] = np.exp(-dist_sq / stencil_radius_sq)
+                                    count += 1
+
+                    if count >= 3:
+                        Aw = np.zeros((3, 3))
+                        Bw1 = np.zeros(3)
+                        Bw2 = np.zeros(3)
+
+                        for n in range(count):
+                            a0 = A[n, 0]
+                            a1 = A[n, 1]
+                            a2 = A[n, 2]
+                            wgt = w[n]
+                            Bw1[0] += wgt * a0 * b1[n]
+                            Bw1[1] += wgt * a1 * b1[n]
+                            Bw1[2] += wgt * a2 * b1[n]
+                            Bw2[0] += wgt * a0 * b2[n]
+                            Bw2[1] += wgt * a1 * b2[n]
+                            Bw2[2] += wgt * a2 * b2[n]
+
+                            Aw[0, 0] += wgt * a0 * a0
+                            Aw[0, 1] += wgt * a0 * a1
+                            Aw[0, 2] += wgt * a0 * a2
+                            Aw[1, 1] += wgt * a1 * a1
+                            Aw[1, 2] += wgt * a1 * a2
+                            Aw[2, 2] += wgt * a2 * a2
+
+                        Aw[1, 0] = Aw[0, 1]
+                        Aw[2, 0] = Aw[0, 2]
+                        Aw[2, 1] = Aw[1, 2]
+
+                        det = (Aw[0,0]*(Aw[1,1]*Aw[2,2] - Aw[1,2]*Aw[2,1])
+                             - Aw[0,1]*(Aw[1,0]*Aw[2,2] - Aw[1,2]*Aw[2,0])
+                             + Aw[0,2]*(Aw[1,0]*Aw[2,1] - Aw[1,1]*Aw[2,0]))
+
+                        if np.abs(det) > 1e-10:
+                            coeffs1 = np.linalg.solve(Aw, Bw1)
+                            coeffs2 = np.linalg.solve(Aw, Bw2)
+
+                            X1_ext[j, i] = coeffs1[0] + coeffs1[1] * x0 + coeffs1[2] * y0
+                            X2_ext[j, i] = coeffs2[0] + coeffs2[1] * x0 + coeffs2[2] * y0
+                            known_flag[j, i] = True
+
+    return X1_ext, X2_ext
+
 def compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s):
     """
     Compute stable timestep based on time scales of solid (elastic) and fluid (advective) components.
@@ -135,7 +330,7 @@ def compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s):
     
     return dt
 
-def advect_semi_lagrangian_rk4(q, a, b, X, Y, dt):
+def advect_semi_lagrangian_rk4_slow(q, a, b, X, Y, dt):
     """
     Semi-Lagrangian advection using RK4 backtracking for high accuracy.
 
@@ -200,6 +395,82 @@ def interpolate_velocity(u, Xq, Yq, X_grid, Y_grid):
     )
     points = np.stack([Yq.ravel(), Xq.ravel()], axis=-1)
     return interpolator(points).reshape(u.shape)
+
+@njit
+def advect_semi_lagrangian_rk4(q, a, b, X, Y, dt, dx, dy):
+    Ny, Nx = q.shape
+
+    def interp(u, xq, yq):
+        return bilinear_interpolate(u, xq, yq, dx, dy, Nx, Ny)
+
+    # RK4 stages
+    k1x = interp(a, X, Y)
+    k1y = interp(b, X, Y)
+
+    X2 = X - 0.5 * dt * k1x
+    Y2 = Y - 0.5 * dt * k1y
+    k2x = interp(a, X2, Y2)
+    k2y = interp(b, X2, Y2)
+
+    X3 = X - 0.5 * dt * k2x
+    Y3 = Y - 0.5 * dt * k2y
+    k3x = interp(a, X3, Y3)
+    k3y = interp(b, X3, Y3)
+
+    X4 = X - dt * k3x
+    Y4 = Y - dt * k3y
+    k4x = interp(a, X4, Y4)
+    k4y = interp(b, X4, Y4)
+
+    X_back = X - (dt / 6.0) * (k1x + 2*k2x + 2*k3x + k4x)
+    Y_back = Y - (dt / 6.0) * (k1y + 2*k2y + 2*k3y + k4y)
+
+    # Interpolate q at backtracked positions
+    q_new = interp(q, X_back, Y_back)
+
+    return q_new
+
+@njit(parallel=True)
+def bilinear_interpolate(u, xq, yq, dx, dy, Nx, Ny):
+    """
+    Fast bilinear interpolator for 2D grid data.
+
+    Parameters:
+        u  : 2D array of shape (Ny, Nx)
+        xq : query x positions (same shape as u)
+        yq : query y positions (same shape as u)
+        dx, dy : grid spacing
+        Nx, Ny : number of grid points in x and y
+
+    Returns:
+        Interpolated values at query points
+    """
+    out = np.zeros_like(xq)
+    for j in prange(xq.shape[0]):
+        for i in range(xq.shape[1]):
+            x = xq[j, i] / dx
+            y = yq[j, i] / dy
+
+            ix = int(np.floor(x))
+            iy = int(np.floor(y))
+
+            fx = x - ix
+            fy = y - iy
+
+            # Clamp indices
+            if ix < 0 or iy < 0 or ix >= Nx - 1 or iy >= Ny - 1:
+                out[j, i] = 0.0
+                continue
+
+            v00 = u[iy,   ix  ]
+            v10 = u[iy,   ix+1]
+            v01 = u[iy+1, ix  ]
+            v11 = u[iy+1, ix+1]
+
+            out[j, i] = (1 - fx) * (1 - fy) * v00 + fx * (1 - fy) * v10 + \
+                        (1 - fx) * fy * v01 + fx * fy * v11
+
+    return out
 
 def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, eta_s=0.0):
     """
@@ -557,7 +828,7 @@ def build_poisson_matrix(Nx, Ny, dx, dy):
     return A.tocsr()
 
 
-def pressure_projection_CG(a_star, b_star, dx, dy, dt, rho):
+def pressure_projection_CG(a_star, b_star, dx, dy, dt, rho, A):
     """
     Enforce incompressibility by solving ∇²p = (ρ/Δt) ∇·U* with Conjugate Gradient.
     
@@ -594,7 +865,7 @@ def pressure_projection_CG(a_star, b_star, dx, dy, dt, rho):
     rhs = (rho * divU / dt).ravel()
     rhs -= np.mean(rhs)  # anchor pressure
 
-    A = build_poisson_matrix(Nx, Ny, dx, dy)
+    # A = build_poisson_matrix(Nx, Ny, dx, dy)
 
     p_flat, info = cg(A, rhs, x0=np.zeros_like(rhs), rtol=1e-8, maxiter=1000)
     if info != 0:
@@ -614,6 +885,39 @@ def pressure_projection_CG(a_star, b_star, dx, dy, dt, rho):
     a, b = lid_bc(a, b)
     return a, b, p
 
+def pressure_projection_amg(a_star, b_star, dx, dy, dt, rho, A=None, ml=None, p_prev=None):
+    Ny, Nx = a_star.shape
+    N = Nx * Ny
+
+    divU = np.zeros_like(a_star)
+    divU[1:-1, 1:-1] = (
+        (a_star[1:-1, 2:] - a_star[1:-1, :-2]) / (2 * dx) +
+        (b_star[2:, 1:-1] - b_star[:-2, 1:-1]) / (2 * dy)
+    )
+
+    rhs = (rho * divU / dt).ravel()
+    rhs -= np.mean(rhs)
+
+    if A is None:
+        A = build_poisson_matrix(Nx, Ny, dx, dy)
+
+    if ml is None:
+        ml = pyamg.ruge_stuben_solver(A)  # Precompute AMG hierarchy
+
+    p_flat = ml.solve(rhs, tol=1e-8, maxiter=50, x0=p_prev.ravel() if p_prev is not None else None)
+    p = p_flat.reshape((Ny, Nx))
+    p -= np.mean(p)
+
+    dpdx = np.zeros_like(p)
+    dpdy = np.zeros_like(p)
+    dpdx[1:-1, 1:-1] = (p[1:-1, 2:] - p[1:-1, :-2]) / (2 * dx)
+    dpdy[1:-1, 1:-1] = (p[2:, 1:-1] - p[:-2, 1:-1]) / (2 * dy)
+
+    a = a_star - (dt / rho) * dpdx
+    b = b_star - (dt / rho) * dpdy
+
+    a, b = lid_bc(a, b)
+    return a, b, p, A, ml
 
 def rebuild_phi_from_reference_map(X1, X2, X, Y, x0, y0, R):
     """
@@ -753,6 +1057,10 @@ def semi_implicit_advect_vector(X1, X2, u, v, dx, dy, dt):
     return X1_new, X2_new
 
 if __name__ == "__main__":
+
+    profiler = cProfile.Profile()
+    profiler.enable()
+
     # --------------------------
     # Grid Setup
     # --------------------------
@@ -773,11 +1081,13 @@ if __name__ == "__main__":
     X1 = X * solid_mask
     X2 = Y * solid_mask
 
-    X1 = extrapolate_transverse_layers(X1, phi, dx, dy, 3 * dx, 2)
-    X2 = extrapolate_transverse_layers(X2, phi, dx, dy, 3 * dx, 2)
+    # X1 = extrapolate_transverse_layers(X1, phi, dx, dy, 3 * dx, 2)
+    # X2 = extrapolate_transverse_layers(X2, phi, dx, dy, 3 * dx, 2)
+    X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, 3 * dx, 3)
+
 
     # Physical Parameters
-    mu_s, kappa, rho_s, eta_s = 0.1, 1.0, 1.0, 0.01
+    mu_s, kappa, rho_s, eta_s = 0.1, 10.0, 1.0, 0.01
     mu_f, rho_f = 0.01, 1.0
     w_t =4 * dx
 
@@ -786,11 +1096,13 @@ if __name__ == "__main__":
     b = np.zeros((Nx, Ny))
     p = np.zeros((Nx, Ny))
 
+    A = build_poisson_matrix(Nx, Ny, dx, dy)
+
     CFL = 0.2
     dt_min_cap = 1e-3
-    max_steps = 82500
+    max_steps = 82000*3
     
-    # with h5py.File("frames/data_63000.h5", "r") as f:
+    # with h5py.File("frames/data_164000.h5", "r") as f:
     #     phi = f["phi"][:]
     #     sigma_xx = f["sigma_xx"][:]
     #     sigma_xy = f["sigma_xy"][:]
@@ -818,15 +1130,17 @@ if __name__ == "__main__":
 
         solid_mask = (phi <= 0).astype(float)
         
-        X1 = advect_semi_lagrangian_rk4(X1, a, b, X, Y, dt)
-        X2 = advect_semi_lagrangian_rk4(X2, a, b, X, Y, dt)
+        X1 = advect_semi_lagrangian_rk4(X1, a, b, X, Y, dt, dx, dy)
+        X2 = advect_semi_lagrangian_rk4(X2, a, b, X, Y, dt, dx, dy)
         # X1, X2 = semi_implicit_advect_vector(X1, X2, a, b, dx, dy, dt)
         
         X1 *= solid_mask
         X2 *= solid_mask
 
-        X1 = extrapolate_transverse_layers(X1, phi, dx, dy, 3 * dx, 3)
-        X2 = extrapolate_transverse_layers(X2, phi, dx, dy, 3 * dx, 3)
+        # X1 = extrapolate_transverse_layers(X1, phi, dx, dy, 3 * dx, 3)
+        # X2 = extrapolate_transverse_layers(X2, phi, dx, dy, 3 * dx, 3)
+
+        X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, 3 * dx, 3)
         # X1, X2 = apply_reference_map_BCs(X1, X2, a, b, dt)
         
         a_star, b_star = velocity_RK4(a, b, p, X1, X2, mu_s, kappa, eta_s , dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t)
@@ -839,7 +1153,7 @@ if __name__ == "__main__":
         rho_local = (1 - H) * rho_s + H * rho_f
         
         # Apply global pressure projection
-        a, b, p = pressure_projection_CG(a_star, b_star, dx, dy, dt, rho_local)
+        a, b, p, A, ml = pressure_projection_amg(a_star, b_star, dx, dy, dt, rho_local, A=A, ml=None, p_prev=p)
         a, b = lid_bc(a, b)
         
         if step % 100 == 0 or step == 1:
@@ -874,3 +1188,7 @@ if __name__ == "__main__":
                 f.create_dataset("sigma_yy", data=sigma_syy)
                 f.create_dataset("sigma_xy", data=sigma_sxy)
                 f.create_dataset("div_vel", data=div)
+    
+    profiler.disable()
+    stats = pstats.Stats(profiler).sort_stats("cumtime")
+    stats.print_stats(30)  # Top 30 most expensive calls
