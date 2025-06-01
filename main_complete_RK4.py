@@ -294,9 +294,19 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, eta_s=0.0):
     is not included in this function.
     """
     
-    # Gradients
-    dX1_dy, dX1_dx = np.gradient(X1, dy, dx, edge_order=2)
-    dX2_dy, dX2_dx = np.gradient(X2, dy, dx, edge_order=2)
+    pad_width = 3  # Enough to cover gradient stencil
+
+    X1_padded = np.pad(X1, pad_width, mode='edge')
+    X2_padded = np.pad(X2, pad_width, mode='edge')
+
+    dX1_dy, dX1_dx = np.gradient(X1_padded, dy, dx, edge_order=2)
+    dX2_dy, dX2_dx = np.gradient(X2_padded, dy, dx, edge_order=2)
+
+    # Unpad back to original size
+    dX1_dy = dX1_dy[pad_width:-pad_width, pad_width:-pad_width]
+    dX1_dx = dX1_dx[pad_width:-pad_width, pad_width:-pad_width]
+    dX2_dy = dX2_dy[pad_width:-pad_width, pad_width:-pad_width]
+    dX2_dx = dX2_dx[pad_width:-pad_width, pad_width:-pad_width]
 
     # Preallocate output
     Ny, Nx = X1.shape
@@ -333,7 +343,7 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, eta_s=0.0):
     I = np.eye(2)
     I_expand = np.broadcast_to(I, FFt.shape)
     J_temp = np.linalg.det(F)
-    J_temp = gaussian_filter(J_temp, 1.0)
+    J_temp = gaussian_filter(J_temp, 0.5)
     # clamp to a physically reasonable window
     J_temp = np.clip(J_temp, 0.5, 2.0)
 
@@ -363,9 +373,9 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, eta_s=0.0):
         sxy[idxs] += eta_s * strain_rate_xy[idxs]
     
     # Apply Gaussian smoothing to the stress components
-    sxx = gaussian_filter(sxx, 1.0)*solid_mask
-    sxy = gaussian_filter(sxy, 1.0)*solid_mask
-    syy = gaussian_filter(syy, 1.0)*solid_mask
+    sxx = gaussian_filter(sxx, 0.5)*solid_mask
+    sxy = gaussian_filter(sxy, 0.5)*solid_mask
+    syy = gaussian_filter(syy, 0.5)*solid_mask
 
     return sxx, sxy, syy, J
 
@@ -834,7 +844,7 @@ if __name__ == "__main__":
     # --------------------------
     # Grid Setup
     # --------------------------
-    Nx, Ny = 256, 256
+    Nx, Ny = 128, 128
     Lx, Ly = 1.0, 1.0
     X, Y, dx, dy = create_grid(Nx, Ny, Lx, Ly)
 
@@ -851,10 +861,10 @@ if __name__ == "__main__":
     X1 = X * solid_mask
     X2 = Y * solid_mask
 
-    X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, 3 * dx, 3)
+    X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, 3 * dx, 4)
 
     # Physical Parameters
-    mu_s, kappa, rho_s, eta_s = 0.1, 10.0, 1.0, 0.01
+    mu_s, kappa, rho_s, eta_s = 0.1, 5.0, 1.0, 0.01
     mu_f, rho_f = 0.01, 1.0
     w_t =4 * dx
 
@@ -869,6 +879,19 @@ if __name__ == "__main__":
     CFL = 0.2
     dt_min_cap = 1e-3
     max_steps = 82000*3
+
+    # with h5py.File("frames_128x128_top_notch_kappa_5/data_060000.h5", "r") as f:
+    #     phi = f["phi"][:]
+    #     sigma_xx = f["sigma_xx"][:]
+    #     sigma_xy = f["sigma_xy"][:]
+    #     sigma_yy = f["sigma_yy"][:]
+    #     X1 = f["X1"][:]
+    #     X2 = f["X2"][:]
+    #     J = f["J"][:]
+    #     a = f["a"][:]
+    #     b = f["b"][:]
+    #     p = f["p"][:]
+    #     div_vel = f["div_vel"][:]
     
     # --------------------------
     # Time Loop
@@ -881,7 +904,7 @@ if __name__ == "__main__":
         phi = rebuild_phi_from_reference_map(X1, X2, X, Y, x0=0.6, y0=0.5, R=0.2)
         
         # if step % 100 == 0:
-        phi = reinitialize_phi_PDE(phi, dx, dy, num_iters=100, apply_phi_BCs_func=None, dt_reinit_factor=0.1)
+        phi = reinitialize_phi_PDE(phi, dx, dy, num_iters=200, apply_phi_BCs_func=None, dt_reinit_factor=0.1)
 
         solid_mask = (phi <= 0).astype(float)
         
@@ -891,7 +914,11 @@ if __name__ == "__main__":
         X1 *= solid_mask
         X2 *= solid_mask
 
-        X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, 3 * dx, 3)
+        # num_layers = 5
+        # if step > 65200:
+        #     num_layers = 3
+
+        X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, 3 * dx, 4)
         
         a_star, b_star = velocity_RK4(a, b, p, X1, X2, mu_s, kappa, eta_s , dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t)
         a_star, b_star = lid_bc(a_star, b_star)
@@ -926,7 +953,7 @@ if __name__ == "__main__":
         if step == 1 or step % 100 == 0:
             div = divergence_2d(a, b, dx, dy)
 
-            with h5py.File(f"frames/data_{step:05d}.h5", "w") as f:
+            with h5py.File(f"frames/data_{step:06d}.h5", "w") as f:
                 f.create_dataset("phi", data=phi)
                 f.create_dataset("X1", data=X1)
                 f.create_dataset("X2", data=X2)
