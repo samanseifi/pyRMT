@@ -343,7 +343,7 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, eta_s=0.0):
     I = np.eye(2)
     I_expand = np.broadcast_to(I, FFt.shape)
     J_temp = np.linalg.det(F)
-    J_temp = gaussian_filter(J_temp, 0.5)
+    # J_temp = gaussian_filter(J_temp, 0.5)
     # clamp to a physically reasonable window
     J_temp = np.clip(J_temp, 0.5, 2.0)
 
@@ -373,9 +373,9 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, eta_s=0.0):
         sxy[idxs] += eta_s * strain_rate_xy[idxs]
     
     # Apply Gaussian smoothing to the stress components
-    sxx = gaussian_filter(sxx, 0.5)*solid_mask
-    sxy = gaussian_filter(sxy, 0.5)*solid_mask
-    syy = gaussian_filter(syy, 0.5)*solid_mask
+    # sxx = gaussian_filter(sxx, 0.5)*solid_mask
+    # sxy = gaussian_filter(sxy, 0.5)*solid_mask
+    # syy = gaussian_filter(syy, 0.5)*solid_mask
 
     return sxx, sxy, syy, J
 
@@ -788,53 +788,6 @@ def reinitialize_phi_PDE(phi_in, dx, dy, num_iters, apply_phi_BCs_func, dt_reini
             
     return phi
 
-def semi_implicit_advect_vector(X1, X2, u, v, dx, dy, dt):
-    """
-    Semi-implicit advection for 2D vector field (X1, X2).
-    Solves: (X^{n+1} - X^n)/dt + u · ∇X^{n+1} = 0 using backward Euler.
-    """
-    Ny, Nx = X1.shape
-    N = Nx * Ny
-
-    def idx(i, j):
-        return i + j * Nx
-
-    # Build a single advection matrix A (same for both components)
-    A = lil_matrix((N, N))
-    for j in range(Ny):
-        for i in range(Nx):
-            k = idx(i, j)
-            u_ij = u[j, i]
-            v_ij = v[j, i]
-            A[k, k] = 1.0
-            A[k, k] += 1e-8  # Regularize diagonal
-
-            if i > 0:
-                A[k, idx(i-1, j)] -= 0.5 * dt * u_ij / dx
-                A[k, k]           += 0.5 * dt * u_ij / dx
-            if i < Nx - 1:
-                A[k, idx(i+1, j)] += 0.5 * dt * u_ij / dx
-                A[k, k]           -= 0.5 * dt * u_ij / dx
-            if j > 0:
-                A[k, idx(i, j-1)] -= 0.5 * dt * v_ij / dy
-                A[k, k]           += 0.5 * dt * v_ij / dy
-            if j < Ny - 1:
-                A[k, idx(i, j+1)] += 0.5 * dt * v_ij / dy
-                A[k, k]           -= 0.5 * dt * v_ij / dy
-
-    A = A.tocsr()
-
-    # Solve for X1
-    X1_flat = X1.ravel()
-    X1_new_flat = spsolve(A, X1_flat)
-    X1_new = X1_new_flat.reshape((Ny, Nx))
-
-    # Solve for X2
-    X2_flat = X2.ravel()
-    X2_new_flat = spsolve(A, X2_flat)
-    X2_new = X2_new_flat.reshape((Ny, Nx))
-
-    return X1_new, X2_new
 
 if __name__ == "__main__":
 
@@ -866,7 +819,7 @@ if __name__ == "__main__":
     # Physical Parameters
     mu_s, kappa, rho_s, eta_s = 0.1, 5.0, 1.0, 0.01
     mu_f, rho_f = 0.01, 1.0
-    w_t =4 * dx
+    w_t = 4 * dx
 
     # Velocity and Pressure
     a = np.zeros((Nx, Ny))
@@ -880,7 +833,7 @@ if __name__ == "__main__":
     dt_min_cap = 1e-3
     max_steps = 82000*3
 
-    # with h5py.File("frames_128x128_top_notch_kappa_5/data_060000.h5", "r") as f:
+    # with h5py.File("frames/data_060000.h5", "r") as f:
     #     phi = f["phi"][:]
     #     sigma_xx = f["sigma_xx"][:]
     #     sigma_xy = f["sigma_xy"][:]
@@ -903,7 +856,6 @@ if __name__ == "__main__":
 
         phi = rebuild_phi_from_reference_map(X1, X2, X, Y, x0=0.6, y0=0.5, R=0.2)
         
-        # if step % 100 == 0:
         phi = reinitialize_phi_PDE(phi, dx, dy, num_iters=200, apply_phi_BCs_func=None, dt_reinit_factor=0.1)
 
         solid_mask = (phi <= 0).astype(float)
@@ -913,11 +865,6 @@ if __name__ == "__main__":
         
         X1 *= solid_mask
         X2 *= solid_mask
-
-        # num_layers = 5
-        # if step > 65200:
-        #     num_layers = 3
-
         X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, 3 * dx, 4)
         
         a_star, b_star = velocity_RK4(a, b, p, X1, X2, mu_s, kappa, eta_s , dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t)
