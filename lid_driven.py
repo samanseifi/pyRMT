@@ -1,4 +1,4 @@
-from pyRMT import *
+from pyRMT.functions import *
 
 import h5py
 import argparse

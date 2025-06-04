@@ -1,4 +1,4 @@
 frames_*/
 frames_*/**
 *.h5
-
+__pycache__/
