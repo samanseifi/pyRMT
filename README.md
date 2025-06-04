@@ -5,7 +5,7 @@ pyRMT is a simple python code for simulating Fluid-Structure Interaction (FSI) u
 
 Below is an example of a lid-driven cavity simulation:
 
-![Lid Driven Cavity Simulation](lid_driven.gif)
+![Lid Driven Cavity Simulation](lid_driven_256x256_new_2.gif)
 
 ## License
 
