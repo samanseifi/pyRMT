@@ -1,0 +1,27 @@
+{
+  "Nx": 128,
+  "Ny": 128,
+  "Lx": 1.0,
+  "Ly": 1.0,
+  "mu_s": 0.1,
+  "kappa": 5.0,
+  "rho_s": 1.0,
+  "eta_s": 0.01,
+  "mu_f": 0.01,
+  "rho_f": 1.0,
+  "CFL": 0.2,
+  "dt_min_cap": 0.001,
+  "max_steps": 50000,
+  "reinit_step": 1,
+  "reinit_factor": 0.1,
+  "extrapolation_layer": 4,
+  "w_t": 0.04,
+  "vis_output_freq": 100,
+  "init_shape": {
+    "type": "disc",
+    "x0": 0.6,
+    "y0": 0.5,
+    "R": 0.2
+  },
+  "level_set_file": null
+}
