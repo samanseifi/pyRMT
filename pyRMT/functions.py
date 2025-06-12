@@ -20,14 +20,6 @@ def create_grid(Nx, Ny, Lx, Ly):
     X, Y = np.meshgrid(x, y)
     return X, Y, dx, dy
 
-def initialize_level_set(X, Y, x0, y0, R):
-    """ 
-    Initialize a disc-shaped level set function phi centered at (x0, y0) with radius R.
-    """
-    r = np.sqrt((X - x0)**2 + (Y - y0)**2)
-    phi = r - R
-    return phi
-
 def apply_phi_BCs(phi):
     """
     Apply periodic boundary conditions to phi (3-cell periodic BCs).
@@ -384,7 +376,7 @@ def heaviside_smooth_alt(x, w_t):
     
     return H
 
-def velocity_RK4(u, v, p, X1, X2, mu_s, kappa, eta_s , dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t):
+def velocity_RK4(u, v, p, X1, X2, velocity_bc, mu_s, kappa, eta_s , dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t):
     """
     RK4 integration using stress divergence from blended stress field.
     """
@@ -411,6 +403,8 @@ def velocity_RK4(u, v, p, X1, X2, mu_s, kappa, eta_s , dx, dy, dt, rho_s, rho_f,
 
     u_new = u + (dt / 6.0) * (k1u + 2*k2u + 2*k3u + k4u)
     v_new = v + (dt / 6.0) * (k1v + 2*k2v + 2*k3v + k4v)
+    
+    u_new, v_new = apply_velocity_BCs(velocity_bc, u_new, v_new)
 
     return u_new, v_new
 
@@ -452,7 +446,7 @@ def velocity_rhs_blended(u, v, p,
              ∂x σ_xy^s + ∂y σ_yy^s]
 
     therefore:
-        ∇·σ = (1 - H) ∇·σ_solid + H ∇·σ_fluid - ∇p + f_jump
+        ∇·σ = (1 - H) ∇·σ_solid + H ∇·σ_fluid + f_jump
     
     where f_jump is the jump term that accounts for the difference in stress across the interface:
         f_jump = (σ_fluid - σ_solid) · ∇H
@@ -510,10 +504,6 @@ def velocity_rhs_blended(u, v, p,
 
     div_solid_x = dsxx_dx + dsxy_dy
     div_solid_y = dsxy_dx + dsyy_dy
-    
-    # --- Apply gradient of projected pressure from previus timestep ---
-    dpdx = (np.roll(p, -1, axis=1) - np.roll(p, 1, axis=1)) / (2 * dx)
-    dpdy = (np.roll(p, -1, axis=0) - np.roll(p, 1, axis=0)) / (2 * dy)
 
     # --- Fluid stress components (only for jump term) ---
     du_dx = (np.roll(u, -1, axis=1) - np.roll(u, 1, axis=1)) / (2 * dx)
@@ -530,38 +520,14 @@ def velocity_rhs_blended(u, v, p,
     jump_y = (sigma_sxy_f - sigma_sxy_s) * dH_dx + (sigma_syy_f - sigma_syy_s) * dH_dy
 
     # --- Final RHS ---
-    rhs_u = u_adv + ((1 - H) * div_solid_x + H * u_lap - dpdx + jump_x) / (rho_local + 1e-12)
-    rhs_v = v_adv + ((1 - H) * div_solid_y + H * v_lap - dpdy + jump_y) / (rho_local + 1e-12)
+    rhs_u = u_adv + ((1 - H) * div_solid_x + H * u_lap + jump_x) / (rho_local + 1e-12)
+    rhs_v = v_adv + ((1 - H) * div_solid_y + H * v_lap + jump_y) / (rho_local + 1e-12)
+
 
     return rhs_u, rhs_v
 
-def lid_bc(u, v):
-    u_bc = u.copy()
-    v_bc = v.copy()
-
-    # Right boundary (no-slip)
-    u_bc[:, -1] = 0.0
-    v_bc[:, -1] = 0.0
-
-    # Left boundary (no-slip)
-    u_bc[:, 0] = 0.0
-    v_bc[:, 0] = 0.0
-
-    # Bottom wall (no-slip)
-    u_bc[0, :] = 0.0
-    v_bc[0, :] = 0.0
-
-    # Top lid (moving right)
-    u_bc[-1, :] = 1.0
-    v_bc[-1, :] = 0.0
-
-    # Corner adjustments
-    u_bc[0, 0] = 0.0; v_bc[0, 0] = 0.0
-    u_bc[0, -1] = 0.0; v_bc[0, -1] = 0.0
-    u_bc[-1, 0] = 0.0; v_bc[-1, 0] = 0.0
-    u_bc[-1, -1] = 0.0; v_bc[-1, -1] = 0.0
-
-    return u_bc, v_bc
+def apply_velocity_BCs(bc, u, v):
+    return bc(u, v)
 
 def divergence_2d(u, v, dx, dy):
     """
@@ -624,7 +590,7 @@ def build_poisson_matrix(Nx, Ny, dx, dy):
 
     return A.tocsr()
 
-def pressure_projection_amg(a_star, b_star, dx, dy, dt, rho, A=None, ml=None, p_prev=None):
+def pressure_projection_amg(a_star, b_star, dx, dy, dt, rho, velocity_bc, A=None, ml=None, p_prev=None):
     """
     Enforce incompressibility by solving ∇²p = (ρ/Δt) ∇·U* with Conjugate Gradient.
     
@@ -679,17 +645,22 @@ def pressure_projection_amg(a_star, b_star, dx, dy, dt, rho, A=None, ml=None, p_
     a = a_star - (dt / rho) * dpdx
     b = b_star - (dt / rho) * dpdy
 
-    a, b = lid_bc(a, b)
+    a, b = apply_velocity_BCs(velocity_bc, a, b)
+    
     return a, b, p, A, ml
 
-def rebuild_phi_from_reference_map(X1, X2, X, Y, x0, y0, R):
+def rebuild_phi_from_reference_map(X1, X2, phi_init_func):
     """
-    Rebuild the level set function phi from the reference maps X1 and X2.
-    This function is used to update the level set function after advection.
+    Rebuilds the level set function φ by evaluating the initializer at the reference map positions (X1, X2).
+    
+    Parameters:
+    - X1, X2: reference maps (advected X, Y coordinates)
+    - phi_init_func: a function like `initialize_disc(X, Y, ...)` that returns the initial level set
+    
+    Returns:
+    - φ rebuilt on current grid using reference coordinates
     """
-    r = np.sqrt((X1 - x0)**2 + (X2 - y0)**2)
-    phi = r - R
-    return phi
+    return phi_init_func(X1, X2)
 
 def reinitialize_phi_PDE(phi_in, dx, dy, num_iters, apply_phi_BCs_func, dt_reinit_factor=0.5):
     """
