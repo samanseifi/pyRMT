@@ -1,5 +1,6 @@
 from pyRMT.functions import *
-
+from pyRMT.output import output_simulation_data
+import os
 import h5py
 
 # Define the boundary conditions for the lid-driven cavity problem
@@ -96,6 +97,8 @@ if __name__ == "__main__":
     A = build_poisson_matrix(Nx, Ny, dx, dy)
     
     vis_output_freq = 100
+    
+    directory_name = "output_lid_driven"
 
     for step in range(1, max_steps + 1):
         dt = compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s)
@@ -119,30 +122,5 @@ if __name__ == "__main__":
 
         a, b, p, A, ml = pressure_projection_amg(a_star, b_star, dx, dy, dt, rho_local, lid_bc, A=A, ml=None, p_prev=p)
 
-        if step % vis_output_freq == 0 or step == 1:
-            vmag = np.sqrt(a**2 + b**2)
-            div = divergence_2d(a, b, dx, dy)
-            solid_area = np.sum(solid_mask) * dx * dy
-            print(
-                f"[Step {step:05d}] dt={dt:.2e}, "
-                f"max|v|={np.max(vmag):.3f}, "
-                f"min(J)={np.min(J):.3f}, "
-                f"mean(J)={np.mean(J):.3f}, "
-                f"max|σ_solid|={np.max(np.abs(sigma_sxx)):.2f}, "
-                f"max divergence = {np.max(np.abs(div)):.2e}, "
-                f"solid area = {solid_area:.4f}"
-            )
-
-            with h5py.File(f"frames_128x128_no_gradP/data_{step:06d}.h5", "w") as f:
-                f.create_dataset("phi", data=phi)
-                f.create_dataset("X1", data=X1)
-                f.create_dataset("X2", data=X2)
-                f.create_dataset("J", data=J)
-                f.create_dataset("a", data=a)
-                f.create_dataset("b", data=b)
-                f.create_dataset("p", data=p)
-                f.create_dataset("sigma_xx", data=sigma_sxx)
-                f.create_dataset("sigma_yy", data=sigma_syy)
-                f.create_dataset("sigma_xy", data=sigma_sxy)
-                f.create_dataset("div_vel", data=div)
+        output_simulation_data(dx, dy, phi, solid_mask, X1, X2, a, b, p, vis_output_freq, directory_name, step, dt, sigma_sxx, sigma_sxy, sigma_syy, J)
 
