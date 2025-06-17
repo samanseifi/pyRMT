@@ -75,9 +75,9 @@ if __name__ == "__main__":
     # --------------------------
     # Physical Properties
     # --------------------------
-    mu_s, kappa, rho_s, eta_s = 0.1, 0.0, 1.0, 0.01
+    mu_s, kappa, rho_s, eta_s = 0.1, 0.01, 1.0, 0.01
     mu_f, rho_f = 0.01, 1.0
-    w_t = 4 * dx
+    w_t = 2 * dx
     
     # --------------------------
     # Fields Initialization
@@ -98,11 +98,11 @@ if __name__ == "__main__":
     
     vis_output_freq = 100
     
-    directory_name = "output_lid_driven"
+    directory_name = "output_lid_driven_soft_disc"
 
     for step in range(1, max_steps + 1):
         dt = compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s)
-        dt *= 0.1
+        dt *= 0.8
 
         phi = rebuild_phi_from_reference_map(X1, X2, phi_init)
         phi = reinitialize_phi_PDE(phi, dx, dy, num_iters=200, apply_phi_BCs_func=None, dt_reinit_factor=0.1)
@@ -115,12 +115,12 @@ if __name__ == "__main__":
 
         a_star, b_star = velocity_RK4(a, b, p, X1, X2, lid_bc, mu_s, kappa, eta_s, dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t)
 
-        sigma_sxx, sigma_sxy, sigma_syy, J = compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, eta_s)
+        sigma_sxx, sigma_sxy, sigma_syy, J = compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b,p, eta_s)
 
         H = heaviside_smooth_alt(phi, w_t)
         rho_local = (1 - H) * rho_s + H * rho_f
 
-        a, b, p, A, ml = pressure_projection_amg(a_star, b_star, dx, dy, dt, rho_local, lid_bc, A=A, ml=None, p_prev=p)
+        a, b, p, A, ml = pressure_projection_amg_RC(a_star, b_star, dx, dy, dt, rho_local, mu_f, lid_bc, A=A, ml=None, p_prev=p)
 
         output_simulation_data(dx, dy, phi, solid_mask, X1, X2, a, b, p, vis_output_freq, directory_name, step, dt, sigma_sxx, sigma_sxy, sigma_syy, J)
 

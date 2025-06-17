@@ -47,11 +47,11 @@ if __name__ == "__main__":
     # Physical Properties
     # --------------------------
     mu_s, kappa, rho_s, eta_s = 0.0, 0.0, 0.0, 0.0
-    mu_f, rho_f = 0.01, 1.0
+    mu_f, rho_f = 0.001, 1.0
     w_t = 4 * dx
     
     rho_local = 1.0  # Local density for solid
-    phi = np.zeros((Nx, Ny))  # Placeholder for solid mask
+    phi = np.ones((Nx, Ny))  # Placeholder for solid mask
     solid_mask = np.zeros((Nx, Ny), dtype=bool)  # Solid mask for visualization
     
     # --------------------------
@@ -73,7 +73,7 @@ if __name__ == "__main__":
     
     vis_output_freq = 100
     
-    directory_name = "output_lid_driven"
+    directory_name = "output_lid_driven_Re_1000"
 
     for step in range(1, max_steps + 1):
         dt = compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s)

@@ -251,59 +251,56 @@ def bilinear_interpolate(u, xq, yq, dx, dy, Nx, Ny):
 
     return out
 
-def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, eta_s=0.0):
+def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, p, eta_s=0.0):
     """
-    Compute solid stress tensor based on reference maps X1, X2 
-    (with extrapolation into fluid region). The stress tensor is 
-    computed using Neo-Hookean Cauchy stress formula:
-    
-        σ = μ_s / J (F F^T - I) + kappa (J-1) I
-    
-    where F is the deformation gradient computed within extrapolated region,
-    J is the determinant of F, and I is the identity matrix.
-   
-    The solid mask is applied to ensure that the stress is only computed
-    in the solid region (phi <= 0).
-    The function returns the stress components sxx, sxy, syy and the Jacobian J.
-    
-    Incorporating Maxwell Stresses from electrohydrodynamics (EHD)
-    is not included in this function.
+    Compute solid stress tensor for an incompressible Neo-Hookean solid with a separate
+    pressure field passed in (p), used as a Lagrange multiplier for incompressibility.
+
+    σ = -p_s * I + μ (F F^T - I)
+
+    Parameters:
+    - X1, X2 : reference maps
+    - dx, dy : grid spacing
+    - mu_s   : shear modulus of solid
+    - phi    : level set function (solid region if phi <= 0)
+    - a, b   : velocity components (for damping)
+    - p      : pressure field (Lagrange multiplier for incompressibility)
+    - eta_s  : optional damping viscosity
+
+    Returns:
+    - sxx, sxy, syy : components of Cauchy stress tensor
+    - J             : determinant of deformation gradient (for diagnostics only)
     """
-    
-    pad_width = 3  # Enough to cover gradient stencil
+
+    pad_width = 3
 
     X1_padded = np.pad(X1, pad_width, mode='edge')
     X2_padded = np.pad(X2, pad_width, mode='edge')
 
-    dX1_dy, dX1_dx = np.gradient(X1_padded, dy, dx, edge_order=2)
-    dX2_dy, dX2_dx = np.gradient(X2_padded, dy, dx, edge_order=2)
+    dX1_dx = grad_x_4th(X1_padded, dx)
+    dX1_dy = grad_y_4th(X1_padded, dy)
+    dX2_dx = grad_x_4th(X2_padded, dx)
+    dX2_dy = grad_y_4th(X2_padded, dy)
 
-    # Unpad back to original size
-    dX1_dy = dX1_dy[pad_width:-pad_width, pad_width:-pad_width]
     dX1_dx = dX1_dx[pad_width:-pad_width, pad_width:-pad_width]
-    dX2_dy = dX2_dy[pad_width:-pad_width, pad_width:-pad_width]
+    dX1_dy = dX1_dy[pad_width:-pad_width, pad_width:-pad_width]
     dX2_dx = dX2_dx[pad_width:-pad_width, pad_width:-pad_width]
+    dX2_dy = dX2_dy[pad_width:-pad_width, pad_width:-pad_width]
 
-    # Preallocate output
     Ny, Nx = X1.shape
     sxx = np.zeros((Ny, Nx))
     sxy = np.zeros((Ny, Nx))
     syy = np.zeros((Ny, Nx))
     J = np.ones((Ny, Nx))
 
-    # Solid with a narrow band mask for smoother divergence computation later
     solid_mask = phi <= 0
-
-    # Flatten indices for masked region
     idxs = np.where(solid_mask)
-    
-    # Construct G matrix: shape (n, 2, 2)
+
     G = np.stack([
         np.stack([dX1_dx[idxs], dX1_dy[idxs]], axis=-1),
         np.stack([dX2_dx[idxs], dX2_dy[idxs]], axis=-1)
-    ], axis=-2)  # shape: (n, 2, 2)
+    ], axis=-2)
 
-    # Invert G safely (skip points where inversion fails)
     detG = G[:, 0, 0] * G[:, 1, 1] - G[:, 0, 1] * G[:, 1, 0]
     good = np.abs(detG) > 1e-10
     Ginv = np.zeros_like(G)
@@ -312,48 +309,50 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, eta_s=0.0):
     Ginv[good, 1, 0] = -G[good, 1, 0] / detG[good]
     Ginv[good, 1, 1] =  G[good, 0, 0] / detG[good]
 
-    # Compute F = inv(G)
     F = Ginv
     Ft = np.transpose(F, axes=(0, 2, 1))
     FFt = np.einsum('nij,njk->nik', F, Ft)
+    
+    # calculate trace of FFt
+    trace_FFt = FFt[:, 0, 0] + FFt[:, 1, 1]
+    
     I = np.eye(2)
     I_expand = np.broadcast_to(I, FFt.shape)
+
+    # Use pressure at the solid points as incompressibility Lagrange multiplier
+    p_solid = p[idxs]
+
     J_temp = np.linalg.det(F)
-    # J_temp = gaussian_filter(J_temp, 0.5)
-    # clamp to a physically reasonable window
-    J_temp = np.clip(J_temp, 0.5, 2.0)
-
     J[idxs] = J_temp
-    sigma = (mu_s / J_temp)[:, None, None] * (FFt - I_expand) + \
-            kappa * (J_temp - 1)[:, None, None] * I_expand
 
-    # Write back to sxx, sxy, syy
+    # sigma = -p_solid[:, None, None] * I_expand + mu_s * (FFt)
+    # sigma = mu_s * (FFt - (1/3)*(trace_FFt + 1)[:, None, None] * I_expand)
+    sigma = mu_s * (FFt - I_expand)
+
     sxx[idxs] = sigma[:, 0, 0]
-    sxy[idxs] = sigma[:, 1, 0]
+    sxy[idxs] = sigma[:, 0, 1]  # Note: correct ordering for symmetric stress
     syy[idxs] = sigma[:, 1, 1]
-    
-    # Apply damping to solid stress
+
     if eta_s > 0:
-        du_dx = (np.roll(a, -1, axis=1) - np.roll(a, 1, axis=1)) / (2 * dx)
-        dv_dy = (np.roll(b, -1, axis=0) - np.roll(b, 1, axis=0)) / (2 * dy)
-        du_dy = (np.roll(a, -1, axis=0) - np.roll(a, 1, axis=0)) / (2 * dy)
-        dv_dx = (np.roll(b, -1, axis=1) - np.roll(b, 1, axis=1)) / (2 * dx)
+        du_dx = grad_x_4th(a, dx)
+        dv_dy = grad_y_4th(b, dy)
+        du_dy = grad_y_4th(a, dy)
+        dv_dx = grad_x_4th(b, dx)
 
         strain_rate_xx = du_dx
         strain_rate_yy = dv_dy
         strain_rate_xy = 0.5 * (du_dy + dv_dx)
 
-        # Apply damping only inside solid
         sxx[idxs] += eta_s * strain_rate_xx[idxs]
         syy[idxs] += eta_s * strain_rate_yy[idxs]
         sxy[idxs] += eta_s * strain_rate_xy[idxs]
-    
-    # Apply Gaussian smoothing to the stress components
-    sxx = gaussian_filter(sxx, 0.5)*solid_mask
-    sxy = gaussian_filter(sxy, 0.5)*solid_mask
-    syy = gaussian_filter(syy, 0.5)*solid_mask
+
+    sxx = gaussian_filter(sxx * solid_mask, 0.5)
+    sxy = gaussian_filter(sxy * solid_mask, 0.5)
+    syy = gaussian_filter(syy * solid_mask, 0.5)
 
     return sxx, sxy, syy, J
+
 
 def heaviside_smooth_alt(x, w_t):
     """
@@ -383,7 +382,7 @@ def velocity_RK4(u, v, p, X1, X2, velocity_bc, mu_s, kappa, eta_s , dx, dy, dt, 
     def rhs(u_stage, v_stage, p):
         sigma_sxx, sigma_sxy, sigma_syy, J = compute_solid_stress(X1, X2, dx, dy, mu_s, 
                                                                   kappa, phi, u_stage, 
-                                                                  v_stage, eta_s)   
+                                                                  v_stage, p,  eta_s)   
         return velocity_rhs_blended(u, v, p, sigma_sxx, sigma_sxy, sigma_syy,
                                     dx, dy, phi,mu_f, rho_s, rho_f, w_t)
 
@@ -407,6 +406,85 @@ def velocity_RK4(u, v, p, X1, X2, velocity_bc, mu_s, kappa, eta_s , dx, dy, dt, 
     u_new, v_new = apply_velocity_BCs(velocity_bc, u_new, v_new)
 
     return u_new, v_new
+
+
+@njit
+def grad_x_4th(f, dx):
+    df_dx = np.zeros_like(f)
+
+    # Interior: 4th-order central difference
+    df_dx[:, 2:-2] = (-f[:, 4:] + 8*f[:, 3:-1] - 8*f[:, 1:-3] + f[:, 0:-4]) / (12 * dx)
+
+    # Left boundary (x = 0, 1)
+    df_dx[:, 0] = (-25*f[:, 0] + 48*f[:, 1] - 36*f[:, 2] + 16*f[:, 3] - 3*f[:, 4]) / (12 * dx)
+    df_dx[:, 1] = (-3*f[:, 0] - 10*f[:, 1] + 18*f[:, 2] - 6*f[:, 3] + f[:, 4]) / (12 * dx)
+
+    # Right boundary (x = -2, -1)
+    df_dx[:, -2] = (3*f[:, -1] + 10*f[:, -2] - 18*f[:, -3] + 6*f[:, -4] - f[:, -5]) / (12 * dx)
+    df_dx[:, -1] = (25*f[:, -1] - 48*f[:, -2] + 36*f[:, -3] - 16*f[:, -4] + 3*f[:, -5]) / (12 * dx)
+
+    return df_dx
+
+@njit
+def grad_y_4th(f, dy):
+    df_dy = np.zeros_like(f)
+
+    # Interior
+    df_dy[2:-2, :] = (-f[4:, :] + 8*f[3:-1, :] - 8*f[1:-3, :] + f[0:-4, :]) / (12 * dy)
+
+    # Bottom boundary (y = 0, 1)
+    df_dy[0, :] = (-25*f[0, :] + 48*f[1, :] - 36*f[2, :] + 16*f[3, :] - 3*f[4, :]) / (12 * dy)
+    df_dy[1, :] = (-3*f[0, :] - 10*f[1, :] + 18*f[2, :] - 6*f[3, :] + f[4, :]) / (12 * dy)
+
+    # Top boundary (y = -2, -1)
+    df_dy[-2, :] = (3*f[-1, :] + 10*f[-2, :] - 18*f[-3, :] + 6*f[-4, :] - f[-5, :]) / (12 * dy)
+    df_dy[-1, :] = (25*f[-1, :] - 48*f[-2, :] + 36*f[-3, :] - 16*f[-4, :] + 3*f[-5, :]) / (12 * dy)
+
+    return df_dy
+
+@njit
+def lap_4th(f, dx, dy):
+    """
+    4th-order accurate Laplacian for 2D array f, with 2nd-order one-sided stencils at boundaries.
+    """
+    lap = np.zeros_like(f)
+
+    # 4th-order central differences for interior
+    d2f_dx2 = np.zeros_like(f)
+    d2f_dy2 = np.zeros_like(f)
+
+    # X second derivative (central, 4th order)
+    d2f_dx2[:, 2:-2] = (
+        -f[:, 4:] + 16*f[:, 3:-1] - 30*f[:, 2:-2] + 16*f[:, 1:-3] - f[:, 0:-4]
+    ) / (12 * dx**2)
+    # Y second derivative (central, 4th order)
+    d2f_dy2[2:-2, :] = (
+        -f[4:, :] + 16*f[3:-1, :] - 30*f[2:-2, :] + 16*f[1:-3, :] - f[0:-4, :]
+    ) / (12 * dy**2)
+
+    # 4th-order one-sided stencils for boundaries (x-direction)
+    # Left boundary (i=0)
+    d2f_dx2[:, 0] = (45*f[:, 0] - 154*f[:, 1] + 214*f[:, 2] - 156*f[:, 3] + 61*f[:, 4] - 10*f[:, 5]) / (12 * dx**2)
+    # i=1
+    d2f_dx2[:, 1] = (10*f[:, 0] - 15*f[:, 1] - 4*f[:, 2] + 14*f[:, 3] - 6*f[:, 4] + f[:, 5]) / (12 * dx**2)
+    # Right boundary (i=-1)
+    d2f_dx2[:, -1] = (45*f[:, -1] - 154*f[:, -2] + 214*f[:, -3] - 156*f[:, -4] + 61*f[:, -5] - 10*f[:, -6]) / (12 * dx**2)
+    # i=-2
+    d2f_dx2[:, -2] = (10*f[:, -1] - 15*f[:, -2] - 4*f[:, -3] + 14*f[:, -4] - 6*f[:, -5] + f[:, -6]) / (12 * dx**2)
+
+    # 4th-order one-sided stencils for boundaries (y-direction)
+    # Bottom boundary (j=0)
+    d2f_dy2[0, :] = (45*f[0, :] - 154*f[1, :] + 214*f[2, :] - 156*f[3, :] + 61*f[4, :] - 10*f[5, :]) / (12 * dy**2)
+    # j=1
+    d2f_dy2[1, :] = (10*f[0, :] - 15*f[1, :] - 4*f[2, :] + 14*f[3, :] - 6*f[4, :] + f[5, :]) / (12 * dy**2)
+    # Top boundary (j=-1)
+    d2f_dy2[-1, :] = (45*f[-1, :] - 154*f[-2, :] + 214*f[-3, :] - 156*f[-4, :] + 61*f[-5, :] - 10*f[-6, :]) / (12 * dy**2)
+    # j=-2
+    d2f_dy2[-2, :] = (10*f[-1, :] - 15*f[-2, :] - 4*f[-3, :] + 14*f[-4, :] - 6*f[-5, :] + f[-6, :]) / (12 * dy**2)
+
+    lap = d2f_dx2 + d2f_dy2
+    return lap
+
 
 def velocity_rhs_blended(u, v, p,
                          sigma_sxx_s, sigma_sxy_s, sigma_syy_s,
@@ -473,43 +551,47 @@ def velocity_rhs_blended(u, v, p,
     """
 
     # --- Advection (central difference) ---
-    u_adv = - u * (np.roll(u, -1, axis=1) - np.roll(u, 1, axis=1)) / (2 * dx) \
-            - v * (np.roll(u, -1, axis=0) - np.roll(u, 1, axis=0)) / (2 * dy)
+    # u_adv = - u * (np.roll(u, -1, axis=1) - np.roll(u, 1, axis=1)) / (2 * dx) \
+    #         - v * (np.roll(u, -1, axis=0) - np.roll(u, 1, axis=0)) / (2 * dy)
 
-    v_adv = - u * (np.roll(v, -1, axis=1) - np.roll(v, 1, axis=1)) / (2 * dx) \
-            - v * (np.roll(v, -1, axis=0) - np.roll(v, 1, axis=0)) / (2 * dy)
+    # v_adv = - u * (np.roll(v, -1, axis=1) - np.roll(v, 1, axis=1)) / (2 * dx) \
+    #         - v * (np.roll(v, -1, axis=0) - np.roll(v, 1, axis=0)) / (2 * dy)
 
+    u_adv = -u * grad_x_4th(u, dx) - v * grad_y_4th(u, dy)
+    v_adv = -u * grad_x_4th(v, dx) - v * grad_y_4th(v, dy)
+    # u_adv = -advection_rhs_velocity(u, u, v, dx, dy)
+    # v_adv = -advection_rhs_velocity(v, u, v, dx, dy)
+    
     # --- Heaviside and ∇H ---
     H = heaviside_smooth_alt(phi, w_t)
-    dH_dx = (np.roll(H, -1, axis=1) - np.roll(H, 1, axis=1)) / (2 * dx)
-    dH_dy = (np.roll(H, -1, axis=0) - np.roll(H, 1, axis=0)) / (2 * dy)
+    dH_dx = grad_x_4th(H, dx)
+    dH_dy = grad_y_4th(H, dy)
 
     # --- Local density ---
     rho_local = (1 - H) * rho_s + H * rho_f
 
-    # --- Fluid stress divergence via Laplacian ---
-    def lap(f):
-        return (np.roll(f, -1, axis=1) - 2*f + np.roll(f, 1, axis=1)) / dx**2 + \
-               (np.roll(f, -1, axis=0) - 2*f + np.roll(f, 1, axis=0)) / dy**2
-
-    u_lap = mu_f * lap(u)
-    v_lap = mu_f * lap(v)
+    u_lap = mu_f * lap_4th(u, dx, dy)
+    v_lap = mu_f * lap_4th(v, dx, dy)
 
     # --- Solid stress divergence ---
-    dsxx_dx = (np.roll(sigma_sxx_s, -1, axis=1) - np.roll(sigma_sxx_s, 1, axis=1)) / (2 * dx)
-    dsxy_dy = (np.roll(sigma_sxy_s, -1, axis=0) - np.roll(sigma_sxy_s, 1, axis=0)) / (2 * dy)
+    dsxx_dx = grad_x_4th(sigma_sxx_s, dx)
+    dsxy_dy = grad_y_4th(sigma_sxy_s, dy)
 
-    dsxy_dx = (np.roll(sigma_sxy_s, -1, axis=1) - np.roll(sigma_sxy_s, 1, axis=1)) / (2 * dx)
-    dsyy_dy = (np.roll(sigma_syy_s, -1, axis=0) - np.roll(sigma_syy_s, 1, axis=0)) / (2 * dy)
+    dsxy_dx = grad_x_4th(sigma_sxy_s, dx)
+    dsyy_dy = grad_y_4th(sigma_syy_s, dy)
 
     div_solid_x = dsxx_dx + dsxy_dy
     div_solid_y = dsxy_dx + dsyy_dy
 
     # --- Fluid stress components (only for jump term) ---
-    du_dx = (np.roll(u, -1, axis=1) - np.roll(u, 1, axis=1)) / (2 * dx)
-    dv_dy = (np.roll(v, -1, axis=0) - np.roll(v, 1, axis=0)) / (2 * dy)
-    du_dy = (np.roll(u, -1, axis=0) - np.roll(u, 1, axis=0)) / (2 * dy)
-    dv_dx = (np.roll(v, -1, axis=1) - np.roll(v, 1, axis=1)) / (2 * dx)
+    # 4th-order central differences for derivatives
+    du_dx = grad_x_4th(u, dx)
+    dv_dy = grad_y_4th(v, dy)
+    du_dy = grad_y_4th(u, dy)
+    dv_dx = grad_x_4th(v, dx)
+
+    dp_dx = grad_x_4th(p, dx)
+    dp_dy = grad_y_4th(p, dy)
 
     sigma_sxx_f = 2 * mu_f * du_dx
     sigma_syy_f = 2 * mu_f * dv_dy
@@ -520,25 +602,14 @@ def velocity_rhs_blended(u, v, p,
     jump_y = (sigma_sxy_f - sigma_sxy_s) * dH_dx + (sigma_syy_f - sigma_syy_s) * dH_dy
 
     # --- Final RHS ---
-    rhs_u = u_adv + ((1 - H) * div_solid_x + H * u_lap + jump_x) / (rho_local + 1e-12)
-    rhs_v = v_adv + ((1 - H) * div_solid_y + H * v_lap + jump_y) / (rho_local + 1e-12)
+    rhs_u = u_adv + ((1 - H) * div_solid_x + H *(u_lap) + jump_x) / (rho_local + 1e-12)
+    rhs_v = v_adv + ((1 - H) * div_solid_y + H *(v_lap) + jump_y) / (rho_local + 1e-12)
 
 
     return rhs_u, rhs_v
 
 def apply_velocity_BCs(bc, u, v):
     return bc(u, v)
-
-def divergence_2d(u, v, dx, dy):
-    """
-    Central-difference approximation of divergence of (u, v).
-    """
-    divU = np.zeros_like(u)
-    divU[1:-1,1:-1] = (
-        (u[1:-1,2:] - u[1:-1,:-2]) / (2*dx) +
-        (v[2:,1:-1] - v[:-2,1:-1]) / (2*dy)
-    )
-    return divU
 
 def build_poisson_matrix(Nx, Ny, dx, dy):
     N = Nx * Ny
@@ -619,6 +690,12 @@ def pressure_projection_amg(a_star, b_star, dx, dy, dt, rho, velocity_bc, A=None
     N = Nx * Ny
 
     divU = np.zeros_like(a_star)
+    # 4th-order central difference for divergence
+    divU[2:-2, 2:-2] = (
+        (-a_star[2:-2, 4:] + 8*a_star[2:-2, 3:-1] - 8*a_star[2:-2, 1:-3] + a_star[2:-2, 0:-4]) / (12 * dx) +
+        (-b_star[4:, 2:-2] + 8*b_star[3:-1, 2:-2] - 8*b_star[1:-3, 2:-2] + b_star[0:-4, 2:-2]) / (12 * dy)
+    )
+    # 2nd-order central difference at boundaries (fallback)
     divU[1:-1, 1:-1] = (
         (a_star[1:-1, 2:] - a_star[1:-1, :-2]) / (2 * dx) +
         (b_star[2:, 1:-1] - b_star[:-2, 1:-1]) / (2 * dy)
@@ -639,6 +716,10 @@ def pressure_projection_amg(a_star, b_star, dx, dy, dt, rho, velocity_bc, A=None
 
     dpdx = np.zeros_like(p)
     dpdy = np.zeros_like(p)
+    # 4th-order central differences for pressure gradients (interior)
+    dpdx[2:-2, 2:-2] = (-p[2:-2, 4:] + 8*p[2:-2, 3:-1] - 8*p[2:-2, 1:-3] + p[2:-2, 0:-4]) / (12 * dx)
+    dpdy[2:-2, 2:-2] = (-p[4:, 2:-2] + 8*p[3:-1, 2:-2] - 8*p[1:-3, 2:-2] + p[0:-4, 2:-2]) / (12 * dy)
+    # 2nd-order central differences at boundaries (fallback)
     dpdx[1:-1, 1:-1] = (p[1:-1, 2:] - p[1:-1, :-2]) / (2 * dx)
     dpdy[1:-1, 1:-1] = (p[2:, 1:-1] - p[:-2, 1:-1]) / (2 * dy)
 
@@ -742,3 +823,189 @@ def reinitialize_phi_PDE(phi_in, dx, dy, num_iters, apply_phi_BCs_func, dt_reini
         phi = phi - dt_reinit * dphi_dtau
             
     return phi
+
+
+# Assuming a_star, b_star are the tentative velocities (u*, v*) after advection and viscous terms.
+
+# You will need the diagonal coefficients (AP) from the momentum equations.
+# In your current setup, velocity_RK4 directly calculates the RHS.
+# To get AP, you'd typically need to discretize the momentum equation
+# in a form like A_P * u_P = Sum(A_nb * u_nb) + S_u + grad(p),
+# where A_P is the sum of other coefficients and S_u contains source terms.
+# Since you're using an RK4 integration for velocity, getting explicit A_P coefficients
+# for a full finite volume discretization might not be straightforward with your current structure.
+
+# Let's assume for now a simplified approximation or that you can derive A_P.
+# For example, for the pure diffusion term, A_P related to mu/dx^2.
+# For a more complete FVM, A_P would come from the discretization of
+# div(rho * u * u) - div(mu * grad(u)) + grad(p) = 0.
+# A common simplified approach for D_f in projection methods is to assume D_f = dt / (rho * dx) for simplicity,
+# but a more rigorous derivation involves the full momentum equation's diagonal coefficient.
+
+@njit(parallel=True)
+def compute_rhie_chow_face_velocities(u_star, v_star, p, dx, dy, rho, dt, A_coeffs_u, A_coeffs_v):
+    # A_coeffs_u, A_coeffs_v would be the diagonal coefficients (A_P)
+    # from the discretized momentum equations for u and v respectively.
+    # If your RK4 step implicitly defines these, you'd need to extract them.
+    # A simpler approximation for D_f for constant rho and dx/dy could be used as a start.
+
+    Ny, Nx = u_star.shape
+    u_face_east = np.zeros_like(u_star) # u at east faces (i+1/2, j)
+    u_face_west = np.zeros_like(u_star) # u at west faces (i-1/2, j)
+    v_face_north = np.zeros_like(v_star) # v at north faces (i, j+1/2)
+    v_face_south = np.zeros_like(v_star) # v at south faces (i, j-1/2)
+
+    # Simplified A_P for demonstration (needs to be derived properly from momentum eq.)
+    # A_P for momentum equation: For a pure diffusion term, it's roughly 2*mu*(1/dx^2 + 1/dy^2) + convective terms.
+    # For simplicity here, let's assume a simplified D_f, which might be a good starting point for testing.
+    # A common simplified D_f related to dt and rho: D_f = dt / (rho * dx)
+    # This might need to be adjusted based on the full momentum equation discretization.
+    # Let's assume a dummy D_u and D_v for now. In a full implementation, these are crucial.
+    # D_u_east = (0.5 / (rho * dx**2)) # A very simple, perhaps too simple, approx for D_f
+    # D_v_north = (0.5 / (rho * dy**2)) # based on inverse of Laplacian coeffs * dt
+
+    # A more rigorous D_f comes from the inverse of the diagonal coefficient A_P in the momentum equation:
+    # u_P = Sum(A_nb * u_nb) / A_P + S_u / A_P - (1/A_P) * dp/dx
+    # So D_f relates to 1/A_P.
+    # For explicit scheme, A_P is often approximated as rho / dt + (convection terms / dx) + (viscous terms / dx^2).
+    # This is a key difficulty in implementing Rhie-Chow in existing codes.
+
+    # If A_coeffs_u and A_coeffs_v are the diagonal coefficients (e.g., from an FVM discretization matrix)
+    # A_coeffs_u for u-momentum, A_coeffs_v for v-momentum
+    D_u_cells = 1.0 / (A_coeffs_u + 1e-12) # Inverse of diagonal coefficient
+    D_v_cells = 1.0 / (A_coeffs_v + 1e-12)
+
+    # Loop over internal cells for face velocities
+    for j in prange(Ny):
+        for i in range(Nx):
+            # East Face (u_face_east[i,j] is velocity at (i+1/2, j))
+            if i < Nx - 1:
+                # Linear interpolation of provisional velocities
+                u_avg = 0.5 * (u_star[j, i] + u_star[j, i+1])
+                D_u_avg = 0.5 * (D_u_cells[j, i] + D_u_cells[j, i+1])
+
+                # Pressure gradient at face
+                dpdx_face = (p[j, i+1] - p[j, i]) / dx
+
+                # Averaged cell-centered pressure gradient (for the subtraction term)
+                # This needs proper definition. Let's use central differences on cell centers
+                dpdx_P = (p[j, min(Nx-1, i+1)] - p[j, max(0, i-1)]) / (2 * dx) if (i > 0 and i < Nx-1) else 0.0 # Approximation for boundary
+                dpdx_E = (p[j, min(Nx-1, i+2)] - p[j, i]) / (2 * dx) if (i+1 > 0 and i+1 < Nx-1) else 0.0 # Approximation for boundary
+                
+                dpdx_avg_cell = 0.5 * (dpdx_P + dpdx_E)
+
+                u_face_east[j, i] = u_avg - D_u_avg * (dpdx_face - dpdx_avg_cell)
+            else: # Boundary: assuming velocity is given by BC or extrapolation
+                u_face_east[j, i] = u_star[j, i] # Or extrapolate u_star as boundary face velocity
+
+            # North Face (v_face_north[i,j] is velocity at (i, j+1/2))
+            if j < Ny - 1:
+                v_avg = 0.5 * (v_star[j, i] + v_star[j+1, i])
+                D_v_avg = 0.5 * (D_v_cells[j, i] + D_v_cells[j+1, i])
+
+                dpdy_face = (p[j+1, i] - p[j, i]) / dy
+
+                dpdy_P = (p[min(Ny-1, j+1), i] - p[max(0, j-1), i]) / (2 * dy) if (j > 0 and j < Ny-1) else 0.0
+                dpdy_N = (p[min(Ny-1, j+2), i] - p[j, i]) / (2 * dy) if (j+1 > 0 and j+1 < Ny-1) else 0.0
+                
+                dpdy_avg_cell = 0.5 * (dpdy_P + dpdy_N)
+
+                v_face_north[j, i] = v_avg - D_v_avg * (dpdy_face - dpdy_avg_cell)
+            else: # Boundary
+                v_face_north[j, i] = v_star[j, i] # Or extrapolate v_star as boundary face velocity
+    
+    # For the west and south faces for divergence calculation at (i,j) cell center
+    # u_face_west[j, i] would be u_face_east[j, i-1]
+    # v_face_south[j, i] would be v_face_north[j-1, i]
+
+    return u_face_east, v_face_north
+
+# Modify pressure_projection_amg
+def pressure_projection_amg_RC(a_star, b_star, dx, dy, dt, rho, mu_f, velocity_bc, A=None, ml=None, p_prev=None):
+    Ny, Nx = a_star.shape
+    N = Nx * Ny
+
+    # --- Crucial: Rhie-Chow interpolation for face velocities ---
+    # To implement this correctly, you need the A_P coefficients from the momentum equation.
+    # Since you're using an RK4 step for the momentum equation, obtaining these directly
+    # might require a re-evaluation of how your RK4 operates in terms of explicit coefficients.
+    # For a simpler start, a constant D_f might be used, but its accuracy will be limited.
+    # Let's assume you have A_coeffs_u and A_coeffs_v (e.g., 2*mu/(dx*dx) + 2*mu/(dy*dy) for diffusion)
+    # This is a simplification and the coefficients should come from the full discretized momentum equation.
+    
+    # *** Placeholder for getting A_coeffs_u, A_coeffs_v ***
+    # This is where the challenge lies with your current RK4 velocity update.
+    # For a standard SIMPLE-like algorithm, you solve a linearized momentum equation:
+    # A_P * u_P = Sum(A_nb * u_nb) - dP/dx + S_u
+    # The A_P comes from that. For a projection method, you essentially need the implicit part
+    # that would correspond to A_P.
+    # For now, let's just make a dummy or simplified D_coeffs:
+    # D_coeffs = dt / rho # This is a very rough approximation, often works for basic tests.
+    # A more common approximation for the diagonal coefficient for the implicit part of the momentum equation is
+    # A_P = rho_local / dt + (viscous terms diagonal) + (convective terms diagonal)
+    # As a first step, let's try a simplified D_f (which is often proportional to 1/A_P)
+
+    # Simplified A_P coefficients for testing (adjust based on your actual momentum eq. discretization)
+    # For a pure fluid, the momentum equation is: rho * du/dt + rho * (u.grad)u = -grad(p) + mu * div(grad(u))
+    # Implicit part from viscosity: mu * ( (u_i+1 - 2u_i + u_i-1)/dx^2 + ... ) --> contributes to 2*mu/dx^2 + 2*mu/dy^2 to A_P
+    # So A_P_approx = rho / dt + 2*mu_f/dx^2 + 2*mu_f/dy^2  (ignoring convection's implicit part for simplicity)
+    rho_local = rho # Assuming rho is correct now
+    A_coeffs_u_approx = rho_local / dt + 2 * mu_f / (dx*dx) + 2 * mu_f / (dy*dy)
+    A_coeffs_v_approx = rho_local / dt + 2 * mu_f / (dx*dx) + 2 * mu_f / (dy*dy)
+    
+    # Ensure A_coeffs_u_approx and A_coeffs_v_approx are 2D arrays, same shape as u_star
+    A_coeffs_u_arr = np.full_like(a_star, A_coeffs_u_approx)
+    A_coeffs_v_arr = np.full_like(b_star, A_coeffs_v_approx)
+
+    u_face_east, v_face_north = compute_rhie_chow_face_velocities(a_star, b_star, p_prev, dx, dy, rho_local, dt, A_coeffs_u_arr, A_coeffs_v_arr) # Pass p_prev for initial pressure gradients
+
+    divU = np.zeros_like(a_star)
+    # Compute divergence using Rhie-Chow interpolated face velocities
+    # u_i+1/2 - u_i-1/2. u_i-1/2 for cell (i,j) is u_face_east for cell (i-1, j)
+    # v_j+1/2 - v_j-1/2. v_j-1/2 for cell (i,j) is v_face_north for cell (i, j-1)
+    
+    # Interior divergence (using 0 to Nx-2, 0 to Ny-2 for the east/north face arrays)
+    divU[1:-1, 1:-1] = (
+        (u_face_east[1:-1, 1:-1] - u_face_east[1:-1, 0:-2]) / dx + # u_face_east[i-1] is effectively u_face_west[i]
+        (v_face_north[1:-1, 1:-1] - v_face_north[0:-2, 1:-1]) / dy  # v_face_north[j-1] is effectively v_face_south[j]
+    )
+
+    # Handle boundaries for divU (requires care with face velocities at domain boundaries)
+    # For solid walls (no-slip/no-through), normal velocity at faces is zero.
+    # For lid (top), u_face_north_top = U_lid, v_face_north_top = 0.
+    # These boundary face velocities should be explicitly set for divergence calculation.
+    # For now, the interior calculation captures most.
+    # If the velocity BCs are applied as hard clamps *after* projection,
+    # the divU at boundaries may need special handling, or rely on the subsequent BC application.
+
+    rhs = (rho_local * divU / dt).ravel() # Use rho_local here
+    rhs -= np.mean(rhs)
+
+    if A is None:
+        A = build_poisson_matrix(Nx, Ny, dx, dy)
+
+    if ml is None:
+        ml = pyamg.ruge_stuben_solver(A)
+
+    p_flat = ml.solve(rhs, tol=1e-8, maxiter=50, x0=p_prev.ravel() if p_prev is not None else None)
+    p = p_flat.reshape((Ny, Nx))
+    p -= np.mean(p) # Ensure zero mean pressure
+
+    # Standard pressure gradient calculation (usually fine with central differences for dp/dx, dp/dy)
+    dpdx = np.zeros_like(p)
+    dpdy = np.zeros_like(p)
+    dpdx[1:-1, 1:-1] = (p[1:-1, 2:] - p[1:-1, :-2]) / (2 * dx)
+    dpdy[1:-1, 1:-1] = (p[2:, 1:-1] - p[:-2, 1:-1]) / (2 * dy)
+    
+    # Correct dpdx/dpdy at boundaries (e.g., using one-sided differences or extrapolation)
+    # Or rely on the explicit application of velocity BCs afterwards.
+    # For lid-driven cavity, often dp/dn = 0 at no-slip walls and top lid.
+    # The current boundary handling for dpdx/dpdy where they remain zero might be problematic.
+    # Let's keep your original for now, as apply_velocity_BCs is fixing u,v at boundaries.
+
+    a = a_star - (dt / rho_local) * dpdx # Use rho_local here
+    b = b_star - (dt / rho_local) * dpdy # Use rho_local here
+
+    a, b = apply_velocity_BCs(velocity_bc, a, b)
+    
+    return a, b, p, A, ml

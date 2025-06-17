@@ -1,7 +1,17 @@
 import os
 import numpy as np
 import h5py
-from .functions import divergence_2d
+
+def divergence_2d(u, v, dx, dy):
+    """
+    Central-difference approximation of divergence of (u, v).
+    """
+    divU = np.zeros_like(u)
+    divU[1:-1,1:-1] = (
+        (u[1:-1,2:] - u[1:-1,:-2]) / (2*dx) +
+        (v[2:,1:-1] - v[:-2,1:-1]) / (2*dy)
+    )
+    return divU
 
 def output_simulation_data(dx, dy, phi, solid_mask, X1, X2, a, b, p, vis_output_freq, directory_name, step, dt, sigma_sxx, sigma_sxy, sigma_syy, J):
     if step % vis_output_freq == 0 or step == 1:
