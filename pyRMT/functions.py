@@ -327,7 +327,7 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, p, eta_s=0.0):
 
     # sigma = -p_solid[:, None, None] * I_expand + mu_s * (FFt)
     # sigma = mu_s * (FFt - (1/3)*(trace_FFt + 1)[:, None, None] * I_expand)
-    sigma = mu_s * (FFt - I_expand)
+    sigma = (mu_s / J_temp)[:, None, None] * (FFt) + kappa * (np.log(J_temp))[:, None, None] * I_expand
 
     sxx[idxs] = sigma[:, 0, 0]
     sxy[idxs] = sigma[:, 0, 1]  # Note: correct ordering for symmetric stress

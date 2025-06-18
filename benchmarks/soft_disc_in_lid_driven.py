@@ -75,7 +75,7 @@ if __name__ == "__main__":
     # --------------------------
     # Physical Properties
     # --------------------------
-    mu_s, kappa, rho_s, eta_s = 0.1, 0.01, 1.0, 0.01
+    mu_s, kappa, rho_s, eta_s = 0.1, 1.0, 1.0, 0.01
     mu_f, rho_f = 0.01, 1.0
     w_t = 2 * dx
     
@@ -102,10 +102,10 @@ if __name__ == "__main__":
 
     for step in range(1, max_steps + 1):
         dt = compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s)
-        dt *= 0.8
+        # dt *= 0.8
 
         phi = rebuild_phi_from_reference_map(X1, X2, phi_init)
-        phi = reinitialize_phi_PDE(phi, dx, dy, num_iters=200, apply_phi_BCs_func=None, dt_reinit_factor=0.1)
+        phi = reinitialize_phi_PDE(phi, dx, dy, num_iters=50, apply_phi_BCs_func=None, dt_reinit_factor=0.1)
 
         solid_mask = (phi <= 0).astype(float)
 
