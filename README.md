@@ -29,3 +29,18 @@ Verification of the fluid solver with lid-driven fluid flow:
 ## License
 
 This project is licensed under the MIT License.
+
+## References
+1. Suhas S. Jain, Ken Kamrin, Ali Mani, *A conservative and non-dissipative Eulerian formulation for the simulation of soft solids in fluids*, Journal
+   of Computational Physics, **399**, 108922 (2019),
+   [https://doi.org/10.1016/j.jcp.2019.108922](https://doi.org/10.1016/j.jcp.2019.108922)
+
+4. Ken Kamrin, Chris H. Rycroft, and Jean-Christophe Nave, *Reference map
+   technique for finite-strain elasticity and fluid–solid interaction*, Journal
+   of the Mechanics and Physics of Solids **60**, 1952–1969 (2012).
+   [doi:10.1016/j.jmps.2012.06.003](https://doi.org/10.1016/j.jmps.2012.06.003)
+
+5. Boris Valkov, Chris H. Rycroft, and Ken Kamrin, *Eulerian method for
+   multiphase interactions of soft solid bodies in fluids*, Journal of Applied
+   Mechanics **82**, 041011 (2015).
+   [doi:10.1115/1.4029765](https://doi.org/10.1115/1.4029765)
