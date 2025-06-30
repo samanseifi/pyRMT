@@ -1,5 +1,5 @@
 # pyRMT
-pyRMT is a Python package for simulating Fluid-Structure Interaction (FSI) in 2D using the Reference Map Technique (RMT). It includes a set of benchmark problems to validate the accuracy of its methods. The main features of the formulation are:
+pyRMT is a research Python code for simulating Fluid-Structure Interaction (FSI) in 2D using the Reference Map Technique (RMT). It includes a set of benchmark problems to validate the accuracy of its methods. The main methods and scehemes used are:
 
 - Discretization on a collocated grid
 - Semi-Lagrangian advection of the reference map with RK4 integration
