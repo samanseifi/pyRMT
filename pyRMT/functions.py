@@ -353,7 +353,6 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, p, eta_s=0.0):
 
     return sxx, sxy, syy, J
 
-
 def heaviside_smooth_alt(x, w_t):
     """
     Smooth Heaviside function with a transition width of w_t.
@@ -406,7 +405,6 @@ def velocity_RK4(u, v, p, X1, X2, velocity_bc, mu_s, kappa, eta_s , dx, dy, dt, 
     u_new, v_new = apply_velocity_BCs(velocity_bc, u_new, v_new)
 
     return u_new, v_new
-
 
 @njit
 def grad_x_4th(f, dx):
@@ -484,7 +482,6 @@ def lap_4th(f, dx, dy):
 
     lap = d2f_dx2 + d2f_dy2
     return lap
-
 
 def velocity_rhs_blended(u, v, p,
                          sigma_sxx_s, sigma_sxy_s, sigma_syy_s,
@@ -604,8 +601,7 @@ def velocity_rhs_blended(u, v, p,
     # --- Final RHS ---
     rhs_u = u_adv + ((1 - H) * div_solid_x + H *(u_lap) + jump_x) / (rho_local + 1e-12)
     rhs_v = v_adv + ((1 - H) * div_solid_y + H *(v_lap) + jump_y) / (rho_local + 1e-12)
-
-
+                             
     return rhs_u, rhs_v
 
 def apply_velocity_BCs(bc, u, v):
@@ -769,22 +765,13 @@ def reinitialize_phi_PDE(phi_in, dx, dy, num_iters, apply_phi_BCs_func, dt_reini
         np.ndarray: The reinitialized level set function phi.
     """
     phi = phi_in.copy()
-    
-    # S(phi_initial): Determine the sign of the initial phi field.
-    # np.sign(0) is 0, which correctly identifies interface points.
     phi_initial_sign = phi_in / np.sqrt(phi_in**2 + dx**2)  # Avoid division by zero, ensure no NaNs.
-
-    # Pseudo-timestep for the reinitialization PDE
     dt_reinit = dt_reinit_factor * min(dx, dy)
 
     for _ in range(num_iters):
-        # Pad phi to handle boundaries when computing finite differences.
-        # 'edge' mode replicates border values, a common approach if specific ghost cell
-        # values based on complex BCs are not set up prior to gradient calculation.
         phi_padded = np.pad(phi, 1, mode='edge') 
         
-        # Calculate forward and backward differences from the padded array.
-        # These correspond to differences on the original grid dimensions.        
+        # Calculate forward and backward differences from the padded array.       
         Dx_m = (phi_padded[1:-1, 1:-1] - phi_padded[1:-1, 0:-2]) / dx # (Backward difference in x at point i,j)
         Dx_p = (phi_padded[1:-1, 2:]   - phi_padded[1:-1, 1:-1]) / dx # (Forward difference in x at point i,j)
         Dy_m = (phi_padded[1:-1, 1:-1] - phi_padded[0:-2, 1:-1]) / dy # (Backward difference in y at point i,j)
@@ -807,13 +794,6 @@ def reinitialize_phi_PDE(phi_in, dx, dy, num_iters, apply_phi_BCs_func, dt_reini
         grad_phi_x_sq[mask_neg] = np.maximum( np.minimum(Dx_m[mask_neg], 0.)**2,  np.maximum(Dx_p[mask_neg], 0.)**2 )
         grad_phi_y_sq[mask_neg] = np.maximum( np.minimum(Dy_m[mask_neg], 0.)**2,  np.maximum(Dy_p[mask_neg], 0.)**2 )
         
-        # For S(phi_initial) == 0 (interface points themselves):
-        # grad_phi_x_sq and grad_phi_y_sq remain 0 at these points.
-        # This means grad_phi_mag will be 0 for these points.
-        # The update term S(phi_initial) * (grad_phi_mag - 1) becomes 0 * (0 - 1) = 0.
-        # Thus, interface points (where phi_initial_sign == 0) are kept fixed during reinitialization.
-        # This is a desired behavior.
-
         grad_phi_mag = np.sqrt(grad_phi_x_sq + grad_phi_y_sq)
         
         # PDE term: S(phi_initial) * ( |grad(phi)| - 1 )
@@ -824,54 +804,14 @@ def reinitialize_phi_PDE(phi_in, dx, dy, num_iters, apply_phi_BCs_func, dt_reini
             
     return phi
 
-
-# Assuming a_star, b_star are the tentative velocities (u*, v*) after advection and viscous terms.
-
-# You will need the diagonal coefficients (AP) from the momentum equations.
-# In your current setup, velocity_RK4 directly calculates the RHS.
-# To get AP, you'd typically need to discretize the momentum equation
-# in a form like A_P * u_P = Sum(A_nb * u_nb) + S_u + grad(p),
-# where A_P is the sum of other coefficients and S_u contains source terms.
-# Since you're using an RK4 integration for velocity, getting explicit A_P coefficients
-# for a full finite volume discretization might not be straightforward with your current structure.
-
-# Let's assume for now a simplified approximation or that you can derive A_P.
-# For example, for the pure diffusion term, A_P related to mu/dx^2.
-# For a more complete FVM, A_P would come from the discretization of
-# div(rho * u * u) - div(mu * grad(u)) + grad(p) = 0.
-# A common simplified approach for D_f in projection methods is to assume D_f = dt / (rho * dx) for simplicity,
-# but a more rigorous derivation involves the full momentum equation's diagonal coefficient.
-
 @njit(parallel=True)
 def compute_rhie_chow_face_velocities(u_star, v_star, p, dx, dy, rho, dt, A_coeffs_u, A_coeffs_v):
-    # A_coeffs_u, A_coeffs_v would be the diagonal coefficients (A_P)
-    # from the discretized momentum equations for u and v respectively.
-    # If your RK4 step implicitly defines these, you'd need to extract them.
-    # A simpler approximation for D_f for constant rho and dx/dy could be used as a start.
-
     Ny, Nx = u_star.shape
     u_face_east = np.zeros_like(u_star) # u at east faces (i+1/2, j)
     u_face_west = np.zeros_like(u_star) # u at west faces (i-1/2, j)
     v_face_north = np.zeros_like(v_star) # v at north faces (i, j+1/2)
     v_face_south = np.zeros_like(v_star) # v at south faces (i, j-1/2)
 
-    # Simplified A_P for demonstration (needs to be derived properly from momentum eq.)
-    # A_P for momentum equation: For a pure diffusion term, it's roughly 2*mu*(1/dx^2 + 1/dy^2) + convective terms.
-    # For simplicity here, let's assume a simplified D_f, which might be a good starting point for testing.
-    # A common simplified D_f related to dt and rho: D_f = dt / (rho * dx)
-    # This might need to be adjusted based on the full momentum equation discretization.
-    # Let's assume a dummy D_u and D_v for now. In a full implementation, these are crucial.
-    # D_u_east = (0.5 / (rho * dx**2)) # A very simple, perhaps too simple, approx for D_f
-    # D_v_north = (0.5 / (rho * dy**2)) # based on inverse of Laplacian coeffs * dt
-
-    # A more rigorous D_f comes from the inverse of the diagonal coefficient A_P in the momentum equation:
-    # u_P = Sum(A_nb * u_nb) / A_P + S_u / A_P - (1/A_P) * dp/dx
-    # So D_f relates to 1/A_P.
-    # For explicit scheme, A_P is often approximated as rho / dt + (convection terms / dx) + (viscous terms / dx^2).
-    # This is a key difficulty in implementing Rhie-Chow in existing codes.
-
-    # If A_coeffs_u and A_coeffs_v are the diagonal coefficients (e.g., from an FVM discretization matrix)
-    # A_coeffs_u for u-momentum, A_coeffs_v for v-momentum
     D_u_cells = 1.0 / (A_coeffs_u + 1e-12) # Inverse of diagonal coefficient
     D_v_cells = 1.0 / (A_coeffs_v + 1e-12)
 
@@ -925,30 +865,6 @@ def pressure_projection_amg_RC(a_star, b_star, dx, dy, dt, rho, mu_f, velocity_b
     Ny, Nx = a_star.shape
     N = Nx * Ny
 
-    # --- Crucial: Rhie-Chow interpolation for face velocities ---
-    # To implement this correctly, you need the A_P coefficients from the momentum equation.
-    # Since you're using an RK4 step for the momentum equation, obtaining these directly
-    # might require a re-evaluation of how your RK4 operates in terms of explicit coefficients.
-    # For a simpler start, a constant D_f might be used, but its accuracy will be limited.
-    # Let's assume you have A_coeffs_u and A_coeffs_v (e.g., 2*mu/(dx*dx) + 2*mu/(dy*dy) for diffusion)
-    # This is a simplification and the coefficients should come from the full discretized momentum equation.
-    
-    # *** Placeholder for getting A_coeffs_u, A_coeffs_v ***
-    # This is where the challenge lies with your current RK4 velocity update.
-    # For a standard SIMPLE-like algorithm, you solve a linearized momentum equation:
-    # A_P * u_P = Sum(A_nb * u_nb) - dP/dx + S_u
-    # The A_P comes from that. For a projection method, you essentially need the implicit part
-    # that would correspond to A_P.
-    # For now, let's just make a dummy or simplified D_coeffs:
-    # D_coeffs = dt / rho # This is a very rough approximation, often works for basic tests.
-    # A more common approximation for the diagonal coefficient for the implicit part of the momentum equation is
-    # A_P = rho_local / dt + (viscous terms diagonal) + (convective terms diagonal)
-    # As a first step, let's try a simplified D_f (which is often proportional to 1/A_P)
-
-    # Simplified A_P coefficients for testing (adjust based on your actual momentum eq. discretization)
-    # For a pure fluid, the momentum equation is: rho * du/dt + rho * (u.grad)u = -grad(p) + mu * div(grad(u))
-    # Implicit part from viscosity: mu * ( (u_i+1 - 2u_i + u_i-1)/dx^2 + ... ) --> contributes to 2*mu/dx^2 + 2*mu/dy^2 to A_P
-    # So A_P_approx = rho / dt + 2*mu_f/dx^2 + 2*mu_f/dy^2  (ignoring convection's implicit part for simplicity)
     rho_local = rho # Assuming rho is correct now
     A_coeffs_u_approx = rho_local / dt + 2 * mu_f / (dx*dx) + 2 * mu_f / (dy*dy)
     A_coeffs_v_approx = rho_local / dt + 2 * mu_f / (dx*dx) + 2 * mu_f / (dy*dy)
@@ -970,14 +886,6 @@ def pressure_projection_amg_RC(a_star, b_star, dx, dy, dt, rho, mu_f, velocity_b
         (v_face_north[1:-1, 1:-1] - v_face_north[0:-2, 1:-1]) / dy  # v_face_north[j-1] is effectively v_face_south[j]
     )
 
-    # Handle boundaries for divU (requires care with face velocities at domain boundaries)
-    # For solid walls (no-slip/no-through), normal velocity at faces is zero.
-    # For lid (top), u_face_north_top = U_lid, v_face_north_top = 0.
-    # These boundary face velocities should be explicitly set for divergence calculation.
-    # For now, the interior calculation captures most.
-    # If the velocity BCs are applied as hard clamps *after* projection,
-    # the divU at boundaries may need special handling, or rely on the subsequent BC application.
-
     rhs = (rho_local * divU / dt).ravel() # Use rho_local here
     rhs -= np.mean(rhs)
 
@@ -996,12 +904,6 @@ def pressure_projection_amg_RC(a_star, b_star, dx, dy, dt, rho, mu_f, velocity_b
     dpdy = np.zeros_like(p)
     dpdx[1:-1, 1:-1] = (p[1:-1, 2:] - p[1:-1, :-2]) / (2 * dx)
     dpdy[1:-1, 1:-1] = (p[2:, 1:-1] - p[:-2, 1:-1]) / (2 * dy)
-    
-    # Correct dpdx/dpdy at boundaries (e.g., using one-sided differences or extrapolation)
-    # Or rely on the explicit application of velocity BCs afterwards.
-    # For lid-driven cavity, often dp/dn = 0 at no-slip walls and top lid.
-    # The current boundary handling for dpdx/dpdy where they remain zero might be problematic.
-    # Let's keep your original for now, as apply_velocity_BCs is fixing u,v at boundaries.
 
     a = a_star - (dt / rho_local) * dpdx # Use rho_local here
     b = b_star - (dt / rho_local) * dpdy # Use rho_local here
