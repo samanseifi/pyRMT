@@ -65,16 +65,19 @@ if __name__ == "__main__":
     # Numerical Method Params
     # --------------------------
     CFL = 0.2
-    dt_min_cap = 1e-3
-    max_steps = 100000
+    dt_min_cap = 1e-2
+    
+    print("Reynolds number: ", (rho_f * 1.0 * Lx) / mu_f)
+    max_steps = 200000
     
     # Precompute Poisson matrix for pressure projection
     A = build_poisson_matrix(Nx, Ny, dx, dy)
     
     vis_output_freq = 100
     
-    directory_name = "output_lid_driven_Re_1000"
-
+    directory_name = "output_lid_driven_Re_1000_3"
+    ml_obj = None
+    
     for step in range(1, max_steps + 1):
         dt = compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s)
         dt *= 0.1
@@ -83,8 +86,7 @@ if __name__ == "__main__":
 
         sigma_sxx, sigma_sxy, sigma_syy, J = compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, eta_s)
 
-
-        a, b, p, A, ml = pressure_projection_amg(a_star, b_star, dx, dy, dt, rho_local, lid_bc, A=A, ml=None, p_prev=p)
-
+        a, b, p, A, ml_obj = pressure_projection_amg_RC(a_star, b_star, dx, dy, dt, rho_local, mu_f, lid_bc, A=A, ml=ml_obj, p_prev=p)
+        
         output_simulation_data(dx, dy, phi, solid_mask, X1, X2, a, b, p, vis_output_freq, directory_name, step, dt, sigma_sxx, sigma_sxy, sigma_syy, J)
 

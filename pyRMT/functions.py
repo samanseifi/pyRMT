@@ -314,13 +314,13 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, p, eta_s=0.0):
     FFt = np.einsum('nij,njk->nik', F, Ft)
     
     # calculate trace of FFt
-    trace_FFt = FFt[:, 0, 0] + FFt[:, 1, 1]
+    # trace_FFt = FFt[:, 0, 0] + FFt[:, 1, 1]
     
     I = np.eye(2)
     I_expand = np.broadcast_to(I, FFt.shape)
 
     # Use pressure at the solid points as incompressibility Lagrange multiplier
-    p_solid = p[idxs]
+    # p_solid = p[idxs]
 
     J_temp = np.linalg.det(F)
     J[idxs] = J_temp
@@ -599,8 +599,8 @@ def velocity_rhs_blended(u, v, p,
     jump_y = (sigma_sxy_f - sigma_sxy_s) * dH_dx + (sigma_syy_f - sigma_syy_s) * dH_dy
 
     # --- Final RHS ---
-    rhs_u = u_adv + ((1 - H) * div_solid_x + H *(u_lap) + jump_x) / (rho_local + 1e-12)
-    rhs_v = v_adv + ((1 - H) * div_solid_y + H *(v_lap) + jump_y) / (rho_local + 1e-12)
+    rhs_u = u_adv + ((1 - H) * div_solid_x + H *(u_lap) + jump_x - dp_dx) / (rho_local + 1e-12)
+    rhs_v = v_adv + ((1 - H) * div_solid_y + H *(v_lap) + jump_y - dp_dy) / (rho_local + 1e-12)
                              
     return rhs_u, rhs_v
 
@@ -862,52 +862,63 @@ def compute_rhie_chow_face_velocities(u_star, v_star, p, dx, dy, rho, dt, A_coef
 
 # Modify pressure_projection_amg
 def pressure_projection_amg_RC(a_star, b_star, dx, dy, dt, rho, mu_f, velocity_bc, A=None, ml=None, p_prev=None):
+    """
+    Solves for pressure correction phi:
+        nabla^2 phi = (rho/dt) * div(u*)
+    Then updates:
+        u_new = u* - (dt/rho) * grad(phi)
+        p_new = p_prev + phi
+    """
     Ny, Nx = a_star.shape
-    N = Nx * Ny
-
-    rho_local = rho # Assuming rho is correct now
+    
+    # 1. Setup Coefficients
+    rho_local = rho 
     A_coeffs_u_approx = rho_local / dt + 2 * mu_f / (dx*dx) + 2 * mu_f / (dy*dy)
     A_coeffs_v_approx = rho_local / dt + 2 * mu_f / (dx*dx) + 2 * mu_f / (dy*dy)
-    
-    # Ensure A_coeffs_u_approx and A_coeffs_v_approx are 2D arrays, same shape as u_star
     A_coeffs_u_arr = np.full_like(a_star, A_coeffs_u_approx)
     A_coeffs_v_arr = np.full_like(b_star, A_coeffs_v_approx)
 
-    u_face_east, v_face_north = compute_rhie_chow_face_velocities(a_star, b_star, p_prev, dx, dy, rho_local, dt, A_coeffs_u_arr, A_coeffs_v_arr) # Pass p_prev for initial pressure gradients
+    # 2. Compute Rhie-Chow Face Velocities
+    # Note: We pass p_prev because u* was computed using p_prev gradients
+    u_face_east, v_face_north = compute_rhie_chow_face_velocities(a_star, b_star, p_prev, dx, dy, rho_local, dt, A_coeffs_u_arr, A_coeffs_v_arr)
 
+    # 3. Compute Divergence of u*
     divU = np.zeros_like(a_star)
-    # Compute divergence using Rhie-Chow interpolated face velocities
-    # u_i+1/2 - u_i-1/2. u_i-1/2 for cell (i,j) is u_face_east for cell (i-1, j)
-    # v_j+1/2 - v_j-1/2. v_j-1/2 for cell (i,j) is v_face_north for cell (i, j-1)
-    
-    # Interior divergence (using 0 to Nx-2, 0 to Ny-2 for the east/north face arrays)
     divU[1:-1, 1:-1] = (
-        (u_face_east[1:-1, 1:-1] - u_face_east[1:-1, 0:-2]) / dx + # u_face_east[i-1] is effectively u_face_west[i]
-        (v_face_north[1:-1, 1:-1] - v_face_north[0:-2, 1:-1]) / dy  # v_face_north[j-1] is effectively v_face_south[j]
+        (u_face_east[1:-1, 1:-1] - u_face_east[1:-1, 0:-2]) / dx +
+        (v_face_north[1:-1, 1:-1] - v_face_north[0:-2, 1:-1]) / dy 
     )
 
-    rhs = (rho_local * divU / dt).ravel() # Use rho_local here
+    rhs = (rho_local * divU / dt).ravel()
     rhs -= np.mean(rhs)
 
+    # 4. Solve for Correction (phi), NOT full pressure
     if A is None:
         A = build_poisson_matrix(Nx, Ny, dx, dy)
-
     if ml is None:
         ml = pyamg.ruge_stuben_solver(A)
 
-    p_flat = ml.solve(rhs, tol=1e-8, maxiter=50, x0=p_prev.ravel() if p_prev is not None else None)
-    p = p_flat.reshape((Ny, Nx))
-    p -= np.mean(p) # Ensure zero mean pressure
+    # Use 0 as initial guess for correction, not p_prev
+    phi_flat = ml.solve(rhs, tol=1e-8, maxiter=50, x0=np.zeros_like(rhs))
+    phi = phi_flat.reshape((Ny, Nx))
+    phi -= np.mean(phi)
 
-    # Standard pressure gradient calculation (usually fine with central differences for dp/dx, dp/dy)
-    dpdx = np.zeros_like(p)
-    dpdy = np.zeros_like(p)
-    dpdx[1:-1, 1:-1] = (p[1:-1, 2:] - p[1:-1, :-2]) / (2 * dx)
-    dpdy[1:-1, 1:-1] = (p[2:, 1:-1] - p[:-2, 1:-1]) / (2 * dy)
+    # 5. Compute Gradient of Correction (grad_phi)
+    dphi_dx = np.zeros_like(phi)
+    dphi_dy = np.zeros_like(phi)
+    dphi_dx[1:-1, 1:-1] = (phi[1:-1, 2:] - phi[1:-1, :-2]) / (2 * dx)
+    dphi_dy[1:-1, 1:-1] = (phi[2:, 1:-1] - phi[:-2, 1:-1]) / (2 * dy)
 
-    a = a_star - (dt / rho_local) * dpdx # Use rho_local here
-    b = b_star - (dt / rho_local) * dpdy # Use rho_local here
+    # 6. Update Velocity using Gradient of Correction
+    # u_new = u* - (dt/rho) * grad(phi)
+    a = a_star - (dt / rho_local) * dphi_dx
+    b = b_star - (dt / rho_local) * dphi_dy
+
+    # 7. Update Total Pressure
+    # p_new = p_prev + phi
+    p_new = p_prev + phi
+    p_new -= np.mean(p_new) # Enforce mean 0 constraint on total pressure
 
     a, b = apply_velocity_BCs(velocity_bc, a, b)
     
-    return a, b, p, A, ml
+    return a, b, p_new, A, ml
