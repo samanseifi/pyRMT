@@ -98,8 +98,9 @@ if __name__ == "__main__":
     
     vis_output_freq = 100
     
-    directory_name = "output_lid_driven_soft_disc"
-
+    directory_name = "output_lid_driven_soft_disc_2"
+    ml_obj = None
+    
     for step in range(1, max_steps + 1):
         dt = compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s)
         # dt *= 0.8
@@ -120,7 +121,6 @@ if __name__ == "__main__":
         H = heaviside_smooth_alt(phi, w_t)
         rho_local = (1 - H) * rho_s + H * rho_f
 
-        a, b, p, A, ml = pressure_projection_amg_RC(a_star, b_star, dx, dy, dt, rho_local, mu_f, lid_bc, A=A, ml=None, p_prev=p)
-
+        a, b, p, A, ml_obj = pressure_projection_amg_RC(a_star, b_star, dx, dy, dt, rho_local, mu_f, lid_bc, A=A, ml=ml_obj, p_prev=p)
         output_simulation_data(dx, dy, phi, solid_mask, X1, X2, a, b, p, vis_output_freq, directory_name, step, dt, sigma_sxx, sigma_sxy, sigma_syy, J)
 
