@@ -49,6 +49,7 @@ if __name__ == "__main__":
     mu_s, kappa, rho_s, eta_s = 0.0, 0.0, 0.0, 0.0
     mu_f, rho_f = 0.001, 1.0
     w_t = 4 * dx
+    gamma = 0.0  # Surface tension coefficient
     
     rho_local = 1.0  # Local density for solid
     phi = np.ones((Nx, Ny))  # Placeholder for solid mask
@@ -79,14 +80,26 @@ if __name__ == "__main__":
     ml_obj = None
     
     for step in range(1, max_steps + 1):
-        dt = compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s)
-        dt *= 0.1
+        dt = compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s, gamma, rho_f)
+        # dt *= 0.1
 
-        a_star, b_star = velocity_RK4(a, b, p, X1, X2, lid_bc, mu_s, kappa, eta_s, dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t)
-
+        a_star, b_star = velocity_RK4(a, b, p, X1, X2, lid_bc, mu_s, kappa, eta_s, dx, dy, dt, rho_s, rho_f, phi, mu_f, gamma, w_t)
+        
         sigma_sxx, sigma_sxy, sigma_syy, J = compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, eta_s)
+        
+        # a, b, p, A, ml = pressure_projection_amg_RC(a_star, b_star, dx, dy, dt, 
+        #                            rho_local, mu_f, velocity_bc=lid_bc, 
+        #                            A=A, ml=ml_obj, p_prev=p)
+        
+        a, b, p, A, ml = pressure_projection_amg(
+            a_star, b_star, dx, dy, dt,
+            rho_f,              # scalar density here
+            velocity_bc=lid_bc,
+            A=A, ml=ml_obj,
+            p_prev=p
+        )
 
-        a, b, p, A, ml_obj = pressure_projection_amg_RC(a_star, b_star, dx, dy, dt, rho_local, mu_f, lid_bc, A=A, ml=ml_obj, p_prev=p)
+       
         
         output_simulation_data(dx, dy, phi, solid_mask, X1, X2, a, b, p, vis_output_freq, directory_name, step, dt, sigma_sxx, sigma_sxy, sigma_syy, J)
 
