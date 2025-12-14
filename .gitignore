@@ -2,3 +2,34 @@ frames_*/
 frames_*/**
 *.h5
 __pycache__/
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints
+.ipynb_checkpoints/**
+# Ignore VSCode workspace settings
+.vscode/
+.vscode/**
+# Ignore Python virtual environment folders
+venv/
+venv/**
+env/
+env/**
+
+# Ignore output folders
+output_*/
+output_*/**
+# Ignore compiled Python files
+*.pyc
+*.pyo
+
+# Ignore distribution/build folders
+build/
+build/**
+dist/
+dist/**
+
+# egginfo
+*.egg-info/
+*.egg-info/**
+# Ignore coverage reports
+htmlcov/
