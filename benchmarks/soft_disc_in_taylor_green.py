@@ -1,4 +1,5 @@
 from pyRMT.functions import *
+from pyRMT.functions import _precompute_poisson_eigenvalues
 from pyRMT.output import output_simulation_data
 import numpy as np
 import os
@@ -107,8 +108,9 @@ if __name__ == "__main__":
     dt_min_cap = 1e-4
     max_steps = 10000
 
-    # Precompute Poisson matrix for pressure projection
+    # Precompute Poisson matrix and DCT eigenvalues for pressure projection
     A = build_poisson_matrix(Nx, Ny, dx, dy)
+    poisson_eigenvalues = _precompute_poisson_eigenvalues(Nx, Ny, dx, dy)
 
     vis_output_freq = 200
     directory_name = "output_taylor_green_soft_disc_1024x1024"
@@ -140,13 +142,9 @@ if __name__ == "__main__":
         )
 
         # Velocity update + projection with TG BC
-        a_star, b_star = velocity_RK4(
+        a_star, b_star, sigma_sxx, sigma_sxy, sigma_syy, J = velocity_RK4(
             a, b, p, X1, X2, tg_bc, mu_s, kappa, eta_s, dx, dy, dt,
             rho_s, rho_f, phi, mu_f, w_t, gamma
-        )
-
-        sigma_sxx, sigma_sxy, sigma_syy, J = compute_solid_stress(
-            X1, X2, dx, dy, mu_s, kappa, phi, a, b, p, eta_s
         )
 
         H = heaviside_smooth_alt(phi, w_t)
@@ -157,7 +155,8 @@ if __name__ == "__main__":
             rho_local,
             velocity_bc=tg_bc,
             A=A, ml=ml_obj,
-            p_prev=p
+            p_prev=p,
+            eigenvalues=poisson_eigenvalues
         )
 
         # Compute dissipation rate for integration (every step, not just output)

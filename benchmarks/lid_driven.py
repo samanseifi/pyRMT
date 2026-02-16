@@ -1,4 +1,5 @@
 from pyRMT.functions import *
+from pyRMT.functions import _precompute_poisson_eigenvalues
 from pyRMT.output import output_simulation_data
 import os
 import h5py
@@ -73,6 +74,7 @@ if __name__ == "__main__":
     
     # Precompute Poisson matrix for pressure projection
     A = build_poisson_matrix(Nx, Ny, dx, dy)
+    poisson_eigenvalues = _precompute_poisson_eigenvalues(Nx, Ny, dx, dy)
     
     vis_output_freq = 100
     
@@ -83,20 +85,21 @@ if __name__ == "__main__":
         dt = compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s, gamma, rho_f)
         # dt *= 0.1
 
-        a_star, b_star = velocity_RK4(a, b, p, X1, X2, lid_bc, mu_s, kappa, eta_s, dx, dy, dt, rho_s, rho_f, phi, mu_f, gamma, w_t)
-        
-        sigma_sxx, sigma_sxy, sigma_syy, J = compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, eta_s)
+        a_star, b_star, sigma_sxx, sigma_sxy, sigma_syy, J = velocity_RK4(
+            a, b, p, X1, X2, lid_bc, mu_s, kappa, eta_s, dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t, gamma
+        )
         
         # a, b, p, A, ml = pressure_projection_amg_RC(a_star, b_star, dx, dy, dt, 
         #                            rho_local, mu_f, velocity_bc=lid_bc, 
         #                            A=A, ml=ml_obj, p_prev=p)
         
-        a, b, p, A, ml = pressure_projection_amg(
+        a, b, p, A, ml_obj = pressure_projection_amg(
             a_star, b_star, dx, dy, dt,
-            rho_f,              # scalar density here
+            rho_local,
             velocity_bc=lid_bc,
             A=A, ml=ml_obj,
-            p_prev=p
+            p_prev=p,
+            eigenvalues=poisson_eigenvalues
         )
 
        
