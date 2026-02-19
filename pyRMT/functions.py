@@ -162,9 +162,9 @@ def extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, band_width, max_la
 
     return X1_ext, X2_ext
 
-def compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s, gamma, rho_f, mu_f=0.0, eta_s=0.0):
-    # 1. Solid Wave Speed
-    cs_solid = np.sqrt(mu_s / (rho_s + 1e-12))
+def compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s, gamma, rho_f, mu_f=0.0, eta_s=0.0, kappa=0.0):
+    # 1. Solid Wave Speed (P-wave: includes bulk modulus contribution)
+    cs_solid = np.sqrt((kappa + mu_s * 4.0 / 3.0) / (rho_s + 1e-12))
     dt_solid = CFL * dx / (cs_solid + 1e-14)
 
     # 2. Fluid Advection Speed
@@ -225,7 +225,7 @@ def advect_semi_lagrangian_rk4(q, a, b, X, Y, dt, dx, dy):
 
     return q_new
 
-@njit(parallel=True)
+# @njit(parallel=True)
 def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi):
     Ny, Nx = X1.shape
     sxx = np.zeros((Ny, Nx))
@@ -264,13 +264,19 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi):
                 J[j, i] = j_val
 
                 # 5. Neo-Hookean Stress Calculation
-                # sigma = (mu/J)*(B - I) + (kappa/J)*ln(J)*I
-                mu_over_j = mu_s / j_val
-                vol_term = (kappa / j_val) * np.log(j_val)
+                # sigma = (mu/J)*(B - I) + (kappa/J)*ln(Js)*I
+                mu_over_j = mu_s  / j_val
+                # vol_term = (kappa / j_val) * np.log(j_val)
+                vol_term = kappa * (j_val - 1.0)
+                
+                sxx[j, i] = mu_s * (b11) + vol_term
+                sxy[j, i] = mu_s * b12
+                syy[j, i] = mu_s * (b22) + vol_term
 
-                sxx[j, i] = mu_over_j * (b11 - 1.0) + vol_term
-                sxy[j, i] = mu_over_j * b12
-                syy[j, i] = mu_over_j * (b22 - 1.0) + vol_term
+    # apply smoothing
+    # sxx = gaussian_filter(sxx, sigma=0.5)
+    # sxy = gaussian_filter(sxy, sigma=0.5)
+    # syy = gaussian_filter(syy, sigma=0.5)
 
     return sxx, sxy, syy, J
 
@@ -314,6 +320,10 @@ def velocity_RK4(u, v, p, X1, X2, velocity_bc, mu_s, kappa, eta_s , dx, dy, dt, 
     solid_mask = (phi <= 0.0)
 
     def rhs(u_stage, v_stage):
+        # Apply BCs to intermediate stage velocities so that Laplacian,
+        # upwind, and gradient operators see correct boundary values
+        u_stage, v_stage = apply_velocity_BCs(velocity_bc, u_stage, v_stage)
+
         # Start with elastic stress
         if eta_s > 0.0 and np.any(solid_mask):
             # Add viscous damping contribution (Kelvin-Voigt)
@@ -390,53 +400,51 @@ def compute_curvature(phi, dx, dy) -> np.ndarray:
     return kappa
 
 def velocity_rhs_blended_optimized(u, v, p,
-                                   sigma_sxx_s, sigma_sxy_s, sigma_syy_s,
+                                   sigma_sxx_s_elastic, sigma_sxy_s_elastic, sigma_syy_s_elastic,
                                    dx, dy, phi, mu_f,
                                    H, dH_dx, dH_dy, rho_local,
                                    st_force_x, st_force_y):
-    # --- Advection (3rd order upwind) ---
-    u_adv = -u * diff_upwind_3rd(u, u, dx, 1) - v * diff_upwind_3rd(u, v, dy, 0)
-    v_adv = -u * diff_upwind_3rd(v, u, dx, 1) - v * diff_upwind_3rd(v, v, dy, 0)
-
-    # --- Laplacians ---
-    u_lap = lap_2nd(u, dx, dy)
-    v_lap = lap_2nd(v, dx, dy)
-
-    # --- Solid stress divergence ---
-    dsxx_dx = grad_central_x_2nd(sigma_sxx_s, dx)
-    dsxy_dy = grad_central_y_2nd(sigma_sxy_s, dy)
-    dsxy_dx = grad_central_x_2nd(sigma_sxy_s, dx)
-    dsyy_dy = grad_central_y_2nd(sigma_syy_s, dy)
-
-    div_solid_x = dsxx_dx + dsxy_dy
-    div_solid_y = dsxy_dx + dsyy_dy
-
-    # --- Fluid stress components (for jump term) ---
+    """
+    CONSERVATIVE BLENDING: Blends stress tensors before taking divergence.
+    Reference: Jain et al. (2019), Section 4.3
+    """
+    # 1. Compute Fluid Viscous Stress components (excluding pressure)
     du_dx = grad_central_x_2nd(u, dx)
     dv_dy = grad_central_y_2nd(v, dy)
     du_dy = grad_central_y_2nd(u, dy)
     dv_dx = grad_central_x_2nd(v, dx)
 
-    div_vel = du_dx + dv_dy
-    grad_div_vel_x = grad_central_x_2nd(div_vel, dx)
-    grad_div_vel_y = grad_central_y_2nd(div_vel, dy)
+    sigma_fxx = 2 * mu_f * du_dx
+    sigma_fyy = 2 * mu_f * dv_dy
+    sigma_fxy = mu_f * (du_dy + dv_dx)
 
+    # 2. Blend the Stress Tensors (Global Cauchy Stress)
+    # sigma_global = H * sigma_f + (1 - H) * sigma_s
+    # Note: Pressure is handled separately as -grad(P) in the RHS
+    sig_xx = H * sigma_fxx + (1 - H) * sigma_sxx_s_elastic
+    sig_yy = H * sigma_fyy + (1 - H) * sigma_syy_s_elastic
+    sig_xy = H * sigma_fxy + (1 - H) * sigma_sxy_s_elastic
+
+    # 3. Compute Divergence of the BLENDED stress
+    dsxx_dx = grad_central_x_2nd(sig_xx, dx)
+    dsxy_dy = grad_central_y_2nd(sig_xy, dy)
+    dsxy_dx = grad_central_x_2nd(sig_xy, dx)
+    dsyy_dy = grad_central_y_2nd(sig_yy, dy)
+
+    div_sigma_x = dsxx_dx + dsxy_dy
+    div_sigma_y = dsxy_dx + dsyy_dy
+
+    # 4. Advection (3rd order upwind)
+    u_adv = -u * diff_upwind_3rd(u, u, dx, 1) - v * diff_upwind_3rd(u, v, dy, 0)
+    v_adv = -u * diff_upwind_3rd(v, u, dx, 1) - v * diff_upwind_3rd(v, v, dy, 0)
+
+    # 5. Pressure Gradient
     dp_dx = grad_central_x_2nd(p, dx)
     dp_dy = grad_central_y_2nd(p, dy)
 
-    sigma_sxx_f = 2 * mu_f * du_dx
-    sigma_syy_f = 2 * mu_f * dv_dy
-    sigma_sxy_f = mu_f * (du_dy + dv_dx)
-
-    # --- Jump term (σ_f - σ_s) · ∇H ---
-    jump_x = (sigma_sxx_f - sigma_sxx_s) * dH_dx + (sigma_sxy_f - sigma_sxy_s) * dH_dy
-    jump_y = (sigma_sxy_f - sigma_sxy_s) * dH_dx + (sigma_syy_f - sigma_syy_s) * dH_dy
-
-    # --- Final RHS ---
-    rhs_u = u_adv + ((1 - H) * div_solid_x + H * (mu_f * (u_lap + grad_div_vel_x)) +
-                     jump_x + st_force_x - dp_dx) / (rho_local + 1e-12)
-    rhs_v = v_adv + ((1 - H) * div_solid_y + H * (mu_f * (v_lap + grad_div_vel_y)) +
-                     jump_y + st_force_y - dp_dy) / (rho_local + 1e-12)
+    # 6. Final RHS using the conservative divergence
+    rhs_u = u_adv + (div_sigma_x + st_force_x - dp_dx) / (rho_local + 1e-12)
+    rhs_v = v_adv + (div_sigma_y + st_force_y - dp_dy) / (rho_local + 1e-12)
 
     return rhs_u, rhs_v
 
@@ -500,12 +508,71 @@ def build_poisson_matrix(Nx, Ny, dx, dy):
     return A.tocsr()
 
 def _compute_divergence(a_star, b_star, dx, dy):
-    """Compute velocity divergence using 2nd-order central differences."""
+    """Compute velocity divergence using 2nd-order central differences.
+    Boundary cells are zero — consistent with Neumann BC (dp/dn=0) in the Poisson solve.
+    """
     divU = np.zeros_like(a_star)
     divU[1:-1, 1:-1] = (
         (a_star[1:-1, 2:] - a_star[1:-1, :-2]) / (2 * dx) +
         (b_star[2:,   1:-1] - b_star[:-2, 1:-1]) / (2 * dy)
     )
+    return divU
+
+def _compute_divergence_rc(a_star, b_star, p_prev, dt, rho, dx, dy):
+    """Compute velocity divergence using Rhie-Chow interpolated face velocities.
+
+    Eliminates odd-even pressure decoupling on collocated grids by replacing
+    the naive wide central-difference divergence with face-velocity divergence
+    that includes a pressure correction term.
+    """
+    Ny, Nx = a_star.shape
+    divU = np.zeros((Ny, Nx))
+
+    is_variable_rho = isinstance(rho, np.ndarray) and rho.ndim == 2 and np.ptp(rho) > 1e-10
+
+    # Cell-center pressure gradients (same stencil as grad_central_x_2nd / grad_central_y_2nd)
+    dpdx_cc = np.zeros((Ny, Nx))
+    dpdy_cc = np.zeros((Ny, Nx))
+
+    dpdx_cc[:, 1:-1] = (p_prev[:, 2:] - p_prev[:, :-2]) / (2.0 * dx)
+    dpdx_cc[:, 0]  = (-3.0*p_prev[:, 0]  + 4.0*p_prev[:, 1]  - p_prev[:, 2])  / (2.0*dx)
+    dpdx_cc[:, -1] = ( 3.0*p_prev[:, -1] - 4.0*p_prev[:, -2] + p_prev[:, -3]) / (2.0*dx)
+
+    dpdy_cc[1:-1, :] = (p_prev[2:, :] - p_prev[:-2, :]) / (2.0 * dy)
+    dpdy_cc[0, :]  = (-3.0*p_prev[0, :]  + 4.0*p_prev[1, :]  - p_prev[2, :])  / (2.0*dy)
+    dpdy_cc[-1, :] = ( 3.0*p_prev[-1, :] - 4.0*p_prev[-2, :] + p_prev[-3, :]) / (2.0*dy)
+
+    # --- X-direction: face velocities at (j, i+1/2) for i=0..Nx-2 ---
+    u_face = 0.5 * (a_star[:, :-1] + a_star[:, 1:])                     # (Ny, Nx-1)
+    face_dpdx = (p_prev[:, 1:] - p_prev[:, :-1]) / dx                   # compact
+    avg_dpdx  = 0.5 * (dpdx_cc[:, :-1] + dpdx_cc[:, 1:])               # interpolated wide
+
+    if is_variable_rho:
+        inv_rho = 1.0 / rho
+        d_f_x = dt * 0.5 * (inv_rho[:, :-1] + inv_rho[:, 1:])
+    else:
+        d_f_x = dt / float(np.mean(rho))   # scalar: rho may be a constant 2D array
+
+    u_face_rc = u_face - d_f_x * (face_dpdx - avg_dpdx)
+
+    # --- Y-direction: face velocities at (j+1/2, i) for j=0..Ny-2 ---
+    v_face = 0.5 * (b_star[:-1, :] + b_star[1:, :])                     # (Ny-1, Nx)
+    face_dpdy = (p_prev[1:, :] - p_prev[:-1, :]) / dy                   # compact
+    avg_dpdy  = 0.5 * (dpdy_cc[:-1, :] + dpdy_cc[1:, :])               # interpolated wide
+
+    if is_variable_rho:
+        d_f_y = dt * 0.5 * (inv_rho[:-1, :] + inv_rho[1:, :])
+    else:
+        d_f_y = dt / float(np.mean(rho))   # scalar: rho may be a constant 2D array
+
+    v_face_rc = v_face - d_f_y * (face_dpdy - avg_dpdy)
+
+    # --- Compact divergence from face velocities (interior cells only) ---
+    divU[1:-1, 1:-1] = (
+        (u_face_rc[1:-1, 1:] - u_face_rc[1:-1, :-1]) / dx +
+        (v_face_rc[1:, 1:-1] - v_face_rc[:-1, 1:-1]) / dy
+    )
+
     return divU
 
 def _compute_pressure_gradient(p, dx, dy):
@@ -526,82 +593,16 @@ def _compute_pressure_gradient(p, dx, dy):
 
     return dpdx, dpdy
 
-def _build_variable_poisson_matrix(Nx, Ny, dx, dy, inv_rho):
-    """
-    Build variable-coefficient Poisson matrix for ∇·((1/ρ)∇p).
-    Uses arithmetic mean of 1/ρ at cell faces.
-    Neumann BCs via ghost-point mirroring (same convention as build_poisson_matrix).
-    """
-    N = Nx * Ny
-    A = lil_matrix((N, N))
-
-    cx = 1.0 / dx**2
-    cy = 1.0 / dy**2
-
-    def idx(i, j):
-        return i + j * Nx
-
-    for j in range(Ny):
-        for i in range(Nx):
-            k = idx(i, j)
-
-            # West face (i-1/2)
-            if i > 0:
-                beta_w = 0.5 * (inv_rho[j, i] + inv_rho[j, i-1])
-                A[k, idx(i-1, j)] += cx * beta_w
-                A[k, k] -= cx * beta_w
-            else:
-                # Neumann: ghost mirrors to i+1
-                beta_w = 0.5 * (inv_rho[j, i] + inv_rho[j, i+1])
-                A[k, idx(i+1, j)] += cx * beta_w
-                A[k, k] -= cx * beta_w
-
-            # East face (i+1/2)
-            if i < Nx - 1:
-                beta_e = 0.5 * (inv_rho[j, i] + inv_rho[j, i+1])
-                A[k, idx(i+1, j)] += cx * beta_e
-                A[k, k] -= cx * beta_e
-            else:
-                # Neumann: ghost mirrors to i-1
-                beta_e = 0.5 * (inv_rho[j, i] + inv_rho[j, i-1])
-                A[k, idx(i-1, j)] += cx * beta_e
-                A[k, k] -= cx * beta_e
-
-            # South face (j-1/2)
-            if j > 0:
-                beta_s = 0.5 * (inv_rho[j, i] + inv_rho[j-1, i])
-                A[k, idx(i, j-1)] += cy * beta_s
-                A[k, k] -= cy * beta_s
-            else:
-                # Neumann: ghost mirrors to j+1
-                beta_s = 0.5 * (inv_rho[j, i] + inv_rho[j+1, i])
-                A[k, idx(i, j+1)] += cy * beta_s
-                A[k, k] -= cy * beta_s
-
-            # North face (j+1/2)
-            if j < Ny - 1:
-                beta_n = 0.5 * (inv_rho[j, i] + inv_rho[j+1, i])
-                A[k, idx(i, j+1)] += cy * beta_n
-                A[k, k] -= cy * beta_n
-            else:
-                # Neumann: ghost mirrors to j-1
-                beta_n = 0.5 * (inv_rho[j, i] + inv_rho[j-1, i])
-                A[k, idx(i, j-1)] += cy * beta_n
-                A[k, k] -= cy * beta_n
-
-    return A.tocsr()
-
 def _precompute_poisson_eigenvalues(Nx, Ny, dx, dy):
     """
     Precompute eigenvalues of the discrete Laplacian with Neumann BCs.
-    Uses DCT-I convention matching np.linspace(0, L, N) node-centered grids.
-    The ghost-point mirroring Neumann BCs (p[-1]=p[1], p[N]=p[N-2]) correspond
-    to DCT-II eigenvalues: λ = -2(1-cos(πk/N))/h².
+    The matrix uses ghost-point mirroring p[-1]=p[1], p[N]=p[N-2], which
+    corresponds to DCT-I: λ = -2(1-cos(πk/(N-1)))/h².
     """
     kx = np.arange(Nx)
     ky = np.arange(Ny)
-    lam_x = -2.0 * (1.0 - np.cos(np.pi * kx / Nx)) / dx**2
-    lam_y = -2.0 * (1.0 - np.cos(np.pi * ky / Ny)) / dy**2
+    lam_x = -2.0 * (1.0 - np.cos(np.pi * kx / (Nx - 1))) / dx**2
+    lam_y = -2.0 * (1.0 - np.cos(np.pi * ky / (Ny - 1))) / dy**2
     eigenvalues = lam_x[np.newaxis, :] + lam_y[:, np.newaxis]
     # Pin the (0,0) mode to avoid division by zero (mean is removed separately)
     eigenvalues[0, 0] = 1.0
@@ -610,12 +611,15 @@ def _precompute_poisson_eigenvalues(Nx, Ny, dx, dy):
 
 def _solve_poisson_dct(rhs_2d, eigenvalues):
     """
-    Direct Poisson solve using DCT-II / IDCT-II (type 2).
+    Direct Poisson solve using DCT-I (type=1, unnormalized).
     O(N log N) — no iteration needed.
+    Matches build_poisson_matrix ghost-cell convention: p[-1]=p[1], p[N]=p[N-2].
+    DCT-I diagonalizes the asymmetric Neumann Poisson matrix exactly.
+    Do NOT use norm='ortho' — it changes the transform matrix and breaks diagonalization.
     """
-    rhs_hat = dctn(rhs_2d, type=2)
+    rhs_hat = dctn(rhs_2d, type=1)
     p_hat = rhs_hat / eigenvalues
-    p = idctn(p_hat, type=2)
+    p = idctn(p_hat, type=1)
     p -= np.mean(p)
     return p
 
@@ -682,13 +686,17 @@ def pressure_projection_amg(a_star, b_star, dx, dy, dt, rho, velocity_bc, A=None
     Ny, Nx = a_star.shape
     N = Nx * Ny
 
-    divU = _compute_divergence(a_star, b_star, dx, dy)
+    if p_prev is not None:
+        divU = _compute_divergence_rc(a_star, b_star, p_prev, dt, rho, dx, dy)
+    else:
+        divU = _compute_divergence(a_star, b_star, dx, dy)
 
     # Determine if density is variable
     is_variable_rho = isinstance(rho, np.ndarray) and rho.ndim == 2 and np.ptp(rho) > 1e-10
 
     if is_variable_rho:
-        # Variable-density projection: ∇·((1/ρ)∇p) = (1/dt) ∇·u*
+        # Variable-density projection: ∇·((1/ρ)∇φ) = (1/dt) ∇·u*
+        # φ is the pressure correction (Poisson solution)
         rhs = (divU / dt).ravel()
         rhs -= np.mean(rhs)
 
@@ -710,18 +718,18 @@ def pressure_projection_amg(a_star, b_star, dx, dy, dt, rho, velocity_bc, A=None
                 ml = pyamg.ruge_stuben_solver(A)
             precond = ml.aspreconditioner()
 
-        x0 = p_prev.ravel() if p_prev is not None else np.zeros(N)
+        x0 = np.zeros(N)
         p_flat, info = cg(A_op, rhs, x0=x0, tol=1e-6, maxiter=200, M=precond)
 
-        p = p_flat.reshape((Ny, Nx))
-        p -= np.mean(p)
+        p_correction = p_flat.reshape((Ny, Nx))
+        p_correction -= np.mean(p_correction)
     else:
-        # Constant-density projection: ∇²p = (ρ/dt) ∇·u*
+        # Constant-density projection: ∇²φ = (ρ/dt) ∇·u*
         rhs_2d = rho * divU / dt
 
         if eigenvalues is not None:
             # DCT direct solve — O(N log N), exact to machine precision
-            p = _solve_poisson_dct(rhs_2d, eigenvalues)
+            p_correction = _solve_poisson_dct(rhs_2d, eigenvalues)
         else:
             # Fallback: AMG iterative solve
             if A is None:
@@ -731,16 +739,24 @@ def pressure_projection_amg(a_star, b_star, dx, dy, dt, rho, velocity_bc, A=None
 
             rhs = rhs_2d.ravel()
             rhs -= np.mean(rhs)
-            p_flat = ml.solve(rhs, tol=1e-6, maxiter=100, x0=p_prev.ravel() if p_prev is not None else None)
-            p = p_flat.reshape((Ny, Nx))
-            p -= np.mean(p)
+            p_flat = ml.solve(rhs, tol=1e-6, maxiter=100, x0=None)
+            p_correction = p_flat.reshape((Ny, Nx))
+            p_correction -= np.mean(p_correction)
 
-    dpdx, dpdy = _compute_pressure_gradient(p, dx, dy)
+    # Velocity correction uses gradient of the CORRECTION only
+    dpdx, dpdy = _compute_pressure_gradient(p_correction, dx, dy)
 
     a = a_star - (dt / rho) * dpdx
     b = b_star - (dt / rho) * dpdy
 
     a, b = apply_velocity_BCs(velocity_bc, a, b)
+
+    # Accumulate pressure: p_new = p_prev + correction (incremental projection)
+    if p_prev is not None:
+        p = p_prev + p_correction
+    else:
+        p = p_correction
+    p -= np.mean(p)
 
     return a, b, p, A, ml
 

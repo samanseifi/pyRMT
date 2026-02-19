@@ -32,6 +32,8 @@ from pyRMT.interpolators import (
 from pyRMT.utils import (
     grad_central_x_2nd,
     grad_central_y_2nd,
+    grad_central_x_4th,
+    grad_central_y_4th,
     diff_upwind_3rd,
     lap_2nd,
     fast_solve_3x3,

@@ -25,6 +25,40 @@ def grad_central_y_2nd(f, dy):
     return df_dy
 
 @njit
+def grad_central_x_4th(f, dx):
+    """4th-order central difference in x, with 2nd-order fallback at boundaries."""
+    df_dx = np.zeros_like(f)
+
+    # Interior: 4th-order central (i=2..Nx-3)
+    df_dx[:, 2:-2] = (-f[:, 4:] + 8*f[:, 3:-1] - 8*f[:, 1:-3] + f[:, 0:-4]) / (12 * dx)
+
+    # Near-boundary: 2nd-order central (i=1, i=Nx-2)
+    df_dx[:, 1] = (f[:, 2] - f[:, 0]) / (2 * dx)
+    df_dx[:, -2] = (f[:, -1] - f[:, -3]) / (2 * dx)
+
+    # Boundary: 2nd-order one-sided
+    df_dx[:, 0] = (-3*f[:, 0] + 4*f[:, 1] - f[:, 2]) / (2*dx)
+    df_dx[:, -1] = (3*f[:, -1] - 4*f[:, -2] + f[:, -3]) / (2*dx)
+    return df_dx
+
+@njit
+def grad_central_y_4th(f, dy):
+    """4th-order central difference in y, with 2nd-order fallback at boundaries."""
+    df_dy = np.zeros_like(f)
+
+    # Interior: 4th-order central (j=2..Ny-3)
+    df_dy[2:-2, :] = (-f[4:, :] + 8*f[3:-1, :] - 8*f[1:-3, :] + f[0:-4, :]) / (12 * dy)
+
+    # Near-boundary: 2nd-order central (j=1, j=Ny-2)
+    df_dy[1, :] = (f[2, :] - f[0, :]) / (2 * dy)
+    df_dy[-2, :] = (f[-1, :] - f[-3, :]) / (2 * dy)
+
+    # Boundary: 2nd-order one-sided
+    df_dy[0, :] = (-3*f[0, :] + 4*f[1, :] - f[2, :]) / (2*dy)
+    df_dy[-1, :] = (3*f[-1, :] - 4*f[-2, :] + f[-3, :]) / (2*dy)
+    return df_dy
+
+@njit
 def diff_upwind_3rd(f, u, h, axis):
     """
     3rd Order Upwind Biased Finite Difference with 1st-order fallback at boundaries.
