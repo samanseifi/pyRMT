@@ -38,7 +38,7 @@ def compute_kinetic_energy(a, b, rho_f, rho_s, phi, w_t, dx, dy):
 
     return ke_total
 
-def compute_strain_energy(X1, X2, phi, mu_s, dx, dy):
+def compute_strain_energy(X1, X2, phi, mu_s, dx, dy, kappa=0.0):
     """
     Compute elastic strain energy: SE = ∫ μ_s * (tr(F^T F) - 2) dA
 
@@ -115,9 +115,14 @@ def compute_strain_energy(X1, X2, phi, mu_s, dx, dy):
             # I_1 = tr(C) = C11 + C22
             I1 = C11 + C22
 
-            # Strain energy density: W = (μ_s/2) * (I_1 - 2)
-            # Note: The factor of 0.5 is included in the energy definition
-            se_density[good] = 0.5 * mu_s * (I1[good] - 2.0)
+            # Full compressible Neo-Hookean energy density:
+            # W = (μ/2)(I₁ - 2 - 2·ln J) + (κ/2)(J-1)²
+            # Consistent with σ = (μ/J)(B-I) + κ(J-1)I
+            J_vals = np.ones_like(detG)
+            J_vals[good] = 1.0 / detG[good]
+            J_safe = np.abs(J_vals)  # guard against clamped negative detG
+            se_density[good] = (0.5 * mu_s * (I1[good] - 2.0 - 2.0 * np.log(J_safe[good]))
+                                + 0.5 * kappa * (J_vals[good] - 1.0)**2)
 
     # Integrate over solid domain
     se_total = np.sum(se_density) * dx * dy
@@ -204,7 +209,7 @@ def divergence_2d_interior(u, v, dx, dy, pad=3):
 def output_simulation_data(dx, dy, phi, solid_mask, X1, X2, a, b, p, vis_output_freq,
                           directory_name, step, dt, sigma_sxx, sigma_sxy, sigma_syy, J,
                           mu_s=0.0, mu_f=0.0, rho_s=1.0, rho_f=1.0, w_t=None, eta_s=0.0,
-                          time=0.0, integrated_dissipation=0.0):
+                          kappa=0.0, time=0.0, integrated_dissipation=0.0):
     """
     Output simulation data including energy diagnostics.
 
@@ -244,7 +249,7 @@ def output_simulation_data(dx, dy, phi, solid_mask, X1, X2, a, b, p, vis_output_
 
         # Compute energy quantities
         ke = compute_kinetic_energy(a, b, rho_f, rho_s, phi, w_t, dx, dy)
-        se = compute_strain_energy(X1, X2, phi, mu_s, dx, dy)
+        se = compute_strain_energy(X1, X2, phi, mu_s, dx, dy, kappa=kappa)
         dissipation_rate = compute_viscous_dissipation(a, b, mu_f, phi, w_t, dx, dy, eta_s)
 
         # Note: integrated_dissipation is updated in the main loop, not here
@@ -257,7 +262,7 @@ def output_simulation_data(dx, dy, phi, solid_mask, X1, X2, a, b, p, vis_output_
                 f"KE={ke:.4e}, SE={se:.4e}, ε={dissipation_rate:.4e}, "
                 f"E_tot={total_energy:.4e}, "
                 f"min(J)={np.min(J):.3f}, "
-                f"max|σ|={np.max(np.abs(sigma_sxx)):.2f}, "
+                f"max|σ|={np.max(np.sqrt(sigma_sxx**2 + sigma_syy**2 + 2*sigma_sxy**2)):.2f}, "
                 f"max|div|={np.max(np.abs(div_interior)):.2e}"
             )
 

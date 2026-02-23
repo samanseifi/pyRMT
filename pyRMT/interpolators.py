@@ -77,31 +77,41 @@ def bicubic_interpolate(u, xq, yq, dx, dy, Nx, Ny):
             # We need a 4x4 stencil: indices from ix-1 to ix+2
             # Handle boundaries by clamping
             row_vals = np.zeros(4)
-            
+            local_min = 1e18
+            local_max = -1e18
+
             for m in range(4): # Loop over y-rows (local index 0..3)
                 # Global y index: iy - 1 + m
                 y_global = iy - 1 + m
-                
+
                 # Clamp y
                 if y_global < 0: y_global = 0
                 if y_global >= Ny: y_global = Ny - 1
-                
+
                 # Gather the 4 x-values for this row
                 col_vals = np.zeros(4)
                 for n in range(4): # Loop over x-cols (local index 0..3)
                     x_global = ix - 1 + n
-                    
+
                     # Clamp x
                     if x_global < 0: x_global = 0
                     if x_global >= Nx: x_global = Nx - 1
-                    
-                    col_vals[n] = u[y_global, x_global]
-                
+
+                    v = u[y_global, x_global]
+                    col_vals[n] = v
+                    if v < local_min: local_min = v
+                    if v > local_max: local_max = v
+
                 # Interpolate this row in x-direction
                 row_vals[m] = cubic_convolution(col_vals[0], col_vals[1], col_vals[2], col_vals[3], fx)
-            
+
             # Final interpolate in y-direction
-            out[j, i] = cubic_convolution(row_vals[0], row_vals[1], row_vals[2], row_vals[3], fy)
+            result = cubic_convolution(row_vals[0], row_vals[1], row_vals[2], row_vals[3], fy)
+            # Clamp to stencil bounds to suppress Catmull-Rom overshoots near
+            # steep gradients (e.g. reference-map jump at solid/fluid interface)
+            if result < local_min: result = local_min
+            if result > local_max: result = local_max
+            out[j, i] = result
             
     return out
 

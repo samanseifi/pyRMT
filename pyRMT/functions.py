@@ -14,7 +14,7 @@ from scipy.sparse import lil_matrix
 from scipy.sparse.linalg import LinearOperator, cg
 from scipy.fft import dctn, idctn
 
-from pyRMT.interpolators import bilinear_interpolate
+from pyRMT.interpolators import bilinear_interpolate, bicubic_interpolate
 from pyRMT.utils import (
     diff_upwind_3rd,
     grad_central_x_2nd,
@@ -196,7 +196,8 @@ def advect_semi_lagrangian_rk4(q, a, b, X, Y, dt, dx, dy):
     Ny, Nx = q.shape
 
     def interp(u, xq, yq):
-        return bilinear_interpolate(u, xq, yq, dx, dy, Nx, Ny)
+        # return bilinear_interpolate(u, xq, yq, dx, dy, Nx, Ny)
+        return bicubic_interpolate(u, xq, yq, dx, dy, Nx, Ny)
 
     # RK4 stages
     k1x = interp(a, X, Y)
@@ -240,15 +241,49 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi):
         for i in range(1, Nx - 1):
             if phi[j, i] <= 0:
                 # 1. Gradients of Reference Map X (G = grad_x X)
-                g11 = (X1[j, i+1] - X1[j, i-1]) * inv_2dx
-                g12 = (X1[j+1, i] - X1[j-1, i]) * inv_2dy
-                g21 = (X2[j, i+1] - X2[j, i-1]) * inv_2dx
-                g22 = (X2[j+1, i] - X2[j-1, i]) * inv_2dy
+                # Use one-sided stencil when a neighbor is in the fluid (phi > 0),
+                # to avoid mixing solid and extrapolated fluid-side values.
+                # x-direction (g11, g21)
+                left_fluid  = phi[j, i-1] > 0.0
+                right_fluid = phi[j, i+1] > 0.0
+                if left_fluid and not right_fluid:
+                    # forward difference
+                    g11 = (X1[j, i+1] - X1[j, i]) / dx
+                    g21 = (X2[j, i+1] - X2[j, i]) / dx
+                elif right_fluid and not left_fluid:
+                    # backward difference
+                    g11 = (X1[j, i] - X1[j, i-1]) / dx
+                    g21 = (X2[j, i] - X2[j, i-1]) / dx
+                else:
+                    # central (both solid, or both fluid — latter is rare boundary case)
+                    g11 = (X1[j, i+1] - X1[j, i-1]) * inv_2dx
+                    g21 = (X2[j, i+1] - X2[j, i-1]) * inv_2dx
+
+                # y-direction (g12, g22)
+                bot_fluid = phi[j-1, i] > 0.0
+                top_fluid = phi[j+1, i] > 0.0
+                if bot_fluid and not top_fluid:
+                    # forward difference
+                    g12 = (X1[j+1, i] - X1[j, i]) / dy
+                    g22 = (X2[j+1, i] - X2[j, i]) / dy
+                elif top_fluid and not bot_fluid:
+                    # backward difference
+                    g12 = (X1[j, i] - X1[j-1, i]) / dy
+                    g22 = (X2[j, i] - X2[j-1, i]) / dy
+                else:
+                    g12 = (X1[j+1, i] - X1[j-1, i]) * inv_2dy
+                    g22 = (X2[j+1, i] - X2[j-1, i]) * inv_2dy
 
                 # 2. Deformation Gradient F = inv(G)
                 detG = g11 * g22 - g12 * g21
                 if abs(detG) < 1e-10:
                     continue
+                # Clamp detG: prevents J from blowing up when the reference map
+                # folds. Bounds J to [1/3, 3]. Normal operation stays in ~[0.6, 1.1].
+                # if detG < 0.33:
+                #     detG = 0.33
+                # elif detG > 3.0:
+                #     detG = 3.0
 
                 # F components
                 f11, f12 =  g22 / detG, -g12 / detG
@@ -263,15 +298,26 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi):
                 j_val = 1.0 / detG
                 J[j, i] = j_val
 
-                # 5. Neo-Hookean Stress Calculation
-                # sigma = (mu/J)*(B - I) + (kappa/J)*ln(Js)*I
-                mu_over_j = mu_s  / j_val
-                # vol_term = (kappa / j_val) * np.log(j_val)
+                # 5. Neo-Hookean Stress (Kamrin form): sigma = mu*B + kappa*(J-1)*I
                 vol_term = kappa * (j_val - 1.0)
-                
-                sxx[j, i] = mu_s * (b11) + vol_term
-                sxy[j, i] = mu_s * b12
-                syy[j, i] = mu_s * (b22) + vol_term
+
+                s_xx = mu_s * b11 + vol_term
+                s_xy = mu_s * b12
+                s_yy = mu_s * b22 + vol_term
+
+                # Clamp stress magnitude: cap at 50*mu_s to prevent blow-up
+                # from corrupt reference map without zeroing the stress direction.
+                # stress_mag = (s_xx*s_xx + 2.0*s_xy*s_xy + s_yy*s_yy) ** 0.5
+                # max_stress = 50.0 * mu_s
+                # if stress_mag > max_stress:
+                #     scale = max_stress / stress_mag
+                #     s_xx *= scale
+                #     s_xy *= scale
+                #     s_yy *= scale
+
+                sxx[j, i] = s_xx
+                sxy[j, i] = s_xy
+                syy[j, i] = s_yy
 
     # apply smoothing
     # sxx = gaussian_filter(sxx, sigma=0.5)
