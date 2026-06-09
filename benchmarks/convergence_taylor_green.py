@@ -97,7 +97,22 @@ def l2(err, mask=None):
     return np.sqrt(np.mean(err ** 2))
 
 
-def run(scheme='semilagrangian', grids=(32, 64, 128), N_ref=256, t_end=0.25, dt=1.0e-4):
+def richardson_order(values):
+    """Reference-free observed order from factor-2-spaced grids.
+    values is a list of (N, Q) ordered coarse->fine. Returns a list of
+    (N_triplet, p) for each consecutive triplet via
+    p = log2(|Q_4h - Q_2h| / |Q_2h - Q_h|)."""
+    out = []
+    for i in range(len(values) - 2):
+        (N0, q0), (N1, q1), (N2, q2) = values[i], values[i + 1], values[i + 2]
+        d_coarse = q1 - q0
+        d_fine = q2 - q1
+        if abs(d_fine) > 0:
+            out.append((N2, np.log(abs(d_coarse) / abs(d_fine)) / np.log(2.0)))
+    return out
+
+
+def run(scheme='semilagrangian', grids=(32, 64, 128, 256), N_ref=512, t_end=0.25, dt=1.0e-4):
     print(f"[convergence-TG] scheme={scheme} grids={grids} ref={N_ref} t={t_end} dt={dt}")
     sols = {}
     for N in list(grids) + [N_ref]:
@@ -124,10 +139,19 @@ def run(scheme='semilagrangian', grids=(32, 64, 128), N_ref=256, t_end=0.25, dt=
         print(f"  N={N:4d}  E_v={e_v:.3e}  E_p={e_p:.3e}  E_X1={e_x:.3e}  "
               f"E_ke={e_ke:.3e}  E_se={e_se:.3e}")
 
+    # Reference-free Richardson order for the scalar energies (uses ALL grids,
+    # incl. the reference, so it does not depend on a converged reference).
+    ke_seq = [(N, sols[N]['ke']) for N in sorted(sols)]
+    se_seq = [(N, sols[N]['se']) for N in sorted(sols)]
+    print("  Richardson (reference-free) scalar orders:")
+    for nm, seq in (("ke", ke_seq), ("se", se_seq)):
+        for Ntrip, p in richardson_order(seq):
+            print(f"    {nm} triplet ->N={Ntrip}: p = {p:.2f}")
+
     rows = np.array(rows)
     dxs = rows[:, 0]
     names = ["|u|", "p", "X1", "ke", "se"]
-    print("  observed orders (slope of log E vs log dx):")
+    print("  observed orders vs reference N=%d (slope of log E vs log dx):" % N_ref)
     orders = {}
     for k, nm in enumerate(names):
         E = rows[:, k + 1]
