@@ -196,8 +196,8 @@ def advect_semi_lagrangian_rk4(q, a, b, X, Y, dt, dx, dy):
     Ny, Nx = q.shape
 
     def interp(u, xq, yq):
-        # return bilinear_interpolate(u, xq, yq, dx, dy, Nx, Ny)
-        return bicubic_interpolate(u, xq, yq, dx, dy, Nx, Ny)
+        return bilinear_interpolate(u, xq, yq, dx, dy, Nx, Ny)
+        # return bicubic_interpolate(u, xq, yq, dx, dy, Nx, Ny)
 
     # RK4 stages
     k1x = interp(a, X, Y)
@@ -226,7 +226,250 @@ def advect_semi_lagrangian_rk4(q, a, b, X, Y, dt, dx, dy):
 
     return q_new
 
-# @njit(parallel=True)
+
+# ── WENO5 + SSP-RK3 Eulerian advection ───────────────────────────────────────
+
+@njit
+def _weno5_left(vm2, vm1, v0, vp1, vp2):
+    """Left-biased WENO5 reconstruction at i+1/2 (upwind for u > 0).
+    Uses stencil {q_{i-2}, q_{i-1}, q_i, q_{i+1}, q_{i+2}}.
+    Returns the reconstructed value at i+1/2."""
+    eps = 1.0e-6
+
+    # Three candidate polynomials
+    r0 = (2.0*vm2 - 7.0*vm1 + 11.0*v0) / 6.0
+    r1 = (-vm1 + 5.0*v0 + 2.0*vp1) / 6.0
+    r2 = (2.0*v0 + 5.0*vp1 - vp2) / 6.0
+
+    # Smoothness indicators (Jiang-Shu 1996)
+    b0 = (13.0/12.0)*(vm2 - 2.0*vm1 + v0)**2 + (1.0/4.0)*(vm2 - 4.0*vm1 + 3.0*v0)**2
+    b1 = (13.0/12.0)*(vm1 - 2.0*v0 + vp1)**2 + (1.0/4.0)*(vm1 - vp1)**2
+    b2 = (13.0/12.0)*(v0 - 2.0*vp1 + vp2)**2 + (1.0/4.0)*(3.0*v0 - 4.0*vp1 + vp2)**2
+
+    # Ideal weights
+    d0, d1, d2 = 0.1, 0.6, 0.3
+
+    # Non-linear weights
+    a0 = d0 / (eps + b0)**2
+    a1 = d1 / (eps + b1)**2
+    a2 = d2 / (eps + b2)**2
+    a_sum = a0 + a1 + a2
+
+    w0 = a0 / a_sum
+    w1 = a1 / a_sum
+    w2 = a2 / a_sum
+
+    return w0*r0 + w1*r1 + w2*r2
+
+
+@njit
+def _weno5_right(vm1, v0, vp1, vp2, vp3):
+    """Right-biased WENO5 reconstruction at i+1/2 (upwind for u < 0).
+    Uses stencil {q_{i-1}, q_i, q_{i+1}, q_{i+2}, q_{i+3}}.
+    Returns the reconstructed value at i+1/2."""
+    eps = 1.0e-6
+
+    # Three candidate polynomials (mirror of left-biased)
+    r0 = (2.0*vp3 - 7.0*vp2 + 11.0*vp1) / 6.0
+    r1 = (-vp2 + 5.0*vp1 + 2.0*v0) / 6.0
+    r2 = (2.0*vp1 + 5.0*v0 - vm1) / 6.0
+
+    # Smoothness indicators (mirrored)
+    b0 = (13.0/12.0)*(vp3 - 2.0*vp2 + vp1)**2 + (1.0/4.0)*(3.0*vp1 - 4.0*vp2 + vp3)**2
+    b1 = (13.0/12.0)*(vp2 - 2.0*vp1 + v0)**2 + (1.0/4.0)*(vp2 - v0)**2
+    b2 = (13.0/12.0)*(vp1 - 2.0*v0 + vm1)**2 + (1.0/4.0)*(vp1 - 4.0*v0 + 3.0*vm1)**2
+
+    # Ideal weights (mirrored)
+    d0, d1, d2 = 0.1, 0.6, 0.3
+
+    a0 = d0 / (eps + b0)**2
+    a1 = d1 / (eps + b1)**2
+    a2 = d2 / (eps + b2)**2
+    a_sum = a0 + a1 + a2
+
+    w0 = a0 / a_sum
+    w1 = a1 / a_sum
+    w2 = a2 / a_sum
+
+    return w0*r0 + w1*r1 + w2*r2
+
+
+@njit(parallel=True)
+def _weno5_rhs(q, a, b, dx, dy, phi, w_cut):
+    """Compute RHS = -(u ∂q/∂x + v ∂q/∂y) using upwind WENO5.
+
+    Only computes the RHS for cells where phi[j,i] <= w_cut (i.e. inside the
+    solid + a thin buffer).  Fluid cells beyond the extrapolation band are
+    left at zero so the scheme never sees the artificial zero-padding that
+    results from the `* solid_mask` operation in the caller.
+
+    The stencil from any solid cell (phi ≤ 0) extends at most 2 cells into
+    the fluid.  As long as the caller extrapolates at least 2 layers beyond
+    the interface, those stencil values are smooth continuations of the
+    reference map and WENO5 operates correctly.
+    """
+    Ny, Nx = q.shape
+    rhs = np.zeros_like(q)
+
+    for j in prange(2, Ny - 2):
+        for i in range(2, Nx - 2):
+            # Only advect inside the solid (+ optional thin buffer)
+            if phi[j, i] > w_cut:
+                continue
+
+            u_ij = a[j, i]
+            v_ij = b[j, i]
+
+            # ── x-direction ──────────────────────────────────────────────────
+            # Face i+1/2
+            if u_ij >= 0.0:
+                qx_p = _weno5_left(q[j, i-2], q[j, i-1], q[j, i], q[j, i+1], q[j, i+2])
+            else:
+                if i + 3 < Nx:
+                    qx_p = _weno5_right(q[j, i-1], q[j, i], q[j, i+1], q[j, i+2], q[j, i+3])
+                else:
+                    qx_p = _weno5_left(q[j, i-2], q[j, i-1], q[j, i], q[j, i+1], q[j, i+2])
+
+            # Face i-1/2
+            if u_ij >= 0.0:
+                if i >= 3:
+                    qx_m = _weno5_left(q[j, i-3], q[j, i-2], q[j, i-1], q[j, i], q[j, i+1])
+                else:
+                    qx_m = _weno5_left(q[j, i-2], q[j, i-1], q[j, i], q[j, i+1], q[j, i+2])
+            else:
+                qx_m = _weno5_right(q[j, i-1], q[j, i], q[j, i+1], q[j, i+2],
+                                     q[j, i+3] if i+3 < Nx else q[j, Nx-1])
+
+            dqdx = (qx_p - qx_m) / dx
+
+            # ── y-direction ──────────────────────────────────────────────────
+            # Face j+1/2
+            if v_ij >= 0.0:
+                qy_p = _weno5_left(q[j-2, i], q[j-1, i], q[j, i], q[j+1, i], q[j+2, i])
+            else:
+                if j + 3 < Ny:
+                    qy_p = _weno5_right(q[j-1, i], q[j, i], q[j+1, i], q[j+2, i], q[j+3, i])
+                else:
+                    qy_p = _weno5_left(q[j-2, i], q[j-1, i], q[j, i], q[j+1, i], q[j+2, i])
+
+            # Face j-1/2
+            if v_ij >= 0.0:
+                if j >= 3:
+                    qy_m = _weno5_left(q[j-3, i], q[j-2, i], q[j-1, i], q[j, i], q[j+1, i])
+                else:
+                    qy_m = _weno5_left(q[j-2, i], q[j-1, i], q[j, i], q[j+1, i], q[j+2, i])
+            else:
+                qy_m = _weno5_right(q[j-1, i], q[j, i], q[j+1, i], q[j+2, i],
+                                     q[j+3, i] if j+3 < Ny else q[Ny-1, i])
+
+            dqdy = (qy_p - qy_m) / dy
+
+            rhs[j, i] = -(u_ij * dqdx + v_ij * dqdy)
+
+    return rhs
+
+
+def advect_weno5_rk3(q, a, b, dx, dy, dt, phi, w_cut=0.0):
+    """Advect scalar field q using WENO5 spatial discretisation
+    and SSP-RK3 (Shu-Osher) time integration.
+
+    phi   : level-set field (same shape as q); only cells with phi <= w_cut
+            are advected.  w_cut=0.0 restricts advection to the solid interior.
+    w_cut : cutoff phi value for the active advection region.  The stencil
+            from any active cell extends at most 2 cells into the fluid, so
+            the extrapolation buffer must be at least 2 layers wide.
+    """
+    # Stage 1
+    q1 = q + dt * _weno5_rhs(q, a, b, dx, dy, phi, w_cut)
+
+    # Stage 2
+    q2 = 0.75 * q + 0.25 * (q1 + dt * _weno5_rhs(q1, a, b, dx, dy, phi, w_cut))
+
+    # Stage 3
+    q_new = (1.0/3.0) * q + (2.0/3.0) * (q2 + dt * _weno5_rhs(q2, a, b, dx, dy, phi, w_cut))
+
+    return q_new
+
+
+# ── 2nd-order central difference + SSP-RK3 advection ─────────────────────────
+
+@njit(parallel=True)
+def _central2_rhs(q, a, b, dx, dy, phi, w_cut):
+    """Compute RHS = -(u ∂q/∂x + v ∂q/∂y) using 2nd-order central differences.
+
+    Only evaluates at cells where phi[j,i] <= w_cut.  Stencil width is ±1,
+    so a single extrapolation layer beyond the interface is sufficient.
+    """
+    Ny, Nx = q.shape
+    rhs = np.zeros_like(q)
+    inv_2dx = 0.5 / dx
+    inv_2dy = 0.5 / dy
+
+    for j in prange(1, Ny - 1):
+        for i in range(1, Nx - 1):
+            if phi[j, i] > w_cut:
+                continue
+            dqdx = (q[j, i+1] - q[j, i-1]) * inv_2dx
+            dqdy = (q[j+1, i] - q[j-1, i]) * inv_2dy
+            rhs[j, i] = -(a[j, i] * dqdx + b[j, i] * dqdy)
+
+    return rhs
+
+
+def advect_central2_rk3(q, a, b, dx, dy, dt, phi, w_cut=0.0):
+    """Advect scalar field q using 2nd-order central differences in space
+    and SSP-RK3 (Shu-Osher) in time.
+
+    phi   : level-set field; only cells with phi <= w_cut are advected.
+    w_cut : 0.0 restricts advection to the solid interior.
+    """
+    # Stage 1
+    q1 = q + dt * _central2_rhs(q, a, b, dx, dy, phi, w_cut)
+
+    # Stage 2
+    q2 = 0.75 * q + 0.25 * (q1 + dt * _central2_rhs(q1, a, b, dx, dy, phi, w_cut))
+
+    # Stage 3
+    q_new = (1.0/3.0) * q + (2.0/3.0) * (q2 + dt * _central2_rhs(q2, a, b, dx, dy, phi, w_cut))
+
+    return q_new
+
+
+# ── Switchable reference-map advection dispatcher ────────────────────────────
+
+def advect_reference_map(q, a, b, X, Y, dt, dx, dy, phi,
+                         scheme='semilagrangian', w_cut=0.0):
+    """Advect a reference-map component ``q`` with a selectable scheme.
+
+    Parameters
+    ----------
+    scheme : {'semilagrangian', 'central2', 'weno5'}
+        'semilagrangian' : RK4 semi-Lagrangian backtrace (bilinear interp).
+                           Robust and keeps the reconstructed level set
+                           well-behaved; this is the DEFAULT.  The caller is
+                           expected to mask/extrapolate the fluid side.
+        'central2'       : 2nd-order central + SSP-RK3, Eulerian, only updates
+                           cells with phi <= w_cut (solid + thin buffer).
+        'weno5'          : WENO5 + SSP-RK3, Eulerian, only updates cells with
+                           phi <= w_cut.
+    w_cut : float
+        Cutoff level-set value for the Eulerian schemes (ignored by the
+        semi-Lagrangian branch).
+    """
+    if scheme == 'semilagrangian':
+        return advect_semi_lagrangian_rk4(q, a, b, X, Y, dt, dx, dy)
+    elif scheme == 'central2':
+        return advect_central2_rk3(q, a, b, dx, dy, dt, phi, w_cut)
+    elif scheme == 'weno5':
+        return advect_weno5_rk3(q, a, b, dx, dy, dt, phi, w_cut)
+    else:
+        raise ValueError(
+            "Unknown advection scheme %r (expected 'semilagrangian', "
+            "'central2' or 'weno5')" % (scheme,)
+        )
+
+
+@njit(parallel=True)
 def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi):
     Ny, Nx = X1.shape
     sxx = np.zeros((Ny, Nx))
@@ -719,18 +962,126 @@ def _apply_variable_poisson(p_flat, Nx, Ny, dx, dy, inv_rho):
     return result.ravel()
 
 
-def pressure_projection_amg(a_star, b_star, dx, dy, dt, rho, velocity_bc, A=None, ml=None, p_prev=None, eigenvalues=None):
+# ── Periodic (FFT) Poisson solver ─────────────────────────────────────────────
+# For doubly-periodic domains (e.g. Taylor-Green) the pressure must satisfy
+# periodic BCs, NOT the homogeneous-Neumann BCs assumed by the DCT solver.  The
+# grid carries an overlap column/row (x[-1] == x[0] physically), so the unique
+# periodic field lives on the reduced (Ny-1, Nx-1) sub-grid with period L.
+
+def _precompute_poisson_eigenvalues_periodic(Nx, Ny, dx, dy):
+    """Fourier symbol of div(grad(.)) for the WIDE 2nd-order central operators
+    used here (``(f[i+1]-f[i-1])/2h`` applied twice) on the reduced
+    (Ny-1) x (Nx-1) periodic sub-grid.
+
+    The symbol is ``-sin(2*pi*k/m)**2 / h**2`` per direction, which is the exact
+    eigenvalue of div∘grad for the wide central stencil.  Matching the solver's
+    eigenvalues to the *actual* discrete operators (rather than the compact
+    Laplacian) makes the projection exact for all resolved modes.
+
+    Two families of modes have a (near-)zero eigenvalue and are unprojectable:
+    the constant mode (k=0) and the checkerboard / Nyquist mode (k=m/2, where
+    sin=0).  Both are pinned to 1.0 here and their corrections are zeroed in
+    `_solve_poisson_fft`; a `mask` of the pinned entries is returned alongside.
     """
-    Pressure projection step. Handles both uniform and variable density.
+    mx = Nx - 1
+    my = Ny - 1
+    kx = np.arange(mx)
+    ky = np.arange(my)
+    lam_x = -(np.sin(2.0 * np.pi * kx / mx) / dx) ** 2
+    lam_y = -(np.sin(2.0 * np.pi * ky / my) / dy) ** 2
+    eig = lam_x[np.newaxis, :] + lam_y[:, np.newaxis]
+    null = np.abs(eig) < 1e-12       # constant + Nyquist/checkerboard modes
+    eig = eig.copy()
+    eig[null] = 1.0
+    return eig, null
 
-    Constant density: uses DCT direct solve — O(N log N), no iteration.
-    Variable density: uses matrix-free CG with AMG preconditioner.
 
-    Pass `eigenvalues` (from `_precompute_poisson_eigenvalues`) to enable DCT.
-    If not provided, falls back to AMG iterative solve.
+def _tile_overlap(field_reduced, Ny, Nx):
+    """Pad a reduced (Ny-1, Nx-1) periodic field back to the full (Ny, Nx)
+    overlap grid by wrapping row/col 0 onto the last row/col."""
+    out = np.empty((Ny, Nx))
+    out[:-1, :-1] = field_reduced
+    out[-1, :-1] = field_reduced[0, :]
+    out[:-1, -1] = field_reduced[:, 0]
+    out[-1, -1] = field_reduced[0, 0]
+    return out
+
+
+def _solve_poisson_fft(rhs_full, eigenvalues_periodic):
+    """Direct periodic Poisson solve via 2D FFT on the reduced sub-grid.
+
+    `eigenvalues_periodic` is the (eig, null) pair from
+    `_precompute_poisson_eigenvalues_periodic`; corrections at the pinned null
+    modes (constant + checkerboard) are set to zero.
+    """
+    eig, null = eigenvalues_periodic
+    Ny, Nx = rhs_full.shape
+    r = rhs_full[:-1, :-1].copy()
+    r -= np.mean(r)
+    rhat = np.fft.fft2(r)
+    phat = rhat / eig
+    phat[null] = 0.0
+    p_reduced = np.real(np.fft.ifft2(phat))
+    p = _tile_overlap(p_reduced, Ny, Nx)
+    p -= np.mean(p)
+    return p
+
+
+def _compute_divergence_periodic(a_star, b_star, dx, dy):
+    """2nd-order central velocity divergence with periodic wrap."""
+    Ny, Nx = a_star.shape
+    au = a_star[:-1, :-1]
+    bv = b_star[:-1, :-1]
+    dudx = (np.roll(au, -1, axis=1) - np.roll(au, 1, axis=1)) / (2.0 * dx)
+    dvdy = (np.roll(bv, -1, axis=0) - np.roll(bv, 1, axis=0)) / (2.0 * dy)
+    return _tile_overlap(dudx + dvdy, Ny, Nx)
+
+
+def _compute_pressure_gradient_periodic(p, dx, dy):
+    """2nd-order central pressure gradient with periodic wrap."""
+    Ny, Nx = p.shape
+    pr = p[:-1, :-1]
+    dpdx_r = (np.roll(pr, -1, axis=1) - np.roll(pr, 1, axis=1)) / (2.0 * dx)
+    dpdy_r = (np.roll(pr, -1, axis=0) - np.roll(pr, 1, axis=0)) / (2.0 * dy)
+    return _tile_overlap(dpdx_r, Ny, Nx), _tile_overlap(dpdy_r, Ny, Nx)
+
+
+def pressure_projection_amg(a_star, b_star, dx, dy, dt, rho, velocity_bc, A=None, ml=None,
+                            p_prev=None, eigenvalues=None, bc_type='neumann'):
+    """
+    Pressure projection step. Handles both uniform and variable density and
+    keeps the pressure BC consistent with the velocity BC.
+
+    bc_type='neumann'  : walls (no-slip / free-slip).  Constant density uses a
+                         DCT-I direct solve — O(N log N); variable density uses
+                         matrix-free CG with a DCT/AMG preconditioner.
+    bc_type='periodic' : doubly-periodic domain (e.g. Taylor-Green).  Uses a
+                         direct FFT solve.  `eigenvalues` must come from
+                         `_precompute_poisson_eigenvalues_periodic`.  Density is
+                         treated as (near-)constant in the Poisson operator; the
+                         velocity correction still uses the local rho.
+
+    Pass `eigenvalues` (matching `bc_type`) to enable the direct solver; if not
+    provided, the Neumann path falls back to an AMG iterative solve.
     """
     Ny, Nx = a_star.shape
     N = Nx * Ny
+
+    # ── Periodic branch (consistent with periodic velocity BCs) ──────────────
+    if bc_type == 'periodic':
+        if eigenvalues is None:
+            eigenvalues = _precompute_poisson_eigenvalues_periodic(Nx, Ny, dx, dy)
+        divU = _compute_divergence_periodic(a_star, b_star, dx, dy)
+        rho_bar = float(np.mean(rho)) if isinstance(rho, np.ndarray) else float(rho)
+        rhs_2d = rho_bar * divU / dt
+        p_correction = _solve_poisson_fft(rhs_2d, eigenvalues)
+        dpdx, dpdy = _compute_pressure_gradient_periodic(p_correction, dx, dy)
+        a = a_star - (dt / rho) * dpdx
+        b = b_star - (dt / rho) * dpdy
+        a, b = apply_velocity_BCs(velocity_bc, a, b)
+        p = (p_prev + p_correction) if p_prev is not None else p_correction
+        p -= np.mean(p)
+        return a, b, p, A, ml
 
     if p_prev is not None:
         divU = _compute_divergence_rc(a_star, b_star, p_prev, dt, rho, dx, dy)

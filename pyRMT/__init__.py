@@ -4,6 +4,9 @@ from pyRMT.functions import (
     extrapolate_transverse_layers_2field,
     compute_timestep,
     advect_semi_lagrangian_rk4,
+    advect_weno5_rk3,
+    advect_central2_rk3,
+    advect_reference_map,
     compute_solid_stress,
     heaviside_smooth_alt,
     velocity_RK4,
@@ -13,6 +16,7 @@ from pyRMT.functions import (
     build_poisson_matrix,
     pressure_projection_amg,
     _precompute_poisson_eigenvalues,
+    _precompute_poisson_eigenvalues_periodic,
     rebuild_phi_from_reference_map,
     reinitialize_phi_PDE,
 )
