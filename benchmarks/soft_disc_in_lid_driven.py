@@ -34,11 +34,16 @@ from benchmarks.common import (no_slip_lid_bc, initialize_disc, check_narrow_ban
                                disc_centroid, ensure_dir, load_xy_csv)
 
 
-def run(N=128, scheme='semilagrangian', t_end=8.0, reinit=False, out_root="outputs"):
+def run(N=128, scheme='semilagrangian', t_end=8.0, reinit=False, out_root="outputs",
+        snapshot_times=None):
+    import h5py
     Lx = Ly = 1.0
     U_lid = 1.0
     X, Y, dx, dy = create_grid(N, N, Lx, Ly)
     bc = lambda u, v: no_slip_lid_bc(u, v, U_lid)
+    # field snapshots to dump (h5) when the simulation time crosses each target
+    snap_targets = sorted(snapshot_times) if snapshot_times else []
+    snap_idx = 0
 
     # disc
     x0, y0, R = 0.6, 0.5, 0.2
@@ -102,6 +107,18 @@ def run(N=128, scheme='semilagrangian', t_end=8.0, reinit=False, out_root="outpu
         cx, cy = disc_centroid(phi, X, Y)
         t += dt
         traj.append((t, cx, cy, J.min(), J.max()))
+
+        # dump field snapshot when t crosses the next requested target time
+        while snap_idx < len(snap_targets) and t >= snap_targets[snap_idx]:
+            tt = snap_targets[snap_idx]
+            with h5py.File(os.path.join(out_dir, f"snap_t{tt:05.2f}.h5"), "w") as f:
+                for nm, arr in (("phi", phi), ("X1", X1), ("X2", X2), ("a", a),
+                                ("b", b), ("p", p), ("J", J), ("sigma_xx", sxx),
+                                ("sigma_xy", sxy), ("sigma_yy", syy)):
+                    f.create_dataset(nm, data=arr)
+                f.attrs["t"] = t; f.attrs["t_target"] = tt
+            snap_idx += 1
+
         if step % 100 == 0 or t >= t_end:
             ke = compute_kinetic_energy(a, b, rho_f, rho_s, phi, w_t, dx, dy)
             print(f"  step {step:5d} t={t:6.3f} centroid=({cx:.4f},{cy:.4f}) "
