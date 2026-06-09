@@ -470,7 +470,7 @@ def advect_reference_map(q, a, b, X, Y, dt, dx, dy, phi,
 
 
 @njit(parallel=True)
-def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, w_cut=0.0):
+def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, w_cut=0.0, detg_clamp=0.0):
     """Neo-Hookean Cauchy stress sigma = mu_s*b + kappa*(J-1)*I from the
     reference map.
 
@@ -498,24 +498,55 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, w_cut=0.0):
             in_band = (phi[j, i] < w_cut) if w_cut > 0.0 else (phi[j, i] <= 0.0)
             if in_band:
                 # 1. Gradients of Reference Map X (G = grad_x X).
-                # CENTRAL differences everywhere: the reference map is
-                # extrapolated through the band, so neighbours are valid smooth
-                # continuations (Jain et al. 2019 use central, not one-sided).
-                g11 = (X1[j, i+1] - X1[j, i-1]) * inv_2dx
-                g21 = (X2[j, i+1] - X2[j, i-1]) * inv_2dx
-                g12 = (X1[j+1, i] - X1[j-1, i]) * inv_2dy
-                g22 = (X2[j+1, i] - X2[j-1, i]) * inv_2dy
+                if w_cut > 0.0:
+                    # BAND mode: central everywhere. The reference map is
+                    # extrapolated through the band, so neighbours are valid
+                    # smooth continuations (Jain et al. 2019 use central).
+                    g11 = (X1[j, i+1] - X1[j, i-1]) * inv_2dx
+                    g21 = (X2[j, i+1] - X2[j, i-1]) * inv_2dx
+                    g12 = (X1[j+1, i] - X1[j-1, i]) * inv_2dy
+                    g22 = (X2[j+1, i] - X2[j-1, i]) * inv_2dy
+                else:
+                    # LEGACY interior mode (robust default): one-sided stencil
+                    # when a neighbour is fluid, to avoid mixing solid and
+                    # extrapolated fluid-side values.
+                    left_fluid  = phi[j, i-1] > 0.0
+                    right_fluid = phi[j, i+1] > 0.0
+                    if left_fluid and not right_fluid:
+                        g11 = (X1[j, i+1] - X1[j, i]) / dx
+                        g21 = (X2[j, i+1] - X2[j, i]) / dx
+                    elif right_fluid and not left_fluid:
+                        g11 = (X1[j, i] - X1[j, i-1]) / dx
+                        g21 = (X2[j, i] - X2[j, i-1]) / dx
+                    else:
+                        g11 = (X1[j, i+1] - X1[j, i-1]) * inv_2dx
+                        g21 = (X2[j, i+1] - X2[j, i-1]) * inv_2dx
+
+                    bot_fluid = phi[j-1, i] > 0.0
+                    top_fluid = phi[j+1, i] > 0.0
+                    if bot_fluid and not top_fluid:
+                        g12 = (X1[j+1, i] - X1[j, i]) / dy
+                        g22 = (X2[j+1, i] - X2[j, i]) / dy
+                    elif top_fluid and not bot_fluid:
+                        g12 = (X1[j, i] - X1[j-1, i]) / dy
+                        g22 = (X2[j, i] - X2[j-1, i]) / dy
+                    else:
+                        g12 = (X1[j+1, i] - X1[j-1, i]) * inv_2dy
+                        g22 = (X2[j+1, i] - X2[j-1, i]) * inv_2dy
 
                 # 2. Deformation Gradient F = inv(G)
                 detG = g11 * g22 - g12 * g21
                 if abs(detG) < 1e-10:
                     continue
-                # Clamp detG: prevents J from blowing up when the reference map
-                # folds. Bounds J to [1/3, 3]. Normal operation stays in ~[0.6, 1.1].
-                # if detG < 0.33:
-                #     detG = 0.33
-                # elif detG > 3.0:
-                #     detG = 3.0
+                # Localized detG clamp: bounds J = 1/detG to [1/C, C] so a single
+                # corrupt/folded cell (common in the extrapolated band on coarse
+                # grids) cannot drive a stress blow-up. Off when detg_clamp <= 0.
+                if detg_clamp > 0.0:
+                    lo = 1.0 / detg_clamp
+                    if detG < lo:
+                        detG = lo
+                    elif detG > detg_clamp:
+                        detG = detg_clamp
 
                 # F components
                 f11, f12 =  g22 / detG, -g12 / detG
@@ -571,17 +602,26 @@ def heaviside_smooth_alt(x, w_t):
 
     return H
 
-def velocity_RK4(u, v, p, X1, X2, velocity_bc, mu_s, kappa, eta_s , dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t, gamma=0.0):
+def velocity_RK4(u, v, p, X1, X2, velocity_bc, mu_s, kappa, eta_s , dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t, gamma=0.0,
+                 stress_band=False, detg_clamp=3.0):
     """
     RK4 integration using stress divergence from blended stress field.
+
+    stress_band : if True, compute the solid stress over the whole smoothed-
+        Heaviside blend region (phi < w_t) with central grad(xi) and a localized
+        detG clamp (detg_clamp). This improves pressure/velocity convergence but
+        needs a clean reference map; it can destabilise very coarse grids, so it
+        is OFF by default (legacy one-sided, interior-only stress -- robust).
+    detg_clamp : J=1/detG bound used only when stress_band is True.
     """
 
-    # PRE-COMPUTE ELASTIC STRESS (independent of velocity during RK4 stages)
-    # Only the reference maps (X1, X2) and phi matter for elastic stress.
-    # Compute it over the whole blend band (phi < w_t) so the blended stress is
-    # continuous across the interface (2nd-order fields).
+    # PRE-COMPUTE ELASTIC STRESS (independent of velocity during RK4 stages).
+    # Default (stress_band=False): legacy interior-only one-sided stress (robust).
+    # stress_band=True: banded central stress over phi < w_t (higher order).
+    w_cut_stress = w_t if stress_band else 0.0
+    clamp = detg_clamp if stress_band else 0.0
     sigma_sxx_elastic, sigma_sxy_elastic, sigma_syy_elastic, J = compute_solid_stress(
-        X1, X2, dx, dy, mu_s, kappa, phi, w_cut=w_t)
+        X1, X2, dx, dy, mu_s, kappa, phi, w_cut=w_cut_stress, detg_clamp=clamp)
 
     # PRE-COMPUTE HEAVISIDE AND GRADIENTS (constant during RK4)
     H = heaviside_smooth_alt(phi, w_t)
