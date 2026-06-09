@@ -115,13 +115,17 @@ def compute_strain_energy(X1, X2, phi, mu_s, dx, dy, kappa=0.0):
             # I_1 = tr(C) = C11 + C22
             I1 = C11 + C22
 
-            # Full compressible Neo-Hookean energy density:
-            # W = (μ/2)(I₁ - 2 - 2·ln J) + (κ/2)(J-1)²
-            # Consistent with σ = (μ/J)(B-I) + κ(J-1)I
+            # Strain-energy density CONSISTENT with the solver's Cauchy stress
+            # sigma = mu_s * b + kappa*(J-1) I  (compute_solid_stress):
+            #   deviatoric : W_dev = (mu_s/2)(I1 - 2)        -> sigma_dev = mu_s b
+            #   volumetric : W_vol = (kappa/2)(J-1)^2         -> sigma_vol = kappa(J-1) I
+            # NOTE: the previous form had an extra -2*ln(J) term, which belongs to
+            # the sigma=(mu/J)(b-I) model, NOT the sigma=mu_s b model used here.
+            # For the incompressible benchmarks (kappa=0, J->1) this reduces to the
+            # Jain et al. (2019) Eq. 38 strain energy.
             J_vals = np.ones_like(detG)
             J_vals[good] = 1.0 / detG[good]
-            J_safe = np.abs(J_vals)  # guard against clamped negative detG
-            se_density[good] = (0.5 * mu_s * (I1[good] - 2.0 - 2.0 * np.log(J_safe[good]))
+            se_density[good] = (0.5 * mu_s * (I1[good] - 2.0)
                                 + 0.5 * kappa * (J_vals[good] - 1.0)**2)
 
     # Integrate over solid domain
