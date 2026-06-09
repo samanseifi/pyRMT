@@ -36,7 +36,7 @@ from benchmarks.common import (free_slip_box_bc, initialize_disc,
                                disc_centroid, ensure_dir)
 
 
-def run(N=128, scheme='semilagrangian', t_end=1.0, out_root="outputs"):
+def run(N=128, scheme='semilagrangian', t_end=1.0, out_root="outputs", stress_band=False):
     Lx = Ly = 1.0
     X, Y, dx, dy = create_grid(N, N, Lx, Ly)
 
@@ -95,7 +95,7 @@ def run(N=128, scheme='semilagrangian', t_end=1.0, out_root="outputs"):
 
         a_star, b_star, sxx, sxy, syy, J = velocity_RK4(
             a, b, p, X1, X2, free_slip_box_bc, mu_s, kappa, eta_s, dx, dy, dt,
-            rho_s, rho_f, phi, mu_f, w_t, gamma)
+            rho_s, rho_f, phi, mu_f, w_t, gamma=0.0, stress_band=stress_band)
 
         H = heaviside_smooth_alt(phi, w_t)
         rho_local = (1 - H) * rho_s + H * rho_f

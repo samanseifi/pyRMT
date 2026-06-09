@@ -35,7 +35,7 @@ from benchmarks.common import (no_slip_lid_bc, initialize_disc, check_narrow_ban
 
 
 def run(N=128, scheme='semilagrangian', t_end=8.0, reinit=False, out_root="outputs",
-        snapshot_times=None):
+        snapshot_times=None, stress_band=False, detg_clamp=3.0):
     import h5py
     Lx = Ly = 1.0
     U_lid = 1.0
@@ -96,7 +96,7 @@ def run(N=128, scheme='semilagrangian', t_end=8.0, reinit=False, out_root="outpu
 
         a_star, b_star, sxx, sxy, syy, J = velocity_RK4(
             a, b, p, X1, X2, bc, mu_s, kappa, eta_s, dx, dy, dt,
-            rho_s, rho_f, phi, mu_f, w_t, gamma)
+            rho_s, rho_f, phi, mu_f, w_t, gamma, stress_band=stress_band, detg_clamp=detg_clamp)
 
         H = heaviside_smooth_alt(phi, w_t)
         rho_local = (1 - H) * rho_s + H * rho_f

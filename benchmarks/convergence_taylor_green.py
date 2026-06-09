@@ -35,7 +35,7 @@ from benchmarks.common import (free_slip_box_bc, initialize_disc,
                                taylor_green_velocity, check_narrow_band, ensure_dir)
 
 
-def simulate_tg(N, scheme, t_end=0.25, dt=1.0e-4):
+def simulate_tg(N, scheme, t_end=0.25, dt=1.0e-4, stress_band=False):
     """Run disc-in-TG to t_end with fixed dt; return final fields + energies."""
     X, Y, dx, dy = create_grid(N, N, 1.0, 1.0)
     x0, y0, R = 0.5, 0.5, 0.2
@@ -71,7 +71,7 @@ def simulate_tg(N, scheme, t_end=0.25, dt=1.0e-4):
 
         a_star, b_star, *_ , J = velocity_RK4(
             a, b, p, X1, X2, free_slip_box_bc, mu_s, kappa, eta_s, dx, dy, dt,
-            rho_s, rho_f, phi, mu_f, w_t, gamma=0.0)
+            rho_s, rho_f, phi, mu_f, w_t, gamma=0.0, stress_band=stress_band)
         H = heaviside_smooth_alt(phi, w_t)
         rho_local = (1 - H) * rho_s + H * rho_f
         a, b, p, A, ml = pressure_projection_amg(
@@ -112,11 +112,12 @@ def richardson_order(values):
     return out
 
 
-def run(scheme='semilagrangian', grids=(32, 64, 128, 256), N_ref=512, t_end=0.25, dt=1.0e-4):
+def run(scheme='semilagrangian', grids=(32, 64, 128, 256), N_ref=512, t_end=0.25, dt=1.0e-4,
+        stress_band=False):
     print(f"[convergence-TG] scheme={scheme} grids={grids} ref={N_ref} t={t_end} dt={dt}")
     sols = {}
     for N in list(grids) + [N_ref]:
-        sols[N] = simulate_tg(N, scheme, t_end, dt)
+        sols[N] = simulate_tg(N, scheme, t_end, dt, stress_band=stress_band)
         s = sols[N]
         print(f"  N={N:4d}  dx={s['dx']:.5f}  ke={s['ke']:.6e}  se={s['se']:.6e}")
 
