@@ -470,7 +470,20 @@ def advect_reference_map(q, a, b, X, Y, dt, dx, dy, phi,
 
 
 @njit(parallel=True)
-def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi):
+def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, w_cut=0.0):
+    """Neo-Hookean Cauchy stress sigma = mu_s*b + kappa*(J-1)*I from the
+    reference map.
+
+    w_cut : band cutoff. Stress is computed for every cell with phi < w_cut so
+            that it is defined over the WHOLE smoothed-Heaviside blend region
+            (1-H) > 0 (i.e. out to phi = w_t), not just the sharp interior
+            phi <= 0.  This removes the O(dx) stress discontinuity at phi=0 that
+            otherwise caps the velocity/pressure convergence at 1st order.
+            The reference map is extrapolated num_layers >= ceil(w_t/dx)+1 cells
+            into the fluid, so the CENTRAL stencils below see valid (smooth)
+            neighbours throughout the band.  w_cut <= 0 reproduces the legacy
+            phi <= 0 interior-only behaviour.
+    """
     Ny, Nx = X1.shape
     sxx = np.zeros((Ny, Nx))
     sxy = np.zeros((Ny, Nx))
@@ -482,40 +495,16 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi):
 
     for j in prange(1, Ny - 1):
         for i in range(1, Nx - 1):
-            if phi[j, i] <= 0:
-                # 1. Gradients of Reference Map X (G = grad_x X)
-                # Use one-sided stencil when a neighbor is in the fluid (phi > 0),
-                # to avoid mixing solid and extrapolated fluid-side values.
-                # x-direction (g11, g21)
-                left_fluid  = phi[j, i-1] > 0.0
-                right_fluid = phi[j, i+1] > 0.0
-                if left_fluid and not right_fluid:
-                    # forward difference
-                    g11 = (X1[j, i+1] - X1[j, i]) / dx
-                    g21 = (X2[j, i+1] - X2[j, i]) / dx
-                elif right_fluid and not left_fluid:
-                    # backward difference
-                    g11 = (X1[j, i] - X1[j, i-1]) / dx
-                    g21 = (X2[j, i] - X2[j, i-1]) / dx
-                else:
-                    # central (both solid, or both fluid — latter is rare boundary case)
-                    g11 = (X1[j, i+1] - X1[j, i-1]) * inv_2dx
-                    g21 = (X2[j, i+1] - X2[j, i-1]) * inv_2dx
-
-                # y-direction (g12, g22)
-                bot_fluid = phi[j-1, i] > 0.0
-                top_fluid = phi[j+1, i] > 0.0
-                if bot_fluid and not top_fluid:
-                    # forward difference
-                    g12 = (X1[j+1, i] - X1[j, i]) / dy
-                    g22 = (X2[j+1, i] - X2[j, i]) / dy
-                elif top_fluid and not bot_fluid:
-                    # backward difference
-                    g12 = (X1[j, i] - X1[j-1, i]) / dy
-                    g22 = (X2[j, i] - X2[j-1, i]) / dy
-                else:
-                    g12 = (X1[j+1, i] - X1[j-1, i]) * inv_2dy
-                    g22 = (X2[j+1, i] - X2[j-1, i]) * inv_2dy
+            in_band = (phi[j, i] < w_cut) if w_cut > 0.0 else (phi[j, i] <= 0.0)
+            if in_band:
+                # 1. Gradients of Reference Map X (G = grad_x X).
+                # CENTRAL differences everywhere: the reference map is
+                # extrapolated through the band, so neighbours are valid smooth
+                # continuations (Jain et al. 2019 use central, not one-sided).
+                g11 = (X1[j, i+1] - X1[j, i-1]) * inv_2dx
+                g21 = (X2[j, i+1] - X2[j, i-1]) * inv_2dx
+                g12 = (X1[j+1, i] - X1[j-1, i]) * inv_2dy
+                g22 = (X2[j+1, i] - X2[j-1, i]) * inv_2dy
 
                 # 2. Deformation Gradient F = inv(G)
                 detG = g11 * g22 - g12 * g21
@@ -588,8 +577,11 @@ def velocity_RK4(u, v, p, X1, X2, velocity_bc, mu_s, kappa, eta_s , dx, dy, dt, 
     """
 
     # PRE-COMPUTE ELASTIC STRESS (independent of velocity during RK4 stages)
-    # Only the reference maps (X1, X2) and phi matter for elastic stress
-    sigma_sxx_elastic, sigma_sxy_elastic, sigma_syy_elastic, J = compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi)
+    # Only the reference maps (X1, X2) and phi matter for elastic stress.
+    # Compute it over the whole blend band (phi < w_t) so the blended stress is
+    # continuous across the interface (2nd-order fields).
+    sigma_sxx_elastic, sigma_sxy_elastic, sigma_syy_elastic, J = compute_solid_stress(
+        X1, X2, dx, dy, mu_s, kappa, phi, w_cut=w_t)
 
     # PRE-COMPUTE HEAVISIDE AND GRADIENTS (constant during RK4)
     H = heaviside_smooth_alt(phi, w_t)
