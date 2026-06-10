@@ -69,7 +69,7 @@ if __name__ == "__main__":
 
     # Extrapolate 3 layers into the fluid for numerical stability at the interface
     num_extrapolation_layers = 3
-    X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, 3 * dx, num_extrapolation_layers)
+    X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, num_extrapolation_layers)
 
     # --------------------------
     # Physical Properties
@@ -120,7 +120,7 @@ if __name__ == "__main__":
         curr_solid_mask = (phi <= 0).astype(float)
         X1 *= curr_solid_mask
         X2 *= curr_solid_mask
-        X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, 3 * dx, num_extrapolation_layers)
+        X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, num_extrapolation_layers)
 
         # 4. Velocity Prediction (RK4)
         a_star, b_star = velocity_RK4(a, b, p, X1, X2, slab_piston_bc, mu_s, kappa, eta_s, dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t, gamma)

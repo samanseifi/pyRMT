@@ -9,7 +9,6 @@
 import numpy as np
 from numba import njit, prange
 import pyamg
-from scipy.ndimage import gaussian_filter
 from scipy.sparse import lil_matrix
 from scipy.sparse.linalg import LinearOperator, cg
 from scipy.fft import dctn, idctn
@@ -47,10 +46,11 @@ def apply_phi_BCs(phi):
     return phi
 
 @njit
-def extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, band_width, max_layers):
+def extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, max_layers):
     """
     Extrapolate solid reference maps (X1, X2) into fluid region.
-    Iteratively extrapolates layer-by-layer near the interface.
+    Iteratively extrapolates layer-by-layer near the interface; the band width is
+    set by `max_layers` (number of cell layers grown beyond the interface).
     
     Seed known values:
         1.  Copy solid data (phi < 0) into X_ext and mark those cells as “known.”
@@ -564,28 +564,9 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, w_cut=0.0, detg_clamp
                 # 5. Neo-Hookean Stress (Kamrin form): sigma = mu*B + kappa*(J-1)*I
                 vol_term = kappa * (j_val - 1.0)
 
-                s_xx = mu_s * b11 + vol_term
-                s_xy = mu_s * b12
-                s_yy = mu_s * b22 + vol_term
-
-                # Clamp stress magnitude: cap at 50*mu_s to prevent blow-up
-                # from corrupt reference map without zeroing the stress direction.
-                # stress_mag = (s_xx*s_xx + 2.0*s_xy*s_xy + s_yy*s_yy) ** 0.5
-                # max_stress = 50.0 * mu_s
-                # if stress_mag > max_stress:
-                #     scale = max_stress / stress_mag
-                #     s_xx *= scale
-                #     s_xy *= scale
-                #     s_yy *= scale
-
-                sxx[j, i] = s_xx
-                sxy[j, i] = s_xy
-                syy[j, i] = s_yy
-
-    # apply smoothing
-    # sxx = gaussian_filter(sxx, sigma=0.5)
-    # sxy = gaussian_filter(sxy, sigma=0.5)
-    # syy = gaussian_filter(syy, sigma=0.5)
+                sxx[j, i] = mu_s * b11 + vol_term
+                sxy[j, i] = mu_s * b12
+                syy[j, i] = mu_s * b22 + vol_term
 
     return sxx, sxy, syy, J
 

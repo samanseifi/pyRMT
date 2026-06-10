@@ -57,7 +57,7 @@ def run(N=128, scheme='semilagrangian', t_end=1.0, out_root="outputs", stress_ba
     # reference maps
     X1 = X * solid_mask
     X2 = Y * solid_mask
-    X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, w_t, num_layers)
+    X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, num_layers)
 
     # initial Taylor-Green field
     a, b = taylor_green_velocity(X, Y, U0=0.05)
@@ -89,7 +89,7 @@ def run(N=128, scheme='semilagrangian', t_end=1.0, out_root="outputs", stress_ba
         w_cut = 0.0
         X1 = advect_reference_map(X1, a, b, X, Y, dt, dx, dy, phi, scheme, w_cut) * solid_mask
         X2 = advect_reference_map(X2, a, b, X, Y, dt, dx, dy, phi, scheme, w_cut) * solid_mask
-        X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, w_t, num_layers)
+        X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, num_layers)
 
         phi = rebuild_phi_from_reference_map(X1, X2, phi_init)
 

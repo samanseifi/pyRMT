@@ -60,7 +60,7 @@ def run(N=128, scheme='semilagrangian', t_end=8.0, reinit=False, out_root="outpu
 
     X1 = X * solid_mask
     X2 = Y * solid_mask
-    X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, w_t, num_layers)
+    X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, num_layers)
 
     a = np.zeros((N, N)); b = np.zeros((N, N)); p = np.zeros((N, N))
 
@@ -90,7 +90,7 @@ def run(N=128, scheme='semilagrangian', t_end=8.0, reinit=False, out_root="outpu
 
         X1 = advect_reference_map(X1, a, b, X, Y, dt, dx, dy, phi, scheme, 0.0) * solid_mask
         X2 = advect_reference_map(X2, a, b, X, Y, dt, dx, dy, phi, scheme, 0.0) * solid_mask
-        X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, w_t, num_layers)
+        X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, num_layers)
 
         phi = rebuild_phi_from_reference_map(X1, X2, phi_init)
 

@@ -50,7 +50,7 @@ def simulate_tg(N, scheme, t_end=0.25, dt=1.0e-4, stress_band=False):
 
     X1 = X * solid_mask
     X2 = Y * solid_mask
-    X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, w_t, num_layers)
+    X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, num_layers)
 
     a, b = taylor_green_velocity(X, Y, U0=0.05)
     a, b = free_slip_box_bc(a, b)
@@ -66,7 +66,7 @@ def simulate_tg(N, scheme, t_end=0.25, dt=1.0e-4, stress_band=False):
         solid_mask = (phi <= 0).astype(float)
         X1 = advect_reference_map(X1, a, b, X, Y, dt, dx, dy, phi, scheme, 0.0) * solid_mask
         X2 = advect_reference_map(X2, a, b, X, Y, dt, dx, dy, phi, scheme, 0.0) * solid_mask
-        X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, w_t, num_layers)
+        X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, num_layers)
         phi = rebuild_phi_from_reference_map(X1, X2, phi_init)
 
         a_star, b_star, *_ , J = velocity_RK4(
