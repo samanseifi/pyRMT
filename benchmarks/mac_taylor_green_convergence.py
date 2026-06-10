@@ -50,19 +50,40 @@ def run_one(N, nu=0.05, T=0.2, dt=2e-4):
     return erru, divmax
 
 
-def run():
+def run(out_root="outputs"):
     nu, T, dt = 0.05, 0.2, 2e-4
-    Ns = [32, 64, 128]
+    Ns = [32, 64, 128, 256]
     print(f"[MAC TG conv] nu={nu} T={T} dt={dt} (forward-Euler, central)")
-    errs = []
+    errs, divs = [], []
     for N in Ns:
         e, dmax = run_one(N, nu, T, dt)
-        errs.append(e)
+        errs.append(e); divs.append(dmax)
         print(f"  N={N:4d}  L2 err(u)={e:.3e}  max|div|={dmax:.1e}")
     print("  spatial order (Richardson):")
     for k in range(1, len(Ns)):
         p = np.log(errs[k - 1] / errs[k]) / np.log(Ns[k] / Ns[k - 1])
         print(f"    N {Ns[k-1]}->{Ns[k]}:  order = {p:.2f}")
+
+    out_dir = os.path.join(out_root, "mac_taylor_green"); os.makedirs(out_dir, exist_ok=True)
+    np.savetxt(os.path.join(out_dir, "tg_convergence.csv"),
+               np.column_stack([Ns, errs, divs]), delimiter=",",
+               header="N,L2_err_u,max_div", comments="")
+    try:
+        import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
+        h = np.array([1.0 / N for N in Ns]); errs = np.array(errs)
+        plt.figure(figsize=(6, 5))
+        plt.loglog(h, errs, "o-", lw=2, ms=7, label="MAC L2 error vs analytic")
+        plt.loglog(h, errs[0] * (h / h[0]) ** 2, "k--", label="2nd-order ref")
+        plt.gca().invert_xaxis()
+        for N, hh, e in zip(Ns, h, errs):
+            plt.annotate(f"N={N}", (hh, e), textcoords="offset points", xytext=(6, 6), fontsize=8)
+        plt.xlabel("h = 1/N"); plt.ylabel("L2 error in u vs exact Taylor-Green")
+        plt.title("Pure-fluid Taylor-Green decay: MAC spatial convergence (2nd order)")
+        plt.legend(); plt.grid(True, which="both", alpha=.3); plt.tight_layout()
+        plt.savefig(os.path.join(out_dir, "convergence.png"), dpi=130)
+        print(f"  saved {out_dir}/convergence.png")
+    except Exception as e:
+        print(f"  (plot skipped: {e})")
     return Ns, errs
 
 
