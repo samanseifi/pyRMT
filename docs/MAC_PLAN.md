@@ -27,3 +27,23 @@ Kept on a separate branch (`mac-staggered`); collocated stays on `main` as fallb
 6. **FSI**: soft disc in lid-driven vs Sugiyama; disc-in-TG energy.
 
 Proceed phase by phase; do not advance until the phase's tests pass.
+
+## Results so far
+
+### Phase 1-2 (operators + projection) — DONE, 5 unit tests pass
+- div(grad p) == DCT Laplacian to machine precision (consistency).
+- projection -> divergence < 1e-11 (vs collocated ~0.07% residual).
+
+### Phase 3-4 (momentum + lid-driven cavity) — DONE, validated vs Ghia (1982)
+| case | MAC RMS vs Ghia | collocated (main) | max\|div\| |
+|---|---|---|---|
+| Re=100, N=128  | 6.6e-3 | 1.7e-3* | ~3e-14 |
+| Re=1000, N=128 | **1.57e-2** | 2.78e-2 | ~3e-14 |
+- *collocated used N=129 nodes aligned with Ghia's grid; MAC N=128 cell-centres
+  need interpolation, which dominates the Re=100 RMS difference.
+- MAC Re=1000 is **better** than collocated (non-dissipative central advection +
+  exact projection) and stable with NO upwinding.
+- convergence: Re=100 RMS 1.27e-2 (N=64) -> 6.6e-3 (N=128).
+- divergence is machine-zero at every step (the structural win).
+
+### Next: Phase 5 (reference map, semi-Lagrangian) then Phase 6 (FSI).
