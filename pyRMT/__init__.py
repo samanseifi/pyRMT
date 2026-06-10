@@ -10,6 +10,7 @@ from pyRMT.functions import (
     solid_cauchy_stress,
     smoothed_heaviside,
     momentum_step_rk4,
+    momentum_step_rk4_2solids,
     compute_curvature,
     compute_contact_force,
     velocity_rhs_blended_optimized,

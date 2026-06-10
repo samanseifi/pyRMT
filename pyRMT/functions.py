@@ -675,6 +675,73 @@ def momentum_step_rk4(u, v, p, X1, X2, velocity_bc, mu_s, kappa, eta_s , dx, dy,
     return u_new, v_new, sigma_sxx_elastic, sigma_sxy_elastic, sigma_syy_elastic, J
 
 
+def momentum_step_rk4_2solids(u, v, p, X1a, X2a, X1b, X2b, velocity_bc,
+                              mu_s, kappa, eta_s, dx, dy, dt, rho_s, rho_f,
+                              phi_a, phi_b, mu_f, w_t, k_rep=0.0, w_c=None):
+    """RK4 momentum step for TWO neo-Hookean solids sharing one velocity/pressure
+    field, with a repulsive solid-solid contact force.
+
+    Two reference maps (X1a,X2a), (X1b,X2b) give two solid stresses; they are
+    combined with the fluid stress via the n=2 one-fluid mixture (Jain 2019 Eq. 29):
+
+        sigma = (Ha+Hb-1) sigma_f + (1-Ha) sigma_sA + (1-Hb) sigma_sB
+        rho   = (Ha+Hb-1) rho_f   + (1-Ha) rho_s    + (1-Hb) rho_s
+
+    A short-range repulsion `compute_contact_force(phi_a,phi_b,k_rep,w_c)` is added
+    as a body force (k_rep<=0 disables it). Returns (u_new, v_new, min(Ja,Jb)).
+    """
+    if w_c is None:
+        w_c = 2.0 * w_t
+
+    # elastic stresses (constant during the RK4 stages)
+    sAxx, sAxy, sAyy, Ja = solid_cauchy_stress(X1a, X2a, dx, dy, mu_s, kappa, phi_a)
+    sBxx, sBxy, sByy, Jb = solid_cauchy_stress(X1b, X2b, dx, dy, mu_s, kappa, phi_b)
+
+    Ha = smoothed_heaviside(phi_a, w_t)
+    Hb = smoothed_heaviside(phi_b, w_t)
+    Hf = Ha + Hb - 1.0                                  # fluid fraction
+    rho_local = Hf * rho_f + (1.0 - Ha) * rho_s + (1.0 - Hb) * rho_s
+
+    if k_rep > 0.0:
+        fcx, fcy = compute_contact_force(phi_a, phi_b, k_rep, w_c, dx, dy)
+    else:
+        fcx = fcy = 0.0
+
+    def rhs(u_stage, v_stage):
+        u_stage, v_stage = apply_velocity_BCs(velocity_bc, u_stage, v_stage)
+        du_dx = grad_central_x_2nd(u_stage, dx)
+        dv_dy = grad_central_y_2nd(v_stage, dy)
+        du_dy = grad_central_y_2nd(u_stage, dy)
+        dv_dx = grad_central_x_2nd(v_stage, dx)
+        sfxx = 2.0 * mu_f * du_dx
+        sfyy = 2.0 * mu_f * dv_dy
+        sfxy = mu_f * (du_dy + dv_dx)
+        # n=2 blended Cauchy stress
+        sig_xx = Hf * sfxx + (1.0 - Ha) * sAxx + (1.0 - Hb) * sBxx
+        sig_yy = Hf * sfyy + (1.0 - Ha) * sAyy + (1.0 - Hb) * sByy
+        sig_xy = Hf * sfxy + (1.0 - Ha) * sAxy + (1.0 - Hb) * sBxy
+        div_x = grad_central_x_2nd(sig_xx, dx) + grad_central_y_2nd(sig_xy, dy)
+        div_y = grad_central_x_2nd(sig_xy, dx) + grad_central_y_2nd(sig_yy, dy)
+        u_adv = -u_stage * diff_upwind_3rd(u_stage, u_stage, dx, 1) \
+                - v_stage * diff_upwind_3rd(u_stage, v_stage, dy, 0)
+        v_adv = -u_stage * diff_upwind_3rd(v_stage, u_stage, dx, 1) \
+                - v_stage * diff_upwind_3rd(v_stage, v_stage, dy, 0)
+        dp_dx = grad_central_x_2nd(p, dx)
+        dp_dy = grad_central_y_2nd(p, dy)
+        rhs_u = u_adv + (div_x + fcx - dp_dx) / (rho_local + 1e-12)
+        rhs_v = v_adv + (div_y + fcy - dp_dy) / (rho_local + 1e-12)
+        return rhs_u, rhs_v
+
+    k1u, k1v = rhs(u, v)
+    k2u, k2v = rhs(u + 0.5 * dt * k1u, v + 0.5 * dt * k1v)
+    k3u, k3v = rhs(u + 0.5 * dt * k2u, v + 0.5 * dt * k2v)
+    k4u, k4v = rhs(u + dt * k3u, v + dt * k3v)
+    u_new = u + (dt / 6.0) * (k1u + 2 * k2u + 2 * k3u + k4u)
+    v_new = v + (dt / 6.0) * (k1v + 2 * k2v + 2 * k3v + k4v)
+    u_new, v_new = apply_velocity_BCs(velocity_bc, u_new, v_new)
+    return u_new, v_new, np.minimum(Ja, Jb)
+
+
 @njit(cache=True)
 def compute_curvature(phi, dx, dy) -> np.ndarray:
     """
