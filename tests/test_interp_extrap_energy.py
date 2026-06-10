@@ -62,3 +62,20 @@ def test_strain_energy_matches_stress_no_lnJ():
     solid_area = np.sum(phi <= 0) * dx * dy
     expected = 0.5 * mu_s * (lam**2 - 1.0) * solid_area
     assert abs(se - expected) / expected < 0.05
+
+
+def test_interpolators_handle_nonfinite_coords():
+    """Non-finite query coordinates must yield NaN, not a segfault
+    (int(floor(NaN)) would index out of bounds)."""
+    N = 33
+    X, Y, dx, dy = create_grid(N, N, 1.0, 1.0)
+    u = (2.0 * X + 3.0 * Y).copy()
+    xq = X.copy(); yq = Y.copy()
+    xq[0, 0] = np.nan; yq[1, 1] = np.inf; xq[2, 2] = -np.inf
+    # huge finite values must not overflow the float->int cast (segfault)
+    xq[3, 3] = 1e200; yq[4, 4] = -1e200
+    for interp in (bilinear_interpolate, bicubic_interpolate):
+        out = interp(u, xq, yq, dx, dy, N, N)
+        assert np.isnan(out[0, 0]) and np.isnan(out[1, 1]) and np.isnan(out[2, 2])
+        assert np.all(np.isfinite(out[5:, 5:]))   # finite queries still fine
+        assert np.isfinite(out[3, 3]) and np.isfinite(out[4, 4])  # huge -> clamped

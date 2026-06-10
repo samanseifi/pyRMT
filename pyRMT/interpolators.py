@@ -22,22 +22,31 @@ def bilinear_interpolate(u, xq, yq, dx, dy, Nx, Ny):
             x = xq[j, i] / dx
             y = yq[j, i] / dy
 
+            # Guard against non-finite query coordinates: int(floor(NaN/Inf)) is
+            # undefined and indexes out of bounds (segfault). Fail gracefully so
+            # an upstream instability surfaces as NaN rather than a crash.
+            if not (np.isfinite(x) and np.isfinite(y)):
+                out[j, i] = np.nan
+                continue
+
+            # Clamp the float coordinate into range BEFORE the int cast. A huge
+            # (but finite) value would overflow float->int and index out of
+            # bounds; clamping first keeps the cast well-defined.
+            if x < 0.0:
+                x = 0.0
+            elif x > Nx - 1.0:
+                x = Nx - 1.0
+            if y < 0.0:
+                y = 0.0
+            elif y > Ny - 1.0:
+                y = Ny - 1.0
+
             ix = int(np.floor(x))
             iy = int(np.floor(y))
-
-            # Clamp indices to valid range instead of returning 0
-            if ix < 0:
-                ix = 0
-                x = 0.0
-            elif ix >= Nx - 1:
+            if ix >= Nx - 1:
                 ix = Nx - 2
-                x = float(Nx - 2)
-            if iy < 0:
-                iy = 0
-                y = 0.0
-            elif iy >= Ny - 1:
+            if iy >= Ny - 1:
                 iy = Ny - 2
-                y = float(Ny - 2)
 
             fx = x - ix
             fy = y - iy
@@ -65,7 +74,23 @@ def bicubic_interpolate(u, xq, yq, dx, dy, Nx, Ny):
             # Normalized coordinates
             x_idx = xq[j, i] / dx
             y_idx = yq[j, i] / dy
-            
+
+            # Guard against non-finite query coordinates (see bilinear_interpolate).
+            if not (np.isfinite(x_idx) and np.isfinite(y_idx)):
+                out[j, i] = np.nan
+                continue
+
+            # Clamp float coords before the int cast (avoid float->int overflow on
+            # huge finite values); per-point stencil indices are clamped below.
+            if x_idx < 0.0:
+                x_idx = 0.0
+            elif x_idx > Nx - 1.0:
+                x_idx = Nx - 1.0
+            if y_idx < 0.0:
+                y_idx = 0.0
+            elif y_idx > Ny - 1.0:
+                y_idx = Ny - 1.0
+
             # Integer part (bottom-left corner of the central cell)
             ix = int(np.floor(x_idx))
             iy = int(np.floor(y_idx))
