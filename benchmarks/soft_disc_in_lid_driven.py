@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pyRMT.functions import (
     create_grid, apply_phi_BCs, extrapolate_reference_map,
     compute_timestep, advect_reference_map, rebuild_phi_from_reference_map,
-    reinitialize_phi_PDE, momentum_step_rk4, smoothed_heaviside,
+    reinitialize_level_set, momentum_step_rk4, smoothed_heaviside,
     pressure_projection_amg, build_poisson_matrix, _precompute_poisson_eigenvalues,
 )
 from pyRMT.output import compute_kinetic_energy, compute_strain_energy
@@ -34,7 +34,7 @@ from benchmarks.common import (no_slip_lid_bc, initialize_disc, check_narrow_ban
                                disc_centroid, ensure_dir, load_xy_csv)
 
 
-def run(N=128, scheme='semilagrangian', t_end=8.0, reinit=False, out_root="outputs",
+def run(N=128, scheme='semilagrangian', t_end=8.0, reinit_method='none', out_root="outputs",
         snapshot_times=None, stress_band=False, detg_clamp=3.0):
     import h5py
     Lx = Ly = 1.0
@@ -83,9 +83,7 @@ def run(N=128, scheme='semilagrangian', t_end=8.0, reinit=False, out_root="outpu
             dt = t_end - t
 
         phi = rebuild_phi_from_reference_map(X1, X2, phi_init)
-        if reinit:
-            phi = reinitialize_phi_PDE(phi, dx, dy, num_iters=20,
-                                       apply_phi_BCs_func=None, dt_reinit_factor=0.2)
+        phi = reinitialize_level_set(phi, dx, dy, method=reinit_method)
         solid_mask = (phi <= 0).astype(float)
 
         X1 = advect_reference_map(X1, a, b, X, Y, dt, dx, dy, phi, scheme, 0.0) * solid_mask

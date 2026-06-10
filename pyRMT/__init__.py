@@ -19,6 +19,8 @@ from pyRMT.functions import (
     _precompute_poisson_eigenvalues_periodic,
     rebuild_phi_from_reference_map,
     reinitialize_phi_PDE,
+    reinitialize_phi_fmm,
+    reinitialize_level_set,
 )
 
 from pyRMT.output import (

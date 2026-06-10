@@ -15,7 +15,8 @@ setup(
         'numba'
     ],
     extras_require={
-        'test': ['pytest'],
+        'fmm': ['scikit-fmm'],          # fast-marching level-set reinitialization
+        'test': ['pytest', 'scikit-fmm'],
     },
     include_package_data=True,
     zip_safe=False,

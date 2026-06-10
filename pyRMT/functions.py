@@ -1218,6 +1218,47 @@ def reinitialize_phi_PDE(phi_in, dx, dy, num_iters, apply_phi_BCs_func, dt_reini
     return phi
 
 
+def reinitialize_phi_fmm(phi, dx, dy):
+    """Reinitialize the level set to a signed-distance field via the Fast
+    Marching Method (scikit-fmm).
+
+    O(N log N), single pass, no pseudo-time iteration or tuning -- more accurate
+    near the front than the iterative PDE scheme.  Requires `scikit-fmm`
+    (``pip install scikit-fmm``).  `phi` is (Ny, Nx), so the per-axis spacing is
+    [dy, dx] (axis 0 = y, axis 1 = x).
+    """
+    try:
+        import skfmm
+    except ImportError as exc:   # pragma: no cover - optional dependency
+        raise ImportError(
+            "reinitialize_phi_fmm requires scikit-fmm (pip install scikit-fmm)"
+        ) from exc
+    return skfmm.distance(phi, dx=[float(dy), float(dx)])
+
+
+def reinitialize_level_set(phi, dx, dy, method='none', num_iters=20,
+                           dt_reinit_factor=0.2, apply_phi_BCs_func=None):
+    """Reinitialize ``phi`` to (approximately) signed distance — switchable.
+
+    method:
+      'none' : return phi unchanged (e.g. when phi is rebuilt analytically from
+               the reference map each step via the compatibility condition).
+      'pde'  : Sussman-Smereka-Osher iterative upwind PDE (reinitialize_phi_PDE).
+      'fmm'  : Fast Marching Method (reinitialize_phi_fmm) -- accurate, O(N log N).
+    """
+    if method == 'none':
+        return phi
+    elif method == 'pde':
+        return reinitialize_phi_PDE(phi, dx, dy, num_iters, apply_phi_BCs_func,
+                                    dt_reinit_factor)
+    elif method == 'fmm':
+        return reinitialize_phi_fmm(phi, dx, dy)
+    else:
+        raise ValueError(
+            "Unknown reinit method %r (expected 'none', 'pde' or 'fmm')" % (method,)
+        )
+
+
 # ── Deprecated name aliases ───────────────────────────────────────────────────
 # Kept so existing notebooks / external scripts using the old names still work.
 # Prefer the new names in new code.
