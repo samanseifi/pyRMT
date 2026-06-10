@@ -1,7 +1,7 @@
 from numba import njit, prange
 import numpy as np
 
-@njit(parallel=True)
+@njit(parallel=True, cache=True)
 def bilinear_interpolate(u, xq, yq, dx, dy, Nx, Ny):
     """
     Fast bilinear interpolator for 2D grid data.
@@ -52,7 +52,7 @@ def bilinear_interpolate(u, xq, yq, dx, dy, Nx, Ny):
 
     return out
 
-@njit(parallel=True)
+@njit(parallel=True, cache=True)
 def bicubic_interpolate(u, xq, yq, dx, dy, Nx, Ny):
     """
     Bicubic interpolation for Semi-Lagrangian Advection.
@@ -115,7 +115,7 @@ def bicubic_interpolate(u, xq, yq, dx, dy, Nx, Ny):
             
     return out
 
-@njit
+@njit(cache=True)
 def cubic_convolution(v0, v1, v2, v3, x):
     """
     Catmull-Rom Cubic Spline interpolation.

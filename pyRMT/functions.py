@@ -45,7 +45,7 @@ def apply_phi_BCs(phi):
     # phi[:, -1] = phi[:, -2]
     return phi
 
-@njit
+@njit(cache=True)
 def extrapolate_reference_map(X1, X2, phi, dx, dy, max_layers):
     """
     Extrapolate solid reference maps (X1, X2) into fluid region.
@@ -191,7 +191,7 @@ def compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s, gamma, rho_f, m
 
     return dt
 
-@njit
+@njit(cache=True)
 def advect_semilagrangian_rk4(q, a, b, X, Y, dt, dx, dy):
     Ny, Nx = q.shape
 
@@ -229,7 +229,7 @@ def advect_semilagrangian_rk4(q, a, b, X, Y, dt, dx, dy):
 
 # ── WENO5 + SSP-RK3 Eulerian advection ───────────────────────────────────────
 
-@njit
+@njit(cache=True)
 def _weno5_left(vm2, vm1, v0, vp1, vp2):
     """Left-biased WENO5 reconstruction at i+1/2 (upwind for u > 0).
     Uses stencil {q_{i-2}, q_{i-1}, q_i, q_{i+1}, q_{i+2}}.
@@ -262,7 +262,7 @@ def _weno5_left(vm2, vm1, v0, vp1, vp2):
     return w0*r0 + w1*r1 + w2*r2
 
 
-@njit
+@njit(cache=True)
 def _weno5_right(vm1, v0, vp1, vp2, vp3):
     """Right-biased WENO5 reconstruction at i+1/2 (upwind for u < 0).
     Uses stencil {q_{i-1}, q_i, q_{i+1}, q_{i+2}, q_{i+3}}.
@@ -294,7 +294,7 @@ def _weno5_right(vm1, v0, vp1, vp2, vp3):
     return w0*r0 + w1*r1 + w2*r2
 
 
-@njit(parallel=True)
+@njit(parallel=True, cache=True)
 def _weno5_rhs(q, a, b, dx, dy, phi, w_cut):
     """Compute RHS = -(u ∂q/∂x + v ∂q/∂y) using upwind WENO5.
 
@@ -393,7 +393,7 @@ def advect_weno5_rk3(q, a, b, dx, dy, dt, phi, w_cut=0.0):
 
 # ── 2nd-order central difference + SSP-RK3 advection ─────────────────────────
 
-@njit(parallel=True)
+@njit(parallel=True, cache=True)
 def _central2_rhs(q, a, b, dx, dy, phi, w_cut):
     """Compute RHS = -(u ∂q/∂x + v ∂q/∂y) using 2nd-order central differences.
 
@@ -469,7 +469,7 @@ def advect_reference_map(q, a, b, X, Y, dt, dx, dy, phi,
         )
 
 
-@njit(parallel=True)
+@njit(parallel=True, cache=True)
 def solid_cauchy_stress(X1, X2, dx, dy, mu_s, kappa, phi, w_cut=0.0, detg_clamp=0.0):
     """Neo-Hookean Cauchy stress sigma = mu_s*b + kappa*(J-1)*I from the
     reference map.
@@ -675,7 +675,7 @@ def momentum_step_rk4(u, v, p, X1, X2, velocity_bc, mu_s, kappa, eta_s , dx, dy,
     return u_new, v_new, sigma_sxx_elastic, sigma_sxy_elastic, sigma_syy_elastic, J
 
 
-@njit
+@njit(cache=True)
 def compute_curvature(phi, dx, dy) -> np.ndarray:
     """
     Computes curvature kappa = div(grad(phi) / |grad(phi)|)

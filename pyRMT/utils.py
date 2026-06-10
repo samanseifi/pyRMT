@@ -1,7 +1,7 @@
 from numba import njit
 import numpy as np
 
-@njit
+@njit(cache=True)
 def grad_central_x_2nd(f, dx):
     df_dx = np.zeros_like(f)
     # Interior 2nd order central
@@ -13,7 +13,7 @@ def grad_central_x_2nd(f, dx):
     df_dx[:, -1] = (3*f[:, -1] - 4*f[:, -2] + f[:, -3]) / (2*dx)
     return df_dx
 
-@njit
+@njit(cache=True)
 def grad_central_y_2nd(f, dy):
     df_dy = np.zeros_like(f)
     df_dy[1:-1, :] = (f[2:, :] - f[0:-2, :]) / (2 * dy)
@@ -24,7 +24,7 @@ def grad_central_y_2nd(f, dy):
     df_dy[-1, :] = (3*f[-1, :] - 4*f[-2, :] + f[-3, :]) / (2*dy)
     return df_dy
 
-@njit
+@njit(cache=True)
 def grad_central_x_4th(f, dx):
     """4th-order central difference in x, with 2nd-order fallback at boundaries."""
     df_dx = np.zeros_like(f)
@@ -41,7 +41,7 @@ def grad_central_x_4th(f, dx):
     df_dx[:, -1] = (3*f[:, -1] - 4*f[:, -2] + f[:, -3]) / (2*dx)
     return df_dx
 
-@njit
+@njit(cache=True)
 def grad_central_y_4th(f, dy):
     """4th-order central difference in y, with 2nd-order fallback at boundaries."""
     df_dy = np.zeros_like(f)
@@ -58,7 +58,7 @@ def grad_central_y_4th(f, dy):
     df_dy[-1, :] = (3*f[-1, :] - 4*f[-2, :] + f[-3, :]) / (2*dy)
     return df_dy
 
-@njit
+@njit(cache=True)
 def diff_upwind_3rd(f, u, h, axis):
     """
     3rd Order Upwind Biased Finite Difference with 1st-order fallback at boundaries.
@@ -113,7 +113,7 @@ def diff_upwind_3rd(f, u, h, axis):
                     df[j, i] = (-f[j+2, i] + 6*f[j+1, i] - 3*f[j, i] - 2*f[j-1, i]) / (6*h)
     return df
 
-@njit
+@njit(cache=True)
 def lap_2nd(f, dx, dy):
     lap = np.zeros_like(f)
     # Second derivative in x (interior: central difference)
@@ -131,7 +131,7 @@ def lap_2nd(f, dx, dy):
     return lap
 
 
-@njit(inline='always')
+@njit(inline='always', cache=True)
 def fast_solve_3x3(A, b):
     """
     Explicitly solves Ax = b for a 3x3 matrix using Cramer's Rule.
