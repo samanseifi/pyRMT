@@ -38,7 +38,7 @@ if __name__ == "__main__":
     # --------------------------
     # Grid Setup
     # --------------------------
-    Nx, Ny = 128, 128
+    Nx, Ny = 129, 129   # Matches Ghia et al. (1982) grid exactly; center node at x=0.5, y=0.5
     Lx, Ly = 1.0, 1.0
     X, Y, dx, dy = create_grid(Nx, Ny, Lx, Ly)
     X1 = X.copy()
@@ -70,7 +70,7 @@ if __name__ == "__main__":
     dt_min_cap = 1e-2
     
     print("Reynolds number: ", (rho_f * 1.0 * Lx) / mu_f)
-    max_steps = 200000
+    max_steps = 100000
     
     # Precompute Poisson matrix for pressure projection
     A = build_poisson_matrix(Nx, Ny, dx, dy)
@@ -78,7 +78,7 @@ if __name__ == "__main__":
     
     vis_output_freq = 100
     
-    directory_name = "output_lid_driven_Re_1000_3"
+    directory_name = "output_lid_driven_Re_1000_5"
     ml_obj = None
     
     for step in range(1, max_steps + 1):

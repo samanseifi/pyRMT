@@ -60,7 +60,7 @@ if __name__ == "__main__":
     # --------------------------
     # Grid Setup
     # --------------------------
-    Nx, Ny = 1024, 1024
+    Nx, Ny = 128, 128
     Lx, Ly = 1.0, 1.0
     X, Y, dx, dy = create_grid(Nx, Ny, Lx, Ly)
 
@@ -113,14 +113,14 @@ if __name__ == "__main__":
     poisson_eigenvalues = _precompute_poisson_eigenvalues(Nx, Ny, dx, dy)
 
     vis_output_freq = 200
-    directory_name = "output_taylor_green_soft_disc_1024x1024"
+    directory_name = "output_taylor_green_soft_disc_128x128_2"
     ml_obj = None
 
     t = 0.0
     integrated_dissipation = 0.0  # Cumulative ∫₀ᵗ ε(τ) dτ
 
     for step in range(1, max_steps + 1):
-        dt = compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s, gamma, rho_f)
+        dt = compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s, gamma, rho_f, kappa=kappa)
 
         # (Optional) if you want the flow to be purely kinematic-driven TG each step,
         # uncomment the next two lines:
@@ -134,9 +134,12 @@ if __name__ == "__main__":
 
         solid_mask = (phi <= 0).astype(float)
 
-        # Advect reference maps
-        X1 = advect_semi_lagrangian_rk4(X1, a, b, X, Y, dt, dx, dy) * solid_mask
-        X2 = advect_semi_lagrangian_rk4(X2, a, b, X, Y, dt, dx, dy) * solid_mask
+        # Advect reference maps; reset fluid region to identity (smooth, bounded)
+        X1 = advect_semi_lagrangian_rk4(X1, a, b, X, Y, dt, dx, dy)
+        X2 = advect_semi_lagrangian_rk4(X2, a, b, X, Y, dt, dx, dy)
+        fluid_mask = phi > 0
+        X1[fluid_mask] = X[fluid_mask]
+        X2[fluid_mask] = Y[fluid_mask]
         X1, X2 = extrapolate_transverse_layers_2field(
             X1, X2, phi, dx, dy, 3 * dx, num_extrapolation_layers
         )
@@ -176,7 +179,7 @@ if __name__ == "__main__":
             vis_output_freq, directory_name, step, dt,
             sigma_sxx, sigma_sxy, sigma_syy, J,
             mu_s=mu_s, mu_f=mu_f, rho_s=rho_s, rho_f=rho_f,
-            w_t=w_t, eta_s=eta_s, time=t,
+            w_t=w_t, eta_s=eta_s, kappa=kappa, time=t,
             integrated_dissipation=integrated_dissipation
         )
 

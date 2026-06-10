@@ -33,3 +33,9 @@ dist/**
 *.egg-info/**
 # Ignore coverage reports
 htmlcov/
+# benchmark outputs
+outputs/
+outputs/**
+
+# preserved scratch/prototypes (local only)
+archive/
