@@ -698,8 +698,42 @@ def compute_curvature(phi, dx, dy) -> np.ndarray:
     dny_dy = grad_central_y_2nd(ny, dy)
     
     kappa = dnx_dx + dny_dy
-    
+
     return kappa
+
+
+def compute_contact_force(phi1, phi2, k_rep, w_c, dx, dy):
+    """Repulsive solid-solid contact body force (Valkov 2015 / Jain 2019 Sec. 3.6).
+
+    Defines the mid-surface level set phi12 = (phi1 - phi2)/2 (phi12=0 is midway
+    between the two solids) and applies a short-range repulsion that pushes each
+    solid away from that mid-surface:
+
+        f = k_rep * delta_s(phi12) * sign(phi12) * n12,   in cells inside either
+            solid (phi1<0 or phi2<0),
+
+    where n12 = grad(phi12)/|grad(phi12)| and delta_s is a compactly-supported
+    influence function of half-width w_c:
+
+        delta_s(x) = (1 + cos(pi x / w_c)) / (2 w_c)   for |x| < w_c, else 0.
+
+    Returns (fx, fy) body-force-density fields (zero where not in contact).
+    """
+    phi12 = 0.5 * (phi1 - phi2)
+    aphi = np.abs(phi12)
+    delta = np.where(aphi < w_c, (1.0 + np.cos(np.pi * phi12 / w_c)) / (2.0 * w_c), 0.0)
+
+    g12x = grad_central_x_2nd(phi12, dx)
+    g12y = grad_central_y_2nd(phi12, dy)
+    gmag = np.sqrt(g12x**2 + g12y**2) + 1e-12
+    n12x = g12x / gmag
+    n12y = g12y / gmag
+
+    active = ((phi1 < 0.0) | (phi2 < 0.0)).astype(float)
+    s = np.sign(phi12)
+    fx = k_rep * delta * s * n12x * active
+    fy = k_rep * delta * s * n12y * active
+    return fx, fy
 
 def velocity_rhs_blended_optimized(u, v, p,
                                    sigma_sxx_s_elastic, sigma_sxy_s_elastic, sigma_syy_s_elastic,

@@ -11,6 +11,7 @@ from pyRMT.functions import (
     smoothed_heaviside,
     momentum_step_rk4,
     compute_curvature,
+    compute_contact_force,
     velocity_rhs_blended_optimized,
     apply_velocity_BCs,
     build_poisson_matrix,
