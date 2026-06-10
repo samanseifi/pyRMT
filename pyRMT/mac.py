@@ -239,3 +239,42 @@ def momentum_predictor_periodic(u, v, nu, dx, dy, dt):
             + (np.roll(v, -1, 0) - 2 * v + np.roll(v, 1, 0)) / dy**2)
     rv = -(_u_at_v_per(u) * dvdx + v * dvdy) + nu * lapv
     return u + dt * ru, v + dt * rv
+
+
+# ── Free-slip box momentum (for the disc-in-Taylor-Green benchmark) ──────────
+# Normal velocity zero at walls; tangential free (zero normal-gradient ghosts).
+
+def momentum_predictor_freeslip(u, v, nu, dx, dy, dt, fu=None, fv=None, rho=1.0):
+    """Explicit predictor (central advection + diffusion) on a free-slip box,
+    plus optional face body forces fu/fv. Returns u*, v* with wall (normal)
+    faces zeroed."""
+    Ny, Nxp1 = u.shape
+    # free-slip tangential ghosts: mirror (+interior)
+    up = np.empty((Ny + 2, Nxp1)); up[1:-1] = u; up[0] = u[0]; up[-1] = u[-1]
+    Nyp1, Nx = v.shape
+    vp = np.empty((Nyp1, Nx + 2)); vp[:, 1:-1] = v; vp[:, 0] = v[:, 0]; vp[:, -1] = v[:, -1]
+
+    uc = u[:, 1:-1]
+    dudx = (u[:, 2:] - u[:, :-2]) / (2 * dx)
+    dudy = (up[2:, 1:-1] - up[:-2, 1:-1]) / (2 * dy)
+    lapu = ((u[:, 2:] - 2 * uc + u[:, :-2]) / dx**2
+            + (up[2:, 1:-1] - 2 * up[1:-1, 1:-1] + up[:-2, 1:-1]) / dy**2)
+    v_u = _v_at_u(v)
+    rhs_u = -(uc * dudx + v_u * dudy) + nu * lapu
+    if fu is not None:
+        rhs_u = rhs_u + fu[:, 1:-1] / rho
+    ustar = u.copy(); ustar[:, 1:-1] = uc + dt * rhs_u
+    ustar[:, 0] = 0.0; ustar[:, -1] = 0.0
+
+    vc = v[1:-1, :]
+    dvdy = (v[2:, :] - v[:-2, :]) / (2 * dy)
+    dvdx = (vp[1:-1, 2:] - vp[1:-1, :-2]) / (2 * dx)
+    lapv = ((vp[1:-1, 2:] - 2 * vp[1:-1, 1:-1] + vp[1:-1, :-2]) / dx**2
+            + (v[2:, :] - 2 * vc + v[:-2, :]) / dy**2)
+    u_v = _u_at_v(u)
+    rhs_v = -(u_v * dvdx + vc * dvdy) + nu * lapv
+    if fv is not None:
+        rhs_v = rhs_v + fv[1:-1, :] / rho
+    vstar = v.copy(); vstar[1:-1, :] = vc + dt * rhs_v
+    vstar[0, :] = 0.0; vstar[-1, :] = 0.0
+    return ustar, vstar
