@@ -22,6 +22,13 @@ def bilinear_interpolate(u, xq, yq, dx, dy, Nx, Ny):
             x = xq[j, i] / dx
             y = yq[j, i] / dy
 
+            # Guard against non-finite query coordinates: int(floor(NaN/Inf)) is
+            # undefined and indexes out of bounds (segfault). Fail gracefully so
+            # an upstream instability surfaces as NaN rather than a crash.
+            if not (np.isfinite(x) and np.isfinite(y)):
+                out[j, i] = np.nan
+                continue
+
             ix = int(np.floor(x))
             iy = int(np.floor(y))
 
@@ -65,7 +72,12 @@ def bicubic_interpolate(u, xq, yq, dx, dy, Nx, Ny):
             # Normalized coordinates
             x_idx = xq[j, i] / dx
             y_idx = yq[j, i] / dy
-            
+
+            # Guard against non-finite query coordinates (see bilinear_interpolate).
+            if not (np.isfinite(x_idx) and np.isfinite(y_idx)):
+                out[j, i] = np.nan
+                continue
+
             # Integer part (bottom-left corner of the central cell)
             ix = int(np.floor(x_idx))
             iy = int(np.floor(y_idx))
