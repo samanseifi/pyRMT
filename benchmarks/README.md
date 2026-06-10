@@ -48,6 +48,26 @@ The semi-Lagrangian scheme is retained as the default because the Eulerian
 schemes can distort the level set; switch only when you specifically want the
 non-dissipative central/WENO behaviour.
 
+## Surface tension (`gamma`)
+
+Continuum-surface-force model `f = -gamma * kappa * grad(H)` with curvature
+`kappa = div(grad(phi)/|grad(phi)|)` and a capillary timestep limit.
+
+`surface_tension_drop.py` validates it with **Laplace's law** (static drop):
+`Delta p = gamma / R`. At N=64, gamma=0.1, R=0.25 the measured jump is 0.4016 vs
+0.4000 (**0.4% error**); curvature in the band is 3.97 vs 1/R=4.0; the parasitic
+capillary currents plateau (bounded, Ca ~ 1e-3) — they do not blow up.
+
+```bash
+python benchmarks/surface_tension_drop.py 64 0.1 0.25
+```
+
+Caveat: this is a *static* test (fixed analytic interface). Surface tension in the
+*moving, fully-coupled* RMT loop on a near-fluid (low-stiffness) drop is not yet
+robust — parasitic currents feed back through the reference-map-advected interface
+and can grow. Making the coupled case robust needs a balanced-force CSF and/or a
+better curvature estimate (height-function / PROST); tracked as a follow-up.
+
 ## Convergence & the accuracy-vs-order tradeoff (`stress_band`)
 
 Spatial convergence on the disc-in-TG case (`convergence_taylor_green.py`):
