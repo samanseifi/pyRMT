@@ -40,3 +40,25 @@ def test_contact_force_zero_when_far_apart():
     phi2 = _disc(X, Y, 0.75, 0.5, R)
     fx, fy = compute_contact_force(phi1, phi2, k_rep=1.0, w_c=2 * dx, dx=dx, dy=dy)
     assert np.allclose(fx, 0.0) and np.allclose(fy, 0.0)
+
+
+def test_two_solid_momentum_step_runs():
+    """The two-solid momentum step (blended stress + contact force) runs and
+    returns finite fields for two nearby discs."""
+    from pyRMT.functions import (momentum_step_rk4_2solids, apply_phi_BCs,
+                                 extrapolate_reference_map)
+    N = 48
+    X, Y, dx, dy = create_grid(N, N, 1.0, 1.0)
+    R = 0.15
+    pa = apply_phi_BCs(_disc(X, Y, 0.35, 0.5, R))
+    pb = apply_phi_BCs(_disc(X, Y, 0.65, 0.5, R))
+    ma = (pa <= 0).astype(float); mb = (pb <= 0).astype(float)
+    X1a, X2a = extrapolate_reference_map(X * ma, Y * ma, pa, dx, dy, 3)
+    X1b, X2b = extrapolate_reference_map(X * mb, Y * mb, pb, dx, dy, 3)
+    bc = lambda u, v: (u.copy(), v.copy())
+    u = np.zeros((N, N)); v = np.zeros((N, N)); p = np.zeros((N, N))
+    un, vn, Jmin = momentum_step_rk4_2solids(
+        u, v, p, X1a, X2a, X1b, X2b, bc, 1.0, 0.0, 0.0, dx, dy, 1e-3, 1.0, 1.0,
+        pa, pb, 0.01, 2 * dx, k_rep=2.0, w_c=3 * dx)
+    assert np.all(np.isfinite(un)) and np.all(np.isfinite(vn))
+    assert np.all(np.isfinite(Jmin))

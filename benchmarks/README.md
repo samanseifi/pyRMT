@@ -48,6 +48,27 @@ The semi-Lagrangian scheme is retained as the default because the Eulerian
 schemes can distort the level set; switch only when you specifically want the
 non-dissipative central/WENO behaviour.
 
+## Solid-solid contact (`two_disc_contact.py`)
+
+Multi-solid support: each solid carries its own reference map; the two solid
+stresses and the fluid stress are combined with the n=2 one-fluid mixture
+(Jain 2019 Eq. 29) and a short-range repulsion (`compute_contact_force`) is added
+in `momentum_step_rk4_2solids`.
+
+`two_disc_contact.py` drives two soft discs together. The contact force prevents
+inter-penetration: the centre gap approaches but stays above 2R (no pass-through),
+the discs compress elastically (min J ~ 0.74), and the run is stable.
+
+```bash
+python benchmarks/two_disc_contact.py 64 1.5 0.15 2.0   # N, t_end, V0, k_rep
+```
+
+Notes / open items: the approach is cushioned by the incompressible fluid between
+the discs (physical lubrication), and the contact influence band (w_c) engages
+before hard contact, so in this gentle setup the discs settle rather than show a
+sharp rebound. Reproducing the energetic collision/rebound of Jain Sec. 4.6
+(stiff solids, high density ratio) is a tuning + validation follow-up.
+
 ## Surface tension (`gamma`)
 
 Continuum-surface-force model `f = -gamma * kappa * grad(H)` with curvature
