@@ -435,6 +435,43 @@ def advect_central2_rk3(q, a, b, dx, dy, dt, phi, w_cut=0.0):
     return q_new
 
 
+@njit(parallel=True, cache=True)
+def _conservative_rhs(q, a, b, dx, dy, phi, w_cut):
+    """RHS = -div(u q) -- the CONSERVATIVE, Heaviside-gated flux form of the
+    reference-map advection (Jain, Kamrin & Mani 2019, Eq. 26):
+
+        d(xi)/dt + H(x) div[u xi] = 0,   H = 1 in the solid (phi<=w_cut), else 0.
+
+    Computed with 2nd-order central differences. The H-gating clips xi to the
+    solid in the advection step itself, which "eliminates the high-frequency
+    content in the xi field" so central differences stay stable without the
+    artificial diffusion of a TVD scheme (which the paper shows corrupts the
+    level-set reconstruction). Stencil width is +/-1 (one extrapolation layer).
+    """
+    Ny, Nx = q.shape
+    rhs = np.zeros_like(q)
+    inv_2dx = 0.5 / dx
+    inv_2dy = 0.5 / dy
+    for j in prange(1, Ny - 1):
+        for i in range(1, Nx - 1):
+            if phi[j, i] > w_cut:
+                continue
+            d_uq_dx = (a[j, i+1] * q[j, i+1] - a[j, i-1] * q[j, i-1]) * inv_2dx
+            d_vq_dy = (b[j+1, i] * q[j+1, i] - b[j-1, i] * q[j-1, i]) * inv_2dy
+            rhs[j, i] = -(d_uq_dx + d_vq_dy)
+    return rhs
+
+
+def advect_conservative_rk3(q, a, b, dx, dy, dt, phi, w_cut=0.0):
+    """Jain 2019 Eq. 26: conservative, Heaviside-gated reference-map advection
+    (central differences + SSP-RK3). w_cut=0 advects strictly the solid; the band
+    is filled by extrapolation. Pairs with per-step level-set reinitialization."""
+    q1 = q + dt * _conservative_rhs(q, a, b, dx, dy, phi, w_cut)
+    q2 = 0.75 * q + 0.25 * (q1 + dt * _conservative_rhs(q1, a, b, dx, dy, phi, w_cut))
+    q_new = (1.0/3.0) * q + (2.0/3.0) * (q2 + dt * _conservative_rhs(q2, a, b, dx, dy, phi, w_cut))
+    return q_new
+
+
 # ── Switchable reference-map advection dispatcher ────────────────────────────
 
 def advect_reference_map(q, a, b, X, Y, dt, dx, dy, phi,
@@ -470,10 +507,12 @@ def advect_reference_map(q, a, b, X, Y, dt, dx, dy, phi,
         return advect_central2_rk3(q, a, b, dx, dy, dt, phi, w_cut)
     elif scheme == 'weno5':
         return advect_weno5_rk3(q, a, b, dx, dy, dt, phi, w_cut)
+    elif scheme == 'conservative':
+        return advect_conservative_rk3(q, a, b, dx, dy, dt, phi, w_cut)
     else:
         raise ValueError(
             "Unknown advection scheme %r (expected 'semilagrangian', "
-            "'central2' or 'weno5')" % (scheme,)
+            "'central2', 'weno5' or 'conservative')" % (scheme,)
         )
 
 
@@ -1347,6 +1386,10 @@ def reinitialize_phi_fmm(phi, dx, dy):
         raise ImportError(
             "reinitialize_phi_fmm requires scikit-fmm (pip install scikit-fmm)"
         ) from exc
+    # skfmm needs a finite field with a zero crossing; if phi has gone non-finite
+    # or the front left the domain, keep phi rather than crash.
+    if not np.all(np.isfinite(phi)) or phi.min() > 0.0 or phi.max() < 0.0:
+        return phi
     return skfmm.distance(phi, dx=[float(dy), float(dx)])
 
 

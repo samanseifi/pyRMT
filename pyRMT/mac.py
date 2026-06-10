@@ -278,3 +278,35 @@ def momentum_predictor_freeslip(u, v, nu, dx, dy, dt, fu=None, fv=None, rho=1.0)
     vstar = v.copy(); vstar[1:-1, :] = vc + dt * rhs_v
     vstar[0, :] = 0.0; vstar[-1, :] = 0.0
     return ustar, vstar
+
+
+# ── Conservative reference-map advection with the divergence-free face velocity ──
+# Jain 2019 Eq. 26: d(xi)/dt + H div(u xi) = 0. Using the MAC FACE velocity (which
+# is discretely divergence-free) makes div(u xi) = u.grad(xi) exactly -- no spurious
+# xi*div(u) source (the cell-interpolated velocity is NOT divergence-free and folds
+# the map). H gates the update to the solid; the band is filled by extrapolation.
+
+def _xi_flux_div_faces(xi, u, v, dx, dy):
+    """div(u xi) at cell centres using face velocities u:(Ny,Nx+1), v:(Ny+1,Nx)
+    and xi:(Ny,Nx) interpolated to the faces (edge values at domain walls)."""
+    Ny, Nx = xi.shape
+    xi_uf = np.empty((Ny, Nx + 1))
+    xi_uf[:, 1:-1] = 0.5 * (xi[:, :-1] + xi[:, 1:])
+    xi_uf[:, 0] = xi[:, 0]; xi_uf[:, -1] = xi[:, -1]
+    fx = u * xi_uf
+    xi_vf = np.empty((Ny + 1, Nx))
+    xi_vf[1:-1, :] = 0.5 * (xi[:-1, :] + xi[1:, :])
+    xi_vf[0, :] = xi[0, :]; xi_vf[-1, :] = xi[-1, :]
+    fy = v * xi_vf
+    return (fx[:, 1:] - fx[:, :-1]) / dx + (fy[1:, :] - fy[:-1, :]) / dy
+
+
+def advect_xi_conservative(xi, u, v, dx, dy, dt, phi, w_cut=0.0):
+    """SSP-RK3 conservative advection of a cell-centred reference-map component
+    with the divergence-free MAC face velocity, gated to phi<=w_cut (Jain Eq. 26)."""
+    H = (phi <= w_cut).astype(float)
+    def rhs(q):
+        return -H * _xi_flux_div_faces(q, u, v, dx, dy)
+    q1 = xi + dt * rhs(xi)
+    q2 = 0.75 * xi + 0.25 * (q1 + dt * rhs(q1))
+    return (1.0 / 3.0) * xi + (2.0 / 3.0) * (q2 + dt * rhs(q2))

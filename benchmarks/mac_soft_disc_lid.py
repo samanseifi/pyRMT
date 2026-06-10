@@ -12,14 +12,15 @@ import os, sys
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pyRMT.mac import mac_grid, momentum_predictor, project, poisson_eigs_neumann, divergence
+from pyRMT.mac import (mac_grid, momentum_predictor, project, poisson_eigs_neumann,
+                       divergence, advect_xi_conservative)
 from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
     rebuild_phi_from_reference_map, solid_cauchy_stress, smoothed_heaviside,
-    grad_central_x_2nd, grad_central_y_2nd)
+    grad_central_x_2nd, grad_central_y_2nd, reinitialize_phi_fmm)
 
 
 def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0,
-        out_root="outputs"):
+        reinit=False, out_root="outputs"):
     dx, dy = mac_grid(N, N)
     xc = (np.arange(N) + 0.5) * dx
     Xc, Yc = np.meshgrid(xc, xc)
@@ -33,12 +34,18 @@ def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0
     mu_s, kappa, rho = 0.1, 0.0, 1.0
     mu_f = 0.01; nu = mu_f / rho; w_t = 2.0 * dx; U_lid = 1.0
     nl = 3
-    # Eulerian schemes (central2/weno5) advect cells with phi<=w_cut and need a
-    # band so their stencils don't reach un-advected/extrapolated values; the
-    # semi-Lagrangian backtrace ignores w_cut. Default a band if none given.
-    if scheme != "semilagrangian" and w_cut_fac == 0.0:
+    # central2/weno5 advect the band, so their stencils need a buffer of
+    # extrapolated values; auto-set one. The conservative (Jain Eq.26) scheme
+    # advects strictly the solid (w_cut=0) with the band filled by extrapolation,
+    # and relies on per-step level-set reinitialization -> enable it.
+    if scheme in ("central2", "weno5") and w_cut_fac == 0.0:
         w_cut_fac = 4.0
         print(f"[MAC FSI] scheme={scheme}: auto-setting w_cut_fac={w_cut_fac}")
+    if scheme == "conservative":
+        reinit = True
+        if detg_clamp == 0.0:
+            detg_clamp = 5.0
+        print(f"[MAC FSI] scheme=conservative (Jain Eq.26): w_cut=0 + FMM reinit + detg_clamp={detg_clamp}")
     X1, X2 = extrapolate_reference_map(Xc * sm, Yc * sm, phi, dx, dy, nl)
 
     u = np.zeros((N, N + 1)); v = np.zeros((N + 1, N))
@@ -54,12 +61,22 @@ def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0
         # face velocity -> cell centres for advecting the reference map
         u_c = 0.5 * (u[:, :-1] + u[:, 1:])
         v_c = 0.5 * (v[:-1, :] + v[1:, :])
-        phi = rebuild_phi_from_reference_map(X1, X2, phi_init); sm = (phi <= 0).astype(float)
+        phi = rebuild_phi_from_reference_map(X1, X2, phi_init)
+        if reinit:
+            phi = reinitialize_phi_fmm(phi, dx, dy)   # clean signed-distance band
+        sm = (phi <= 0).astype(float)
         wc = w_cut_fac * dx
-        X1 = advect_reference_map(X1, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
-        X2 = advect_reference_map(X2, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
+        if scheme == "conservative":
+            # Jain Eq.26 with the divergence-free MAC face velocity (u,v)
+            X1 = advect_xi_conservative(X1, u, v, dx, dy, dt, phi, wc) * sm
+            X2 = advect_xi_conservative(X2, u, v, dx, dy, dt, phi, wc) * sm
+        else:
+            X1 = advect_reference_map(X1, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
+            X2 = advect_reference_map(X2, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
         X1, X2 = extrapolate_reference_map(X1, X2, phi, dx, dy, nl)
         phi = rebuild_phi_from_reference_map(X1, X2, phi_init)
+        if reinit:
+            phi = reinitialize_phi_fmm(phi, dx, dy)
 
         sxx, sxy, syy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s, kappa, phi,
                                                detg_clamp=detg_clamp)
