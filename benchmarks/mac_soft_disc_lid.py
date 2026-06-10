@@ -18,7 +18,8 @@ from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
     grad_central_x_2nd, grad_central_y_2nd)
 
 
-def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, out_root="outputs"):
+def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0,
+        out_root="outputs"):
     dx, dy = mac_grid(N, N)
     xc = (np.arange(N) + 0.5) * dx
     Xc, Yc = np.meshgrid(xc, xc)
@@ -32,6 +33,12 @@ def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, out_root="outp
     mu_s, kappa, rho = 0.1, 0.0, 1.0
     mu_f = 0.01; nu = mu_f / rho; w_t = 2.0 * dx; U_lid = 1.0
     nl = 3
+    # Eulerian schemes (central2/weno5) advect cells with phi<=w_cut and need a
+    # band so their stencils don't reach un-advected/extrapolated values; the
+    # semi-Lagrangian backtrace ignores w_cut. Default a band if none given.
+    if scheme != "semilagrangian" and w_cut_fac == 0.0:
+        w_cut_fac = 4.0
+        print(f"[MAC FSI] scheme={scheme}: auto-setting w_cut_fac={w_cut_fac}")
     X1, X2 = extrapolate_reference_map(Xc * sm, Yc * sm, phi, dx, dy, nl)
 
     u = np.zeros((N, N + 1)); v = np.zeros((N + 1, N))
@@ -54,7 +61,8 @@ def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, out_root="outp
         X1, X2 = extrapolate_reference_map(X1, X2, phi, dx, dy, nl)
         phi = rebuild_phi_from_reference_map(X1, X2, phi_init)
 
-        sxx, sxy, syy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s, kappa, phi)
+        sxx, sxy, syy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s, kappa, phi,
+                                               detg_clamp=detg_clamp)
         H = smoothed_heaviside(phi, w_t)
         Sxx = (1 - H) * sxx; Sxy = (1 - H) * sxy; Syy = (1 - H) * syy
         divx = grad_central_x_2nd(Sxx, dx) + grad_central_y_2nd(Sxy, dy)   # centres
