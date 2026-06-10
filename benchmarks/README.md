@@ -48,6 +48,37 @@ The semi-Lagrangian scheme is retained as the default because the Eulerian
 schemes can distort the level set; switch only when you specifically want the
 non-dissipative central/WENO behaviour.
 
+## Convergence & the accuracy-vs-order tradeoff (`stress_band`)
+
+Spatial convergence on the disc-in-TG case (`convergence_taylor_green.py`):
+
+| quantity | default (one-sided stress) | `stress_band=True` (banded central + detG clamp) |
+|---|---|---|
+| strain energy SE | ~2.0 | ~2.1 |
+| kinetic energy KE | ~2nd (converged) | ~1.5 |
+| reference map ξ | ~1.6 | ~1.45 |
+| velocity \|u\| | ~1.2 | ~1.25 |
+| pressure p | **~0.76 (sub-1st)** | **~1.08** |
+
+`stress_band=True` computes the solid stress over the whole `(1-H)>0` blend band
+with central ∇ξ and a localized detG clamp. It improves **pressure** convergence
+(0.76 → 1.08) and is the more "correct" central discretisation (Jain et al. 2019),
+**but** it changes the interface force enough to shrink the soft-disc orbit in the
+lid-driven cavity (centroid extent x→0.60 instead of 0.70; Sugiyama is 0.70) at
+both clamp=3 and clamp=10. So it trades **FSI accuracy for pressure order** — it is
+**OFF by default**.
+
+The default (one-sided, interior-only stress) reproduces the validated soft-disc
+trajectory at N=64 and N=128 (matches Sugiyama) and leaves Re=1000 unchanged, at
+the cost of sub-1st-order pressure convergence. Getting 2nd-order *fields* without
+sacrificing the disc needs the deeper combined work (higher-order reference-map
+extrapolation + conservative central momentum), not a single interface tweak.
+
+Enable the higher-order interface stress per-run:
+```python
+run(N=128, stress_band=True, detg_clamp=3.0)   # higher p-order, smaller disc orbit
+```
+
 ## Narrow-band / transition-width coupling
 
 `common.check_narrow_band(w_t, dx, num_layers)` enforces
