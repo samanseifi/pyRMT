@@ -24,7 +24,7 @@ from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
 from pyRMT.output import compute_strain_energy
 
 SCHEMES = ["semilagrangian", "central2", "weno5"]
-NS = [32, 64, 128, 256]
+NS = [32, 64, 128, 256, 512]
 
 
 def run_one(N, t_end, R=0.15, x0=0.5, y0=0.7, mu_s=0.1, mu_f=0.01, U0=0.3, rho=1.0,
@@ -76,7 +76,8 @@ def run_one(N, t_end, R=0.15, x0=0.5, y0=0.7, mu_s=0.1, mu_f=0.01, U0=0.3, rho=1
     KE = 0.5 * np.sum(u_c**2 + v_c**2) * dx * dy
     se = compute_strain_energy(X1, X2, phi, mu_s, dx, dy)
     Estrain = np.nansum(np.where(np.isfinite(se), se, 0.0)) * dx * dy
-    return dict(N=N, dx=dx, xc=xc, speed=speed, p=p / dt, KE=KE, Estrain=Estrain,
+    # `project` returns the physical pressure (O(1)); do NOT divide by dt.
+    return dict(N=N, dx=dx, xc=xc, speed=speed, p=p, KE=KE, Estrain=Estrain,
                 divmax=np.max(np.abs(divergence(u, v, dx, dy))))
 
 
@@ -106,55 +107,112 @@ def run(t_end=0.6, out_root="outputs"):
         data[sch] = res
 
     out_dir = os.path.join(out_root, "mac_disc_in_tg"); os.makedirs(out_dir, exist_ok=True)
-    coarse = NS[:-1]; h = np.array([1.0 / N for N in coarse])
+    REF = NS[-1]; coarse = NS[:-1]; h = np.array([1.0 / N for N in coarse])
 
-    # per-scheme errors vs that scheme's own N=256 reference
+    # per-scheme L2 errors vs that scheme's own finest reference (N=REF)
     verr = {}; perr = {}
     for sch in SCHEMES:
         r = data[sch]
-        if r[256] is None or any(r[N] is None for N in coarse):
+        if r[REF] is None or any(r[N] is None for N in coarse):
             verr[sch] = perr[sch] = None; continue
-        spref = _sample(r[256]['xc'], r[256]['speed'], g)
-        prref = _sample(r[256]['xc'], r[256]['p'], g)
+        spref = _sample(r[REF]['xc'], r[REF]['speed'], g)
+        prref = _sample(r[REF]['xc'], r[REF]['p'], g)
         verr[sch] = [np.sqrt(np.mean((_sample(r[N]['xc'], r[N]['speed'], g) - spref)**2)) for N in coarse]
         perr[sch] = [np.sqrt(np.mean((_sample(r[N]['xc'], r[N]['p'], g) - prref)**2)) for N in coarse]
         print(f"\n[{sch}] velocity order:", [f"{o:.2f}" for o in _orders(coarse, verr[sch])],
               " pressure order:", [f"{o:.2f}" for o in _orders(coarse, perr[sch])])
 
+    KE = {s: [data[s][N]['KE'] if data[s][N] else np.nan for N in NS] for s in SCHEMES}
+    Es = {s: [data[s][N]['Estrain'] if data[s][N] else np.nan for N in NS] for s in SCHEMES}
+    nan = [np.nan] * len(coarse)
+    np.savez(os.path.join(out_dir, "conv_data.npz"),
+             coarse=np.array(coarse), Ns=np.array(NS), REF=REF, h=h,
+             **{f"verr_{s}": np.array(verr[s] if verr[s] else nan) for s in SCHEMES},
+             **{f"perr_{s}": np.array(perr[s] if perr[s] else nan) for s in SCHEMES},
+             **{f"KE_{s}": np.array(KE[s]) for s in SCHEMES},
+             **{f"Es_{s}": np.array(Es[s]) for s in SCHEMES})
+    plot_pub(out_dir, coarse, NS, REF, h, verr, perr, KE, Es)
+    return data
+
+
+def plot_pub(out_dir, coarse, Ns, REF, h, verr, perr, KE, Es):
+    """Publication-quality convergence figures: per-scheme curves with 1st- and
+    2nd-order reference lines (fanning from the coarsest point) plus slope
+    triangles for a qualitative read."""
     try:
         import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
-        col = {"semilagrangian": "C0", "central2": "C1", "weno5": "C2"}
-
-        def conv_plot(err, title, fname):
-            plt.figure(figsize=(6.2, 5))
-            for sch in SCHEMES:
-                if err[sch] is None:
-                    continue
-                plt.loglog(h, err[sch], "o-", color=col[sch], lw=2,
-                           label=f"{sch}: order {_orders(coarse, err[sch])[-1]:.2f}")
-            e0 = next(e for e in err.values() if e is not None)[0]
-            plt.loglog(h, e0 * (h / h[0])**2, "k--", label="2nd-order ref")
-            plt.gca().invert_xaxis()
-            plt.xlabel("h = 1/N"); plt.ylabel("L2 error vs N=256 reference")
-            plt.title(title); plt.legend(); plt.grid(True, which="both", alpha=.3); plt.tight_layout()
-            plt.savefig(os.path.join(out_dir, fname), dpi=130); plt.close()
-
-        conv_plot(verr, "Disc-in-TG: velocity convergence (MAC)", "conv_velocity.png")
-        conv_plot(perr, "Disc-in-TG: pressure convergence (MAC)", "conv_pressure.png")
-
-        for q, fn, ttl in (("KE", "conv_kinetic_energy.png", "kinetic energy"),
-                           ("Estrain", "conv_strain_energy.png", "strain energy")):
-            plt.figure(figsize=(6.2, 4.2))
-            for sch in SCHEMES:
-                vals = [data[sch][N][q] if data[sch][N] else np.nan for N in NS]
-                plt.semilogx(NS, vals, "s-", color=col[sch], label=sch)
-            plt.xlabel("N"); plt.ylabel(f"{ttl} at T"); plt.title(f"Disc-in-TG: {ttl} vs resolution")
-            plt.legend(); plt.grid(True, alpha=.3); plt.tight_layout()
-            plt.savefig(os.path.join(out_dir, fn), dpi=130); plt.close()
-        print(f"\n  saved 4 convergence plots in {out_dir}/")
     except Exception as e:
-        print(f"  (plot skipped: {e})")
-    return data
+        print(f"  (plot skipped: {e})"); return
+    plt.rcParams.update({"font.size": 11, "axes.labelsize": 12.5,
+                         "axes.titlesize": 12.5, "legend.fontsize": 10})
+    col = {"semilagrangian": "#1f77b4", "central2": "#ff7f0e", "weno5": "#2ca02c"}
+    mk = {"semilagrangian": "o", "central2": "s", "weno5": "^"}
+    lbl = {"semilagrangian": "semi-Lagrangian", "central2": "central-2", "weno5": "WENO5"}
+    h = np.asarray(h)
+
+    def _tri(ax, slope, ybase, color):
+        ha, hb = h[-2], h[-1]                       # ha>hb; hb is finer (right side)
+        yb = ybase * (hb / ha) ** slope
+        ax.plot([ha, hb], [ybase, ybase], color=color, lw=0.9)
+        ax.plot([hb, hb], [ybase, yb], color=color, lw=0.9)
+        ax.plot([ha, hb], [ybase, yb], color=color, lw=1.3)
+        ax.text(hb * 0.88, (ybase * yb) ** 0.5, f"{slope}", color=color,
+                fontsize=9.5, ha="right", va="center")
+
+    def conv(err, ylabel, title, fname):
+        present = [e for e in err.values() if e is not None]
+        if not present:
+            return
+        fig, ax = plt.subplots(figsize=(6.6, 5.3))
+        y0 = max(e[0] for e in present) * 1.6
+        ax.loglog(h, y0 * (h / h[0]) ** 1, ls=":", color="0.55", lw=1.5, label="1st order")
+        ax.loglog(h, y0 * (h / h[0]) ** 2, ls="--", color="0.3", lw=1.5, label="2nd order")
+        for sch in SCHEMES:
+            if err[sch] is None:
+                continue
+            o = _orders(coarse, err[sch])[-1]
+            ax.loglog(h, err[sch], marker=mk[sch], color=col[sch], lw=2, ms=8,
+                      label=f"{lbl[sch]}  (p≈{o:.2f})")
+        ybase = min(e[-1] for e in present) * 0.4
+        _tri(ax, 1, ybase * 2.4, "0.55")
+        _tri(ax, 2, ybase, "0.3")
+        ax.invert_xaxis()
+        for N, hv in zip(coarse, h):
+            ax.annotate(f"{N}", (hv, max(e[list(coarse).index(N)] for e in present)),
+                        textcoords="offset points", xytext=(0, 8), fontsize=8, ha="center", color="0.4")
+        ax.set_xlabel("grid spacing  $h = 1/N$"); ax.set_ylabel(ylabel)
+        ax.set_title(title); ax.grid(True, which="both", alpha=.25)
+        ax.legend(frameon=True, framealpha=.92, loc="lower left")
+        fig.tight_layout(); fig.savefig(os.path.join(out_dir, fname), dpi=200); plt.close(fig)
+
+    conv(verr, r"$\||u|_N-|u|_{\mathrm{ref}}\|_2$",
+         f"Disc-in-Taylor-Green: velocity convergence (ref $N={REF}$)", "conv_velocity.png")
+    conv(perr, r"$\|p_N-p_{\mathrm{ref}}\|_2$",
+         f"Disc-in-Taylor-Green: pressure convergence (ref $N={REF}$)", "conv_pressure.png")
+    for vals, ttl, fn in ((KE, "kinetic energy", "conv_kinetic_energy.png"),
+                          (Es, "strain energy", "conv_strain_energy.png")):
+        fig, ax = plt.subplots(figsize=(6.6, 4.5))
+        for sch in SCHEMES:
+            ax.semilogx(Ns, vals[sch], marker=mk[sch], color=col[sch], lw=2, ms=7, label=lbl[sch])
+        ax.set_xlabel("$N$"); ax.set_ylabel(f"{ttl} at $T$")
+        ax.set_title(f"Disc-in-Taylor-Green: {ttl} vs resolution")
+        ax.grid(True, alpha=.25); ax.legend(); fig.tight_layout()
+        fig.savefig(os.path.join(out_dir, fn), dpi=200); plt.close(fig)
+    print(f"\n  saved 4 publication plots in {out_dir}/")
+
+
+def replot(out_root="outputs"):
+    """Re-make the publication figures from saved conv_data.npz (no re-run)."""
+    out_dir = os.path.join(out_root, "mac_disc_in_tg")
+    d = np.load(os.path.join(out_dir, "conv_data.npz"))
+    coarse = list(d["coarse"]); Ns = list(d["Ns"]); REF = int(d["REF"]); h = d["h"]
+    def grab(prefix):
+        out = {}
+        for s in SCHEMES:
+            a = d[f"{prefix}_{s}"]
+            out[s] = None if np.all(np.isnan(a)) else list(a)
+        return out
+    plot_pub(out_dir, coarse, Ns, REF, h, grab("verr"), grab("perr"), grab("KE"), grab("Es"))
 
 
 if __name__ == "__main__":
