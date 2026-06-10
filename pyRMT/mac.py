@@ -81,3 +81,74 @@ def project(u_star, v_star, dx, dy, dt, rho, eig):
     u = u_star - (dt / rho) * gradient_p_u(phi, dx)
     v = v_star - (dt / rho) * gradient_p_v(phi, dy)
     return u, v, phi
+
+
+# ── Lid-driven cavity: momentum (advection + diffusion) with ghost-cell BCs ───
+# Walls: no-slip. Top lid moves at U_lid (tangential to the x-walls... at the top
+# y-wall). Normal velocity at every wall is zero (u[:,0]=u[:,-1]=0, v[0,:]=v[-1,:]=0);
+# tangential no-slip / lid is imposed via reflected ghost rows/cols.
+
+def _u_ghost_y(u, U_lid):
+    """Pad u (Ny,Nx+1) with one ghost row top & bottom enforcing tangential BC:
+    bottom wall u=0 -> ghost=-u[0]; top lid u=U_lid -> ghost=2*U_lid-u[-1]."""
+    Ny, Nxp1 = u.shape
+    up = np.empty((Ny + 2, Nxp1))
+    up[1:-1, :] = u
+    up[0, :] = -u[0, :]                 # bottom no-slip
+    up[-1, :] = 2.0 * U_lid - u[-1, :]  # top lid
+    return up
+
+
+def _v_ghost_x(v):
+    """Pad v (Ny+1,Nx) with one ghost col left & right enforcing no-slip (v=0)."""
+    Nyp1, Nx = v.shape
+    vp = np.empty((Nyp1, Nx + 2))
+    vp[:, 1:-1] = v
+    vp[:, 0] = -v[:, 0]
+    vp[:, -1] = -v[:, -1]
+    return vp
+
+
+def _v_at_u(v):
+    """Interpolate v (Ny+1,Nx) to the interior u-faces (Ny, Nx-1)."""
+    # u-face (i, j) sits between v[j,i-1],v[j,i],v[j+1,i-1],v[j+1,i]
+    return 0.25 * (v[:-1, :-1] + v[:-1, 1:] + v[1:, :-1] + v[1:, 1:])
+
+
+def _u_at_v(u):
+    """Interpolate u (Ny,Nx+1) to the interior v-faces (Ny-1, Nx)."""
+    return 0.25 * (u[:-1, :-1] + u[:-1, 1:] + u[1:, :-1] + u[1:, 1:])
+
+
+def momentum_predictor(u, v, nu, dx, dy, dt, U_lid):
+    """One explicit predictor step (central advection + diffusion) for the
+    lid-driven cavity. Returns u*, v* with wall (normal) faces zeroed."""
+    Ny, Nxp1 = u.shape
+    Nx = Nxp1 - 1
+    up = _u_ghost_y(u, U_lid)            # (Ny+2, Nx+1)
+    vp = _v_ghost_x(v)                   # (Ny+1, Nx+2)
+
+    # --- u-momentum at interior u-faces i=1..Nx-1 ---
+    uc = u[:, 1:-1]                                  # (Ny, Nx-1)
+    dudx = (u[:, 2:] - u[:, :-2]) / (2 * dx)         # (Ny, Nx-1)
+    dudy = (up[2:, 1:-1] - up[:-2, 1:-1]) / (2 * dy) # (Ny, Nx-1)
+    lapu = ((u[:, 2:] - 2 * uc + u[:, :-2]) / dx**2
+            + (up[2:, 1:-1] - 2 * up[1:-1, 1:-1] + up[:-2, 1:-1]) / dy**2)
+    v_u = _v_at_u(v)                                 # (Ny, Nx-1)
+    rhs_u = -(uc * dudx + v_u * dudy) + nu * lapu
+    ustar = u.copy()
+    ustar[:, 1:-1] = uc + dt * rhs_u
+    ustar[:, 0] = 0.0; ustar[:, -1] = 0.0
+
+    # --- v-momentum at interior v-faces j=1..Ny-1 ---
+    vc = v[1:-1, :]                                  # (Ny-1, Nx)
+    dvdy = (v[2:, :] - v[:-2, :]) / (2 * dy)
+    dvdx = (vp[1:-1, 2:] - vp[1:-1, :-2]) / (2 * dx)
+    lapv = ((vp[1:-1, 2:] - 2 * vp[1:-1, 1:-1] + vp[1:-1, :-2]) / dx**2
+            + (v[2:, :] - 2 * vc + v[:-2, :]) / dy**2)
+    u_v = _u_at_v(u)                                 # (Ny-1, Nx)
+    rhs_v = -(u_v * dvdx + vc * dvdy) + nu * lapv
+    vstar = v.copy()
+    vstar[1:-1, :] = vc + dt * rhs_v
+    vstar[0, :] = 0.0; vstar[-1, :] = 0.0
+    return ustar, vstar
