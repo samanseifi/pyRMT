@@ -456,6 +456,14 @@ def advect_reference_map(q, a, b, X, Y, dt, dx, dy, phi,
         Cutoff level-set value for the Eulerian schemes (ignored by the
         semi-Lagrangian branch).
     """
+    # Guard: a diverged (non-finite) velocity field fed into the compiled
+    # semi-Lagrangian backtrace can segfault (float->int on garbage indices).
+    # Convert that into a clean, catchable error so a blow-up is debuggable
+    # rather than crashing the process.
+    if not (np.all(np.isfinite(a)) and np.all(np.isfinite(b))):
+        raise FloatingPointError(
+            "advect_reference_map: non-finite velocity (the simulation diverged)")
+
     if scheme == 'semilagrangian':
         return advect_semilagrangian_rk4(q, a, b, X, Y, dt, dx, dy)
     elif scheme == 'central2':
@@ -677,7 +685,8 @@ def momentum_step_rk4(u, v, p, X1, X2, velocity_bc, mu_s, kappa, eta_s , dx, dy,
 
 def momentum_step_rk4_2solids(u, v, p, X1a, X2a, X1b, X2b, velocity_bc,
                               mu_s, kappa, eta_s, dx, dy, dt, rho_s, rho_f,
-                              phi_a, phi_b, mu_f, w_t, k_rep=0.0, w_c=None):
+                              phi_a, phi_b, mu_f, w_t, k_rep=0.0, w_c=None,
+                              detg_clamp=4.0):
     """RK4 momentum step for TWO neo-Hookean solids sharing one velocity/pressure
     field, with a repulsive solid-solid contact force.
 
@@ -693,9 +702,13 @@ def momentum_step_rk4_2solids(u, v, p, X1a, X2a, X1b, X2b, velocity_bc,
     if w_c is None:
         w_c = 2.0 * w_t
 
-    # elastic stresses (constant during the RK4 stages)
-    sAxx, sAxy, sAyy, Ja = solid_cauchy_stress(X1a, X2a, dx, dy, mu_s, kappa, phi_a)
-    sBxx, sBxy, sByy, Jb = solid_cauchy_stress(X1b, X2b, dx, dy, mu_s, kappa, phi_b)
+    # elastic stresses (constant during the RK4 stages). The detG clamp bounds J
+    # away from 0/negative so a hard collision cannot invert the reference map
+    # into a blow-up (essential for contact, where strong overlap is possible).
+    sAxx, sAxy, sAyy, Ja = solid_cauchy_stress(X1a, X2a, dx, dy, mu_s, kappa, phi_a,
+                                               detg_clamp=detg_clamp)
+    sBxx, sBxy, sByy, Jb = solid_cauchy_stress(X1b, X2b, dx, dy, mu_s, kappa, phi_b,
+                                               detg_clamp=detg_clamp)
 
     Ha = smoothed_heaviside(phi_a, w_t)
     Hb = smoothed_heaviside(phi_b, w_t)
