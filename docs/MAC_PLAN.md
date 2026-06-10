@@ -47,3 +47,21 @@ Proceed phase by phase; do not advance until the phase's tests pass.
 - divergence is machine-zero at every step (the structural win).
 
 ### Next: Phase 5 (reference map, semi-Lagrangian) then Phase 6 (FSI).
+
+### Phase 5-6 (reference map + soft-disc FSI) — DONE, validated vs Sugiyama
+- Reference map (X1,X2) at cell centres, advected semi-Lagrangian on a 0-based index
+  grid with the cell-centre velocity (faces->centres). Cell-centred RMT machinery
+  (phi rebuild, extrapolation, neo-Hookean stress) reused from collocated.
+- Soft disc in lid-driven cavity (N=128, t=8): the centroid trajectory tracks the
+  Sugiyama 1024^2 and Kolahduz reference data closely along the spiral; the disc
+  deforms (J in [0.87, 2.26]); divergence ~1e-14 throughout; stable.
+
+### Bug fixed along the way
+The long-standing nondeterministic semi-Lagrangian segfault (which also limited
+collocated FSI / contact / coupled surface tension) was numba `parallel=True` on
+`bilinear_interpolate`. Made it serial -> segfault gone, all tests pass. This fix
+benefits the collocated solver on `main` too (worth cherry-picking).
+
+### Remaining for full FSI parity: disc-in-Taylor-Green energy; variable-density
+projection (rho_s != rho_f) for the general case; then re-test surface tension &
+contact in the consistent MAC setting (expected to behave far better).
