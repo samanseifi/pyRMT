@@ -18,7 +18,7 @@ from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
     grad_central_x_2nd, grad_central_y_2nd)
 
 
-def run(N=128, t_end=8.0, out_root="outputs"):
+def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, out_root="outputs"):
     dx, dy = mac_grid(N, N)
     xc = (np.arange(N) + 0.5) * dx
     Xc, Yc = np.meshgrid(xc, xc)
@@ -48,8 +48,9 @@ def run(N=128, t_end=8.0, out_root="outputs"):
         u_c = 0.5 * (u[:, :-1] + u[:, 1:])
         v_c = 0.5 * (v[:-1, :] + v[1:, :])
         phi = rebuild_phi_from_reference_map(X1, X2, phi_init); sm = (phi <= 0).astype(float)
-        X1 = advect_reference_map(X1, u_c, v_c, Xg, Yg, dt, dx, dy, phi, 'semilagrangian', 0.0) * sm
-        X2 = advect_reference_map(X2, u_c, v_c, Xg, Yg, dt, dx, dy, phi, 'semilagrangian', 0.0) * sm
+        wc = w_cut_fac * dx
+        X1 = advect_reference_map(X1, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
+        X2 = advect_reference_map(X2, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
         X1, X2 = extrapolate_reference_map(X1, X2, phi, dx, dy, nl)
         phi = rebuild_phi_from_reference_map(X1, X2, phi_init)
 
@@ -96,4 +97,5 @@ def run(N=128, t_end=8.0, out_root="outputs"):
 if __name__ == "__main__":
     N = int(sys.argv[1]) if len(sys.argv) > 1 else 128
     t_end = float(sys.argv[2]) if len(sys.argv) > 2 else 8.0
-    run(N=N, t_end=t_end)
+    scheme = sys.argv[3] if len(sys.argv) > 3 else "semilagrangian"
+    run(N=N, t_end=t_end, scheme=scheme)
