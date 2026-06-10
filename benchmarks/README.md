@@ -79,6 +79,21 @@ Enable the higher-order interface stress per-run:
 run(N=128, stress_band=True, detg_clamp=3.0)   # higher p-order, smaller disc orbit
 ```
 
+## Level-set reinitialization (`reinit_method`)
+
+The FSI drivers rebuild `phi` analytically from the reference map each step
+(compatibility condition `phi = phi_init(xi)`), which for simple shapes is
+already a signed-distance field. For non-analytic shapes / cleaner normals you
+can reinitialize via `reinit_method`:
+
+- `'none'`  — no reinit (default; correct when `phi` is already SDF).
+- `'pde'`   — Sussman-Smereka-Osher iterative upwind PDE.
+- `'fmm'`   — Fast Marching Method (`scikit-fmm`, `pip install scikit-fmm` or
+  `pip install -e ".[fmm]"`), O(N log N), accurate, no tuning.
+
+For the soft disc, `'fmm'` is bit-identical to `'none'` (the analytic `phi` is
+already signed distance); FMM's value is on non-SDF level sets.
+
 ## Narrow-band / transition-width coupling
 
 `common.check_narrow_band(w_t, dx, num_layers)` enforces

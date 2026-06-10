@@ -26,8 +26,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pyRMT.functions import (
     create_grid, apply_phi_BCs, extrapolate_reference_map,
     compute_timestep, advect_reference_map, rebuild_phi_from_reference_map,
-    momentum_step_rk4, smoothed_heaviside, pressure_projection_amg,
-    build_poisson_matrix, _precompute_poisson_eigenvalues,
+    reinitialize_level_set, momentum_step_rk4, smoothed_heaviside,
+    pressure_projection_amg, build_poisson_matrix, _precompute_poisson_eigenvalues,
 )
 from pyRMT.output import (compute_kinetic_energy, compute_strain_energy,
                           compute_viscous_dissipation)
@@ -36,7 +36,8 @@ from benchmarks.common import (free_slip_box_bc, initialize_disc,
                                disc_centroid, ensure_dir)
 
 
-def run(N=128, scheme='semilagrangian', t_end=1.0, out_root="outputs", stress_band=False):
+def run(N=128, scheme='semilagrangian', t_end=1.0, out_root="outputs", stress_band=False,
+        reinit_method='none'):
     Lx = Ly = 1.0
     X, Y, dx, dy = create_grid(N, N, Lx, Ly)
 
@@ -83,6 +84,7 @@ def run(N=128, scheme='semilagrangian', t_end=1.0, out_root="outputs", stress_ba
 
         # phi/mask from current reference map (compatibility reconstruction)
         phi = rebuild_phi_from_reference_map(X1, X2, phi_init)
+        phi = reinitialize_level_set(phi, dx, dy, method=reinit_method)
         solid_mask = (phi <= 0).astype(float)
 
         # advect reference map (scheme selectable), reset fluid side, extrapolate
