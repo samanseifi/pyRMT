@@ -156,3 +156,14 @@ def test_faces_to_centres_interpolation_exact_on_linear():
     u_c = 0.5 * (u[:, :-1] + u[:, 1:])
     xc = (np.arange(N) + 0.5) * dx
     assert np.allclose(u_c, 2.0 + 3.0 * xc[np.newaxis, :], atol=1e-12)
+
+
+def test_taylor_green_second_order_convergence():
+    """Periodic MAC reproduces the Taylor-Green decaying vortex at 2nd order
+    (the accuracy the collocated solver could not reach for the fields)."""
+    from benchmarks.mac_taylor_green_convergence import run_one
+    e32, d32 = run_one(32, nu=0.05, T=0.1, dt=2e-4)
+    e64, d64 = run_one(64, nu=0.05, T=0.1, dt=2e-4)
+    order = np.log(e32 / e64) / np.log(2)
+    assert order > 1.8, f"TG spatial order {order:.2f} < 1.8"
+    assert d64 < 1e-12, "periodic projection not divergence-free"

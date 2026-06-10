@@ -174,3 +174,68 @@ def momentum_predictor(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None, rho=1.0):
     vstar[1:-1, :] = vc + dt * rhs_v
     vstar[0, :] = 0.0; vstar[-1, :] = 0.0
     return ustar, vstar
+
+
+# ── Periodic MAC (for Taylor-Green convergence) ──────────────────────────────
+# Periodic layout (Nx x Ny): u,v both (Ny,Nx); u at x-faces (i dx,(j+.5)dy),
+# v at y-faces ((i+.5)dx, j dy), p at centres. All operators use np.roll.
+
+def divergence_per(u, v, dx, dy):
+    return (np.roll(u, -1, 1) - u) / dx + (np.roll(v, -1, 0) - v) / dy
+
+
+def grad_p_u_per(p, dx):
+    return (p - np.roll(p, 1, 1)) / dx           # d/dx to x-face
+
+
+def grad_p_v_per(p, dy):
+    return (p - np.roll(p, 1, 0)) / dy           # d/dy to y-face
+
+
+def poisson_eigs_periodic(Nx, Ny, dx, dy):
+    kx = np.arange(Nx); ky = np.arange(Ny)
+    lx = -4.0 * np.sin(np.pi * kx / Nx) ** 2 / dx**2
+    ly = -4.0 * np.sin(np.pi * ky / Ny) ** 2 / dy**2
+    eig = lx[np.newaxis, :] + ly[:, np.newaxis]
+    eig = eig.copy(); eig[0, 0] = 1.0
+    return eig
+
+
+def solve_poisson_periodic(rhs, eig):
+    rhat = np.fft.fft2(rhs)
+    phat = rhat / eig; phat[0, 0] = 0.0
+    return np.real(np.fft.ifft2(phat))
+
+
+def project_per(u_star, v_star, dx, dy, dt, rho, eig):
+    div = divergence_per(u_star, v_star, dx, dy)
+    phi = solve_poisson_periodic((rho / dt) * div, eig)
+    return (u_star - (dt / rho) * grad_p_u_per(phi, dx),
+            v_star - (dt / rho) * grad_p_v_per(phi, dy), phi)
+
+
+def _v_at_u_per(v):
+    return 0.25 * (v + np.roll(v, 1, 1) + np.roll(v, -1, 0)
+                   + np.roll(np.roll(v, -1, 0), 1, 1))
+
+
+def _u_at_v_per(u):
+    return 0.25 * (u + np.roll(u, -1, 1) + np.roll(u, 1, 0)
+                   + np.roll(np.roll(u, 1, 0), -1, 1))
+
+
+def momentum_predictor_periodic(u, v, nu, dx, dy, dt):
+    """Forward-Euler predictor (central advection + diffusion) on the periodic
+    staggered grid. Returns u*, v*."""
+    dudx = (np.roll(u, -1, 1) - np.roll(u, 1, 1)) / (2 * dx)
+    dudy = (np.roll(u, -1, 0) - np.roll(u, 1, 0)) / (2 * dy)
+    lapu = ((np.roll(u, -1, 1) - 2 * u + np.roll(u, 1, 1)) / dx**2
+            + (np.roll(u, -1, 0) - 2 * u + np.roll(u, 1, 0)) / dy**2)
+    ru = -(u * dudx + _v_at_u_per(v) * dudy) + nu * lapu
+
+    dvdx = (np.roll(v, -1, 1) - np.roll(v, 1, 1)) / (2 * dx)
+    dvdy = (np.roll(v, -1, 0) - np.roll(v, 1, 0)) / (2 * dy)
+    lapv = ((np.roll(v, -1, 1) - 2 * v + np.roll(v, 1, 1)) / dx**2
+            + (np.roll(v, -1, 0) - 2 * v + np.roll(v, 1, 0)) / dy**2)
+    rv = -(_u_at_v_per(u) * dvdx + v * dvdy) + nu * lapv
+    return u + dt * ru, v + dt * rv
