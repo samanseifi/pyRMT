@@ -24,10 +24,10 @@ def compute_kinetic_energy(a, b, rho_f, rho_s, phi, w_t, dx, dy):
     --------
     float : Total kinetic energy
     """
-    from pyRMT.functions import heaviside_smooth_alt
+    from pyRMT.functions import smoothed_heaviside
 
     # Compute local density using smooth Heaviside
-    H = heaviside_smooth_alt(phi, w_t)
+    H = smoothed_heaviside(phi, w_t)
     rho_local = (1 - H) * rho_s + H * rho_f
 
     # Kinetic energy density: 0.5 * rho * |u|^2
@@ -116,7 +116,7 @@ def compute_strain_energy(X1, X2, phi, mu_s, dx, dy, kappa=0.0):
             I1 = C11 + C22
 
             # Strain-energy density CONSISTENT with the solver's Cauchy stress
-            # sigma = mu_s * b + kappa*(J-1) I  (compute_solid_stress):
+            # sigma = mu_s * b + kappa*(J-1) I  (solid_cauchy_stress):
             #   deviatoric : W_dev = (mu_s/2)(I1 - 2)        -> sigma_dev = mu_s b
             #   volumetric : W_vol = (kappa/2)(J-1)^2         -> sigma_vol = kappa(J-1) I
             # NOTE: the previous form had an extra -2*ln(J) term, which belongs to
@@ -162,7 +162,7 @@ def compute_viscous_dissipation(a, b, mu_f, phi, w_t, dx, dy, eta_s=0.0):
     --------
     float : Viscous dissipation rate (power)
     """
-    from pyRMT.functions import grad_central_x_2nd, grad_central_y_2nd, heaviside_smooth_alt
+    from pyRMT.functions import grad_central_x_2nd, grad_central_y_2nd, smoothed_heaviside
 
     # Velocity gradients
     du_dx = grad_central_x_2nd(a, dx)
@@ -179,7 +179,7 @@ def compute_viscous_dissipation(a, b, mu_f, phi, w_t, dx, dy, eta_s=0.0):
     # In 2D: Φ = 2 * μ * (D_xx^2 + D_yy^2 + 2*D_xy^2)
 
     # Compute Heaviside for blending
-    H = heaviside_smooth_alt(phi, w_t)
+    H = smoothed_heaviside(phi, w_t)
 
     # Local viscosity (fluid viscosity in fluid, solid viscosity in solid if eta_s > 0)
     mu_local = H * mu_f + (1 - H) * eta_s

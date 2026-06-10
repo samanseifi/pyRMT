@@ -69,7 +69,7 @@ if __name__ == "__main__":
 
     # Extrapolate 3 layers into the fluid for numerical stability at the interface
     num_extrapolation_layers = 3
-    X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, num_extrapolation_layers)
+    X1, X2 = extrapolate_reference_map(X1, X2, phi, dx, dy, num_extrapolation_layers)
 
     # --------------------------
     # Physical Properties
@@ -113,20 +113,20 @@ if __name__ == "__main__":
 
         # 3. Advect Reference Maps (The "Solid" Memory)
         # We only advect the solid part, then re-extrapolate
-        X1 = advect_semi_lagrangian_rk4(X1, a, b, X, Y, dt, dx, dy)
-        X2 = advect_semi_lagrangian_rk4(X2, a, b, X, Y, dt, dx, dy)
+        X1 = advect_semilagrangian_rk4(X1, a, b, X, Y, dt, dx, dy)
+        X2 = advect_semilagrangian_rk4(X2, a, b, X, Y, dt, dx, dy)
         
         # Keep solid identity and clean up fluid region
         curr_solid_mask = (phi <= 0).astype(float)
         X1 *= curr_solid_mask
         X2 *= curr_solid_mask
-        X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, num_extrapolation_layers)
+        X1, X2 = extrapolate_reference_map(X1, X2, phi, dx, dy, num_extrapolation_layers)
 
         # 4. Velocity Prediction (RK4)
-        a_star, b_star = velocity_RK4(a, b, p, X1, X2, slab_piston_bc, mu_s, kappa, eta_s, dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t, gamma)
+        a_star, b_star = momentum_step_rk4(a, b, p, X1, X2, slab_piston_bc, mu_s, kappa, eta_s, dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t, gamma)
 
         # 5. Pressure Projection (Incompressibility)
-        H = heaviside_smooth_alt(phi, w_t)
+        H = smoothed_heaviside(phi, w_t)
         rho_local = (1 - H) * rho_s + H * rho_f
         
         a, b, p, A, ml_obj = pressure_projection_amg(
@@ -140,7 +140,7 @@ if __name__ == "__main__":
         # 6. Diagnostics and Output
         if step % vis_output_freq == 0 or step == 1:
             # Compute stress for visualization
-            sxx, sxy, syy, J = compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, p, eta_s)
+            sxx, sxy, syy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s, kappa, phi, a, b, p, eta_s)
             
             print(f"Step: {step} | dt: {dt:.5f} | Max V: {np.max(np.sqrt(a**2 + b**2)):.4f}")
             output_simulation_data_lite(

@@ -25,9 +25,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from scipy.interpolate import RegularGridInterpolator
 
 from pyRMT.functions import (
-    create_grid, apply_phi_BCs, extrapolate_transverse_layers_2field,
-    advect_reference_map, rebuild_phi_from_reference_map, velocity_RK4,
-    heaviside_smooth_alt, pressure_projection_amg, build_poisson_matrix,
+    create_grid, apply_phi_BCs, extrapolate_reference_map,
+    advect_reference_map, rebuild_phi_from_reference_map, momentum_step_rk4,
+    smoothed_heaviside, pressure_projection_amg, build_poisson_matrix,
     _precompute_poisson_eigenvalues,
 )
 from pyRMT.output import compute_kinetic_energy, compute_strain_energy
@@ -50,7 +50,7 @@ def simulate_tg(N, scheme, t_end=0.25, dt=1.0e-4, stress_band=False):
 
     X1 = X * solid_mask
     X2 = Y * solid_mask
-    X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, num_layers)
+    X1, X2 = extrapolate_reference_map(X1, X2, phi, dx, dy, num_layers)
 
     a, b = taylor_green_velocity(X, Y, U0=0.05)
     a, b = free_slip_box_bc(a, b)
@@ -66,13 +66,13 @@ def simulate_tg(N, scheme, t_end=0.25, dt=1.0e-4, stress_band=False):
         solid_mask = (phi <= 0).astype(float)
         X1 = advect_reference_map(X1, a, b, X, Y, dt, dx, dy, phi, scheme, 0.0) * solid_mask
         X2 = advect_reference_map(X2, a, b, X, Y, dt, dx, dy, phi, scheme, 0.0) * solid_mask
-        X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, num_layers)
+        X1, X2 = extrapolate_reference_map(X1, X2, phi, dx, dy, num_layers)
         phi = rebuild_phi_from_reference_map(X1, X2, phi_init)
 
-        a_star, b_star, *_ , J = velocity_RK4(
+        a_star, b_star, *_ , J = momentum_step_rk4(
             a, b, p, X1, X2, free_slip_box_bc, mu_s, kappa, eta_s, dx, dy, dt,
             rho_s, rho_f, phi, mu_f, w_t, gamma=0.0, stress_band=stress_band)
-        H = heaviside_smooth_alt(phi, w_t)
+        H = smoothed_heaviside(phi, w_t)
         rho_local = (1 - H) * rho_s + H * rho_f
         a, b, p, A, ml = pressure_projection_amg(
             a_star, b_star, dx, dy, dt, rho_local, velocity_bc=free_slip_box_bc,

@@ -1,15 +1,15 @@
 from pyRMT.functions import (
     create_grid,
     apply_phi_BCs,
-    extrapolate_transverse_layers_2field,
+    extrapolate_reference_map,
     compute_timestep,
-    advect_semi_lagrangian_rk4,
+    advect_semilagrangian_rk4,
     advect_weno5_rk3,
     advect_central2_rk3,
     advect_reference_map,
-    compute_solid_stress,
-    heaviside_smooth_alt,
-    velocity_RK4,
+    solid_cauchy_stress,
+    smoothed_heaviside,
+    momentum_step_rk4,
     compute_curvature,
     velocity_rhs_blended_optimized,
     apply_velocity_BCs,
@@ -41,4 +41,13 @@ from pyRMT.utils import (
     diff_upwind_3rd,
     lap_2nd,
     fast_solve_3x3,
+)
+
+# Deprecated aliases (old names kept for notebooks / external scripts)
+from pyRMT.functions import (
+    velocity_RK4,
+    heaviside_smooth_alt,
+    compute_solid_stress,
+    extrapolate_transverse_layers_2field,
+    advect_semi_lagrangian_rk4,
 )

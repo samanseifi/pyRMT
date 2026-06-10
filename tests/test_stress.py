@@ -1,6 +1,6 @@
 """Solid Cauchy stress sanity checks (neo-Hookean from the reference map)."""
 import numpy as np
-from pyRMT.functions import create_grid, compute_solid_stress
+from pyRMT.functions import create_grid, solid_cauchy_stress
 
 
 def _disc_phi(X, Y, R=0.25):
@@ -13,7 +13,7 @@ def test_undeformed_identity_zero_shear_J_one():
     X, Y, dx, dy = create_grid(N, N, 1.0, 1.0)
     phi = _disc_phi(X, Y)
     X1, X2 = X.copy(), Y.copy()                 # identity map everywhere
-    sxx, sxy, syy, J = compute_solid_stress(X1, X2, dx, dy, mu_s=1.0, kappa=0.0, phi=phi)
+    sxx, sxy, syy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s=1.0, kappa=0.0, phi=phi)
     solid = phi <= 0
     # b = I -> sigma = mu_s * I (no kappa): sxx=syy=mu_s, sxy=0
     assert np.allclose(sxx[solid], 1.0, atol=1e-6)
@@ -28,7 +28,7 @@ def test_rigid_translation_unchanged_stress():
     X, Y, dx, dy = create_grid(N, N, 1.0, 1.0)
     phi = _disc_phi(X, Y)
     X1, X2 = X - 0.1, Y + 0.05                  # translated identity
-    sxx, sxy, syy, J = compute_solid_stress(X1, X2, dx, dy, 1.0, 0.0, phi)
+    sxx, sxy, syy, J = solid_cauchy_stress(X1, X2, dx, dy, 1.0, 0.0, phi)
     solid = phi <= 0
     assert np.allclose(J[solid], 1.0, atol=1e-6)
     assert np.allclose(sxx[solid], 1.0, atol=1e-6)
@@ -43,7 +43,7 @@ def test_uniform_stretch_known_stress():
     phi = _disc_phi(X, Y)
     lam = 1.5
     X1, X2 = X / lam, Y.copy()                  # grad xi = diag(1/lam, 1)
-    sxx, sxy, syy, J = compute_solid_stress(X1, X2, dx, dy, mu_s=2.0, kappa=0.0, phi=phi)
+    sxx, sxy, syy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s=2.0, kappa=0.0, phi=phi)
     solid = phi <= 0
     assert np.allclose(J[solid], lam, atol=1e-6)
     assert np.allclose(sxx[solid], 2.0 * lam**2, atol=1e-6)
@@ -58,7 +58,7 @@ def test_detg_clamp_bounds_J():
     phi = _disc_phi(X, Y)
     # strong compression xi = 10*x => detG=10 => J=0.1; clamp C=3 => J>=1/3
     X1, X2 = 10.0 * X, Y.copy()
-    _, _, _, J = compute_solid_stress(X1, X2, dx, dy, 1.0, 0.0, phi,
+    _, _, _, J = solid_cauchy_stress(X1, X2, dx, dy, 1.0, 0.0, phi,
                                       w_cut=2 * dx, detg_clamp=3.0)
     solid = phi <= 0
     assert J[solid].min() >= 1.0 / 3.0 - 1e-9

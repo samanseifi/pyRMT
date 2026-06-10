@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pyRMT.functions import (
     create_grid, build_poisson_matrix, _precompute_poisson_eigenvalues,
-    compute_timestep, velocity_RK4, pressure_projection_amg,
+    compute_timestep, momentum_step_rk4, pressure_projection_amg,
 )
 from benchmarks.common import no_slip_lid_bc, extract_centerlines, ensure_dir
 
@@ -60,7 +60,7 @@ def run(Re=100.0, N=129, max_steps=60000, steady_tol=2e-5, out_root="outputs"):
                               rho_f, mu_f=mu_f)
         a_prev = a
 
-        a_star, b_star, *_ = velocity_RK4(
+        a_star, b_star, *_ = momentum_step_rk4(
             a, b, p, X1, X2, bc, mu_s, kappa, eta_s, dx, dy, dt,
             rho_s, rho_f, phi, mu_f, w_t, gamma)
 

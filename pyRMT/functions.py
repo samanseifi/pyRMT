@@ -46,7 +46,7 @@ def apply_phi_BCs(phi):
     return phi
 
 @njit
-def extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, max_layers):
+def extrapolate_reference_map(X1, X2, phi, dx, dy, max_layers):
     """
     Extrapolate solid reference maps (X1, X2) into fluid region.
     Iteratively extrapolates layer-by-layer near the interface; the band width is
@@ -192,7 +192,7 @@ def compute_timestep(a, b, dx, dy, CFL, dt_min_cap, mu_s, rho_s, gamma, rho_f, m
     return dt
 
 @njit
-def advect_semi_lagrangian_rk4(q, a, b, X, Y, dt, dx, dy):
+def advect_semilagrangian_rk4(q, a, b, X, Y, dt, dx, dy):
     Ny, Nx = q.shape
 
     def interp(u, xq, yq):
@@ -457,7 +457,7 @@ def advect_reference_map(q, a, b, X, Y, dt, dx, dy, phi,
         semi-Lagrangian branch).
     """
     if scheme == 'semilagrangian':
-        return advect_semi_lagrangian_rk4(q, a, b, X, Y, dt, dx, dy)
+        return advect_semilagrangian_rk4(q, a, b, X, Y, dt, dx, dy)
     elif scheme == 'central2':
         return advect_central2_rk3(q, a, b, dx, dy, dt, phi, w_cut)
     elif scheme == 'weno5':
@@ -470,7 +470,7 @@ def advect_reference_map(q, a, b, X, Y, dt, dx, dy, phi,
 
 
 @njit(parallel=True)
-def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, w_cut=0.0, detg_clamp=0.0):
+def solid_cauchy_stress(X1, X2, dx, dy, mu_s, kappa, phi, w_cut=0.0, detg_clamp=0.0):
     """Neo-Hookean Cauchy stress sigma = mu_s*b + kappa*(J-1)*I from the
     reference map.
 
@@ -570,7 +570,7 @@ def compute_solid_stress(X1, X2, dx, dy, mu_s, kappa, phi, w_cut=0.0, detg_clamp
 
     return sxx, sxy, syy, J
 
-def heaviside_smooth_alt(x, w_t):
+def smoothed_heaviside(x, w_t):
     inv_wt = 1.0 / w_t
     inv_pi = 1.0 / np.pi
 
@@ -583,7 +583,7 @@ def heaviside_smooth_alt(x, w_t):
 
     return H
 
-def velocity_RK4(u, v, p, X1, X2, velocity_bc, mu_s, kappa, eta_s , dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t, gamma=0.0,
+def momentum_step_rk4(u, v, p, X1, X2, velocity_bc, mu_s, kappa, eta_s , dx, dy, dt, rho_s, rho_f, phi, mu_f, w_t, gamma=0.0,
                  stress_band=False, detg_clamp=3.0):
     """
     RK4 integration using stress divergence from blended stress field.
@@ -601,11 +601,11 @@ def velocity_RK4(u, v, p, X1, X2, velocity_bc, mu_s, kappa, eta_s , dx, dy, dt, 
     # stress_band=True: banded central stress over phi < w_t (higher order).
     w_cut_stress = w_t if stress_band else 0.0
     clamp = detg_clamp if stress_band else 0.0
-    sigma_sxx_elastic, sigma_sxy_elastic, sigma_syy_elastic, J = compute_solid_stress(
+    sigma_sxx_elastic, sigma_sxy_elastic, sigma_syy_elastic, J = solid_cauchy_stress(
         X1, X2, dx, dy, mu_s, kappa, phi, w_cut=w_cut_stress, detg_clamp=clamp)
 
     # PRE-COMPUTE HEAVISIDE AND GRADIENTS (constant during RK4)
-    H = heaviside_smooth_alt(phi, w_t)
+    H = smoothed_heaviside(phi, w_t)
     dH_dx = grad_central_x_2nd(H, dx)
     dH_dy = grad_central_y_2nd(H, dy)
     rho_local = (1 - H) * rho_s + H * rho_f
@@ -1216,3 +1216,13 @@ def reinitialize_phi_PDE(phi_in, dx, dy, num_iters, apply_phi_BCs_func, dt_reini
             phi = apply_phi_BCs_func(phi)
 
     return phi
+
+
+# ── Deprecated name aliases ───────────────────────────────────────────────────
+# Kept so existing notebooks / external scripts using the old names still work.
+# Prefer the new names in new code.
+velocity_RK4 = momentum_step_rk4
+heaviside_smooth_alt = smoothed_heaviside
+compute_solid_stress = solid_cauchy_stress
+extrapolate_transverse_layers_2field = extrapolate_reference_map
+advect_semi_lagrangian_rk4 = advect_semilagrangian_rk4

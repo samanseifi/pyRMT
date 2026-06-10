@@ -1,7 +1,7 @@
 """Interpolators, reference-map extrapolation, and strain-energy consistency."""
 import numpy as np
 from pyRMT.functions import (
-    create_grid, extrapolate_transverse_layers_2field, compute_solid_stress,
+    create_grid, extrapolate_reference_map, solid_cauchy_stress,
 )
 from pyRMT.interpolators import bilinear_interpolate, bicubic_interpolate
 from pyRMT.output import compute_strain_energy
@@ -39,7 +39,7 @@ def test_extrapolation_exact_on_linear_reference_map():
     # linear maps a*x+b*y+c, zeroed outside, then extrapolated
     X1 = (1.3 * X + 0.2 * Y) * solid
     X2 = (-0.4 * X + 0.9 * Y) * solid
-    X1e, X2e = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, max_layers=3)
+    X1e, X2e = extrapolate_reference_map(X1, X2, phi, dx, dy, max_layers=3)
     band = (phi >= 0) & (phi < 3 * dx)
     err1 = np.abs(X1e[band] - (1.3 * X[band] + 0.2 * Y[band]))
     err2 = np.abs(X2e[band] - (-0.4 * X[band] + 0.9 * Y[band]))

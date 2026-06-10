@@ -24,9 +24,9 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pyRMT.functions import (
-    create_grid, apply_phi_BCs, extrapolate_transverse_layers_2field,
+    create_grid, apply_phi_BCs, extrapolate_reference_map,
     compute_timestep, advect_reference_map, rebuild_phi_from_reference_map,
-    reinitialize_phi_PDE, velocity_RK4, heaviside_smooth_alt,
+    reinitialize_phi_PDE, momentum_step_rk4, smoothed_heaviside,
     pressure_projection_amg, build_poisson_matrix, _precompute_poisson_eigenvalues,
 )
 from pyRMT.output import compute_kinetic_energy, compute_strain_energy
@@ -60,7 +60,7 @@ def run(N=128, scheme='semilagrangian', t_end=8.0, reinit=False, out_root="outpu
 
     X1 = X * solid_mask
     X2 = Y * solid_mask
-    X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, num_layers)
+    X1, X2 = extrapolate_reference_map(X1, X2, phi, dx, dy, num_layers)
 
     a = np.zeros((N, N)); b = np.zeros((N, N)); p = np.zeros((N, N))
 
@@ -90,15 +90,15 @@ def run(N=128, scheme='semilagrangian', t_end=8.0, reinit=False, out_root="outpu
 
         X1 = advect_reference_map(X1, a, b, X, Y, dt, dx, dy, phi, scheme, 0.0) * solid_mask
         X2 = advect_reference_map(X2, a, b, X, Y, dt, dx, dy, phi, scheme, 0.0) * solid_mask
-        X1, X2 = extrapolate_transverse_layers_2field(X1, X2, phi, dx, dy, num_layers)
+        X1, X2 = extrapolate_reference_map(X1, X2, phi, dx, dy, num_layers)
 
         phi = rebuild_phi_from_reference_map(X1, X2, phi_init)
 
-        a_star, b_star, sxx, sxy, syy, J = velocity_RK4(
+        a_star, b_star, sxx, sxy, syy, J = momentum_step_rk4(
             a, b, p, X1, X2, bc, mu_s, kappa, eta_s, dx, dy, dt,
             rho_s, rho_f, phi, mu_f, w_t, gamma, stress_band=stress_band, detg_clamp=detg_clamp)
 
-        H = heaviside_smooth_alt(phi, w_t)
+        H = smoothed_heaviside(phi, w_t)
         rho_local = (1 - H) * rho_s + H * rho_f
         a, b, p, A, ml = pressure_projection_amg(
             a_star, b_star, dx, dy, dt, rho_local, velocity_bc=bc,
