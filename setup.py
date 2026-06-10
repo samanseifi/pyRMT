@@ -14,6 +14,9 @@ setup(
         'pyamg',
         'numba'
     ],
+    extras_require={
+        'test': ['pytest'],
+    },
     include_package_data=True,
     zip_safe=False,
 )
