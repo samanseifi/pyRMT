@@ -1,7 +1,7 @@
 from numba import njit, prange
 import numpy as np
 
-@njit(parallel=True, cache=True)
+@njit(cache=True)
 def bilinear_interpolate(u, xq, yq, dx, dy, Nx, Ny):
     """
     Fast bilinear interpolator for 2D grid data.

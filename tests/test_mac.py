@@ -129,3 +129,30 @@ def test_interfacial_force_balanced_for_constant_curvature():
     phi = -gamma * kR * H
     gu = gradient_p_u(phi, dx); gv = gradient_p_v(phi, dy)
     assert np.allclose(fu, gu, atol=1e-12) and np.allclose(fv, gv, atol=1e-12)
+
+
+def test_reference_map_advect_identity_on_index_grid():
+    """Reference map advected with zero velocity on the 0-based index grid is the
+    identity (machine zero) -- the grid convention the MAC FSI driver relies on."""
+    from pyRMT.functions import advect_reference_map
+    N = 48
+    dx = dy = 1.0 / N
+    xc = (np.arange(N) + 0.5) * dx
+    Xc, Yc = np.meshgrid(xc, xc)
+    Xg, Yg = np.meshgrid(np.arange(N) * dx, np.arange(N) * dy)
+    phi = np.sqrt((Xc - 0.5)**2 + (Yc - 0.5)**2) - 0.2
+    X1 = Xc.copy()
+    z = np.zeros((N, N))
+    X1a = advect_reference_map(X1, z, z, Xg, Yg, 1e-3, dx, dy, phi, 'semilagrangian', 0.0)
+    assert np.max(np.abs(X1a - X1)) < 1e-12
+
+
+def test_faces_to_centres_interpolation_exact_on_linear():
+    """0.5*(u[:, :-1]+u[:, 1:]) recovers a linear field at cell centres exactly."""
+    N = 32
+    dx = 1.0 / N
+    xf = np.arange(N + 1) * dx
+    u = 2.0 + 3.0 * xf[np.newaxis, :] * np.ones((N, 1))   # linear in x at u-faces
+    u_c = 0.5 * (u[:, :-1] + u[:, 1:])
+    xc = (np.arange(N) + 0.5) * dx
+    assert np.allclose(u_c, 2.0 + 3.0 * xc[np.newaxis, :], atol=1e-12)
