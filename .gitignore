@@ -39,3 +39,7 @@ outputs/**
 
 # preserved scratch/prototypes (local only)
 archive/
+
+# numba cache
+*.nbi
+*.nbc
