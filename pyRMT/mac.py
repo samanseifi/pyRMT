@@ -120,9 +120,27 @@ def _u_at_v(u):
     return 0.25 * (u[:-1, :-1] + u[:-1, 1:] + u[1:, :-1] + u[1:, 1:])
 
 
-def momentum_predictor(u, v, nu, dx, dy, dt, U_lid):
+def interfacial_force_faces(kappa, H, gamma, dx, dy):
+    """Continuum-surface-force at faces: f = -gamma * kappa * grad(H), with kappa
+    (cell centres) interpolated to faces and grad(H) the SAME compact face gradient
+    as the pressure gradient -> balanced-force by construction. Returns (fu, fv)
+    on the u-faces (Ny,Nx+1) and v-faces (Ny+1,Nx); wall faces are 0."""
+    Ny, Nx = H.shape
+    fu = np.zeros((Ny, Nx + 1))
+    fv = np.zeros((Ny + 1, Nx))
+    # u-faces (interior i=1..Nx-1): kappa interp in x, grad H compact in x
+    ku = 0.5 * (kappa[:, 1:] + kappa[:, :-1])
+    fu[:, 1:-1] = -gamma * ku * (H[:, 1:] - H[:, :-1]) / dx
+    # v-faces (interior j=1..Ny-1)
+    kv = 0.5 * (kappa[1:, :] + kappa[:-1, :])
+    fv[1:-1, :] = -gamma * kv * (H[1:, :] - H[:-1, :]) / dy
+    return fu, fv
+
+
+def momentum_predictor(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None, rho=1.0):
     """One explicit predictor step (central advection + diffusion) for the
-    lid-driven cavity. Returns u*, v* with wall (normal) faces zeroed."""
+    lid-driven cavity, plus optional face body forces fu (Ny,Nx+1)/fv (Ny+1,Nx)
+    (e.g. surface tension) added as fu/rho. Returns u*, v* with wall faces zeroed."""
     Ny, Nxp1 = u.shape
     Nx = Nxp1 - 1
     up = _u_ghost_y(u, U_lid)            # (Ny+2, Nx+1)
@@ -136,6 +154,8 @@ def momentum_predictor(u, v, nu, dx, dy, dt, U_lid):
             + (up[2:, 1:-1] - 2 * up[1:-1, 1:-1] + up[:-2, 1:-1]) / dy**2)
     v_u = _v_at_u(v)                                 # (Ny, Nx-1)
     rhs_u = -(uc * dudx + v_u * dudy) + nu * lapu
+    if fu is not None:
+        rhs_u = rhs_u + fu[:, 1:-1] / rho
     ustar = u.copy()
     ustar[:, 1:-1] = uc + dt * rhs_u
     ustar[:, 0] = 0.0; ustar[:, -1] = 0.0
@@ -148,6 +168,8 @@ def momentum_predictor(u, v, nu, dx, dy, dt, U_lid):
             + (v[2:, :] - 2 * vc + v[:-2, :]) / dy**2)
     u_v = _u_at_v(u)                                 # (Ny-1, Nx)
     rhs_v = -(u_v * dvdx + vc * dvdy) + nu * lapv
+    if fv is not None:
+        rhs_v = rhs_v + fv[1:-1, :] / rho
     vstar = v.copy()
     vstar[1:-1, :] = vc + dt * rhs_v
     vstar[0, :] = 0.0; vstar[-1, :] = 0.0

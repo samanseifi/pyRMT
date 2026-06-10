@@ -110,3 +110,22 @@ def test_projection_makes_divergence_machine_zero():
     eig = poisson_eigs_neumann(Nx, Ny, dx, dy)
     un, vn, p = project(u, v, dx, dy, dt=0.01, rho=1.0, eig=eig)
     assert np.max(np.abs(divergence(un, vn, dx, dy))) < 1e-11
+
+
+def test_interfacial_force_balanced_for_constant_curvature():
+    """For constant curvature, f = -gamma*kappa*grad(H) must be the discrete
+    gradient of (-gamma*kappa*H) at faces -- i.e. exactly balanceable by pressure
+    (this is why MAC surface tension has small parasitic currents)."""
+    from pyRMT.mac import mac_grid, interfacial_force_faces, gradient_p_u, gradient_p_v
+    Nx, Ny = 40, 40
+    dx, dy = mac_grid(Nx, Ny)
+    xc = (np.arange(Nx) + 0.5) * dx
+    Xc, Yc = np.meshgrid(xc, xc)
+    H = 0.5 * (1 + np.tanh((np.sqrt((Xc-.5)**2+(Yc-.5)**2)-.25)/(2*dx)))  # smooth band
+    gamma, kR = 0.1, 4.0
+    kappa = np.full((Ny, Nx), kR)
+    fu, fv = interfacial_force_faces(kappa, H, gamma, dx, dy)
+    # potential phi = -gamma*kR*H ; grad(phi) at faces should equal (fu,fv)
+    phi = -gamma * kR * H
+    gu = gradient_p_u(phi, dx); gv = gradient_p_v(phi, dy)
+    assert np.allclose(fu, gu, atol=1e-12) and np.allclose(fv, gv, atol=1e-12)
