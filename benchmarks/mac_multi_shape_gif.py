@@ -43,21 +43,34 @@ def shape_cross(cx, cy, arm, width, r=0.02, k=0.03):
                      _rbox(X, Y, cx, cy, width, arm, r), k)
     return f, arm
 
+def shape_triangle(cx, cy, R, r=0.02):
+    # up-pointing equilateral triangle (rounded corners), intersection of 3 edges
+    kk = np.sqrt(3) / 2
+    def f(X, Y):
+        x = X - cx; y = Y - cy
+        d_base = -(y + 0.5 * R)
+        d_right = kk * x + 0.5 * (y - R)
+        d_left = -kk * x + 0.5 * (y - R)
+        return np.maximum(np.maximum(d_base, d_right), d_left) - r
+    return f, R
 
-def run(N=128, t_end=6.0, U_lid=1.0, mu_s=1.2, mu_f=0.01, rho=1.0, eta=3.0,
-        frame_dt=0.1, out_root="outputs"):
+
+def run(N=128, t_end=10.0, U_lid=1.0, mu_s=2.5, mu_f=0.01, rho=1.0, eta=2.5,
+        eta_wall=3.0, frame_dt=0.1, out_root="outputs"):
     dx, dy = mac_grid(N, N)
     xc = (np.arange(N) + 0.5) * dx
     Xc, Yc = np.meshgrid(xc, xc)
     Xg, Yg = np.meshgrid(np.arange(N) * dx, np.arange(N) * dy)
     w_t = 2.0 * dx; nu = mu_f / rho; eps = 3.0 * dx
+    # wall level set: phi_wall < 0 OUTSIDE the box -> solids feel a contact stress
+    # against the walls (keeps them from being squeezed into corners and folding).
+    phi_wall = np.minimum(np.minimum(Xc, 1.0 - Xc), np.minimum(Yc, 1.0 - Yc))
 
-    # square & circle placed just touching -> contact stress engaged from t=0 as
-    # the lid tumbles them together; the cross drifts up to join them.
-    shapes = [shape_square(0.46, 0.60, 0.085),
-              shape_circle(0.635, 0.60, 0.090),
-              shape_cross(0.45, 0.33, 0.105, 0.042)]
-    names = ["square", "circle", "smooth cross"]
+    shapes = [shape_square(0.40, 0.62, 0.080, r=0.028),
+              shape_circle(0.60, 0.62, 0.085),
+              shape_cross(0.40, 0.36, 0.100, 0.040, r=0.025, k=0.045),
+              shape_triangle(0.62, 0.36, 0.110, r=0.04)]
+    names = ["square", "circle", "smooth cross", "triangle"]
     inits = [s[0] for s in shapes]
     refs = []
     for pin in inits:
@@ -100,6 +113,9 @@ def run(N=128, t_end=6.0, U_lid=1.0, mu_s=1.2, mu_f=0.01, rho=1.0, eta=3.0,
             for j in range(i + 1, len(phis)):
                 txx, txy, tyy = contact_stress(phis[i], phis[j], eta, 2 * mu_s, eps, dx, dy)
                 Sxx += txx; Sxy += txy; Syy += tyy
+            if eta_wall > 0:                       # solid-wall contact
+                txx, txy, tyy = contact_stress(phis[i], phi_wall, eta_wall, 2 * mu_s, eps, dx, dy)
+                Sxx += txx; Sxy += txy; Syy += tyy
 
         divx = grad_central_x_2nd(Sxx, dx) + grad_central_y_2nd(Sxy, dy)
         divy = grad_central_x_2nd(Sxy, dx) + grad_central_y_2nd(Syy, dy)
@@ -124,20 +140,19 @@ def run(N=128, t_end=6.0, U_lid=1.0, mu_s=1.2, mu_f=0.01, rho=1.0, eta=3.0,
     import matplotlib; matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import imageio.v2 as imageio
-    cols = ["#d62728", "#1f77b4", "#2ca02c"]
-    s = max(1, N // 22); sl = (slice(None, None, s), slice(None, None, s))
-    Xq, Yq = Xc[sl], Yc[sl]
+    cols = ["#d62728", "#1f77b4", "#2ca02c", "#9467bd", "#ff7f0e"]
     imgs = []
     for (tt, pps, uc, vc) in frames:
-        fig, ax = plt.subplots(figsize=(5.2, 5.2), dpi=110)
+        fig, ax = plt.subplots(figsize=(5.6, 5.2), dpi=110)
         spd = np.sqrt(uc**2 + vc**2)
-        ax.streamplot(xc, xc, uc, vc, density=1.0, color=spd, cmap="Greys",
-                      linewidth=0.6, arrowsize=0.6)
-        for k, pp in enumerate(pps):
-            ax.contourf(Xc, Yc, pp, levels=[-1e9, 0.0], colors=[cols[k]], alpha=0.92)
-            ax.contour(Xc, Yc, pp, levels=[0.0], colors=["k"], linewidths=1.0)
+        im = ax.imshow(spd, origin="lower", extent=[0, 1, 0, 1], cmap="viridis",
+                       vmin=0.0, vmax=1.0, interpolation="bilinear")
+        for k, pp in enumerate(pps):                       # opaque coloured solids on top
+            ax.contourf(Xc, Yc, pp, levels=[-1e9, 0.0], colors=[cols[k % len(cols)]])
+            ax.contour(Xc, Yc, pp, levels=[0.0], colors=["white"], linewidths=1.2)
         ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.set_aspect("equal")
-        ax.set_xticks([]); ax.set_yticks([]); ax.set_title(f"t = {tt:4.2f}")
+        ax.set_xticks([]); ax.set_yticks([]); ax.set_title(f"t = {tt:4.2f}   (colour = speed)")
+        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.02, label="|u|")
         fig.tight_layout(pad=0.4)
         fig.canvas.draw()
         w, h = fig.canvas.get_width_height()
