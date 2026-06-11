@@ -23,8 +23,8 @@ from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
     grad_central_x_2nd, grad_central_y_2nd)
 from pyRMT.output import compute_strain_energy
 
-SCHEMES = ["semilagrangian", "central2", "weno5"]
-NS = [32, 64, 128, 256, 512]
+SCHEMES = ["semilagrangian", "semilagrangian_cubic", "central2", "weno5"]
+NS = [32, 64, 128, 256]
 
 
 def run_one(N, t_end, R=0.15, x0=0.5, y0=0.7, mu_s=0.1, mu_f=0.01, U0=0.3, rho=1.0,
@@ -145,9 +145,12 @@ def plot_pub(out_dir, coarse, Ns, REF, h, verr, perr, KE, Es):
         print(f"  (plot skipped: {e})"); return
     plt.rcParams.update({"font.size": 11, "axes.labelsize": 12.5,
                          "axes.titlesize": 12.5, "legend.fontsize": 10})
-    col = {"semilagrangian": "#1f77b4", "central2": "#ff7f0e", "weno5": "#2ca02c"}
-    mk = {"semilagrangian": "o", "central2": "s", "weno5": "^"}
-    lbl = {"semilagrangian": "semi-Lagrangian", "central2": "central-2", "weno5": "WENO5"}
+    col = {"semilagrangian": "#1f77b4", "semilagrangian_cubic": "#9467bd",
+           "central2": "#ff7f0e", "weno5": "#2ca02c"}
+    mk = {"semilagrangian": "o", "semilagrangian_cubic": "D", "central2": "s", "weno5": "^"}
+    lbl = {"semilagrangian": "semi-Lagrangian (bilinear)",
+           "semilagrangian_cubic": "semi-Lagrangian (cubic)",
+           "central2": "central-2", "weno5": "WENO5"}
     h = np.asarray(h)
 
     def _tri(ax, slope, ybase, color):
