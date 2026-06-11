@@ -310,3 +310,31 @@ def advect_xi_conservative(xi, u, v, dx, dy, dt, phi, w_cut=0.0):
     q1 = xi + dt * rhs(xi)
     q2 = 0.75 * xi + 0.25 * (q1 + dt * rhs(q1))
     return (1.0 / 3.0) * xi + (2.0 / 3.0) * (q2 + dt * rhs(q2))
+
+
+# ── Solid-solid contact STRESS (Rycroft et al. 2018, arXiv 1810.03015 Eq.4.10-4.12) ──
+# Unlike a repulsive BODY force (which is curl-free -> nullified by the projection),
+# contact is added as a trace-free STRESS tensor; its divergence is a momentum-
+# conserving force that survives the exact projection.
+
+def contact_stress(phi_a, phi_b, eta, Gsum, eps, dx, dy):
+    """Trace-free contact stress for a pair of solids whose blur zones overlap.
+
+      f(phi)  = 1/2 (1 - phi/eps) for phi < eps, else 0   (contact intensity)
+      n       = grad(phi_a - phi_b)/|grad(phi_a - phi_b)|  (pair normal)
+      tau_col = -eta * min{f_a,f_b} * Gsum * (n⊗n - 1/2 I)   (2D, trace-free)
+
+    Returns the cell-centred components (txx, txy, tyy), to be ADDED to the solid
+    stress before taking its divergence. Gsum = G_a + G_b, eps ~ contact width.
+    """
+    fa = np.where(phi_a < eps, 0.5 * (1.0 - phi_a / eps), 0.0)
+    fb = np.where(phi_b < eps, 0.5 * (1.0 - phi_b / eps), 0.0)
+    fc = np.minimum(fa, fb)                       # active only where both overlap
+    d = phi_a - phi_b
+    dpx = np.zeros_like(d); dpy = np.zeros_like(d)
+    dpx[:, 1:-1] = (d[:, 2:] - d[:, :-2]) / (2 * dx)
+    dpy[1:-1, :] = (d[2:, :] - d[:-2, :]) / (2 * dy)
+    mag = np.sqrt(dpx * dpx + dpy * dpy) + 1e-12
+    nx = dpx / mag; ny = dpy / mag
+    s = -eta * fc * Gsum
+    return s * (nx * nx - 0.5), s * (nx * ny), s * (ny * ny - 0.5)
