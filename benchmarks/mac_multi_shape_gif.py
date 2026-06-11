@@ -52,9 +52,11 @@ def run(N=128, t_end=6.0, U_lid=1.0, mu_s=1.2, mu_f=0.01, rho=1.0, eta=3.0,
     Xg, Yg = np.meshgrid(np.arange(N) * dx, np.arange(N) * dy)
     w_t = 2.0 * dx; nu = mu_f / rho; eps = 3.0 * dx
 
-    shapes = [shape_square(0.40, 0.66, 0.085),
-              shape_circle(0.62, 0.62, 0.090),
-              shape_cross(0.48, 0.40, 0.105, 0.042)]
+    # square & circle placed just touching -> contact stress engaged from t=0 as
+    # the lid tumbles them together; the cross drifts up to join them.
+    shapes = [shape_square(0.46, 0.60, 0.085),
+              shape_circle(0.635, 0.60, 0.090),
+              shape_cross(0.45, 0.33, 0.105, 0.042)]
     names = ["square", "circle", "smooth cross"]
     inits = [s[0] for s in shapes]
     refs = []
