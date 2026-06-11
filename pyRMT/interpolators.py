@@ -61,7 +61,7 @@ def bilinear_interpolate(u, xq, yq, dx, dy, Nx, Ny):
 
     return out
 
-@njit(parallel=True, cache=True)
+@njit(cache=True)
 def bicubic_interpolate(u, xq, yq, dx, dy, Nx, Ny):
     """
     Bicubic interpolation for Semi-Lagrangian Advection.

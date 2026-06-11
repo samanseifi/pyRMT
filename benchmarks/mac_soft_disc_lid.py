@@ -91,8 +91,12 @@ def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0
         u, v, p = project(ustar, vstar, dx, dy, dt, rho, eig)
 
         msk = phi <= 0
-        cx = Xc[msk].mean() if msk.any() else np.nan
-        cy = Yc[msk].mean() if msk.any() else np.nan
+        # honest divergence detection: the masking + reinit guards can otherwise
+        # let a blown-up run limp along (disc zeroed out) and look "survived".
+        if not msk.any() or not (np.all(np.isfinite(u)) and np.all(np.isfinite(v))):
+            print(f"  [DIVERGED at step {step}, t={t:.3f}: disc lost or non-finite velocity]")
+            break
+        cx = Xc[msk].mean(); cy = Yc[msk].mean()
         t += dt
         traj.append((t, cx, cy, J.min(), J.max()))
         if step % 200 == 0 or t >= t_end:

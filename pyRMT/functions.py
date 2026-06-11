@@ -227,6 +227,30 @@ def advect_semilagrangian_rk4(q, a, b, X, Y, dt, dx, dy):
     return q_new
 
 
+@njit(cache=True)
+def advect_semilagrangian_cubic_rk4(q, a, b, X, Y, dt, dx, dy):
+    """Semi-Lagrangian RK4 backtrace using MONOTONE bicubic (Catmull-Rom)
+    interpolation -- much less diffusive than bilinear, so higher effective order,
+    while the interpolation's local min/max limiter keeps it stable at the
+    reference-map kink (no physical-quantity clamping needed). Unconditionally
+    stable like the bilinear SL."""
+    Ny, Nx = q.shape
+
+    def interp(u, xq, yq):
+        return bicubic_interpolate(u, xq, yq, dx, dy, Nx, Ny)
+
+    k1x = interp(a, X, Y); k1y = interp(b, X, Y)
+    X2 = X - 0.5 * dt * k1x; Y2 = Y - 0.5 * dt * k1y
+    k2x = interp(a, X2, Y2); k2y = interp(b, X2, Y2)
+    X3 = X - 0.5 * dt * k2x; Y3 = Y - 0.5 * dt * k2y
+    k3x = interp(a, X3, Y3); k3y = interp(b, X3, Y3)
+    X4 = X - dt * k3x; Y4 = Y - dt * k3y
+    k4x = interp(a, X4, Y4); k4y = interp(b, X4, Y4)
+    X_back = X - (dt / 6.0) * (k1x + 2*k2x + 2*k3x + k4x)
+    Y_back = Y - (dt / 6.0) * (k1y + 2*k2y + 2*k3y + k4y)
+    return interp(q, X_back, Y_back)
+
+
 # ── WENO5 + SSP-RK3 Eulerian advection ───────────────────────────────────────
 
 @njit(cache=True)
@@ -503,6 +527,8 @@ def advect_reference_map(q, a, b, X, Y, dt, dx, dy, phi,
 
     if scheme == 'semilagrangian':
         return advect_semilagrangian_rk4(q, a, b, X, Y, dt, dx, dy)
+    elif scheme == 'semilagrangian_cubic':
+        return advect_semilagrangian_cubic_rk4(q, a, b, X, Y, dt, dx, dy)
     elif scheme == 'central2':
         return advect_central2_rk3(q, a, b, dx, dy, dt, phi, w_cut)
     elif scheme == 'weno5':
