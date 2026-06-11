@@ -28,7 +28,7 @@ NS = [32, 64, 128, 256]
 
 
 def run_one(N, t_end, R=0.15, x0=0.5, y0=0.7, mu_s=0.1, mu_f=0.01, U0=0.3, rho=1.0,
-            scheme="semilagrangian", w_cut_fac=4.0, isochoric=False):
+            scheme="semilagrangian", w_cut_fac=4.0, isochoric=False, normalize_phi=False):
     dx, dy = mac_grid(N, N)
     xc = (np.arange(N) + 0.5) * dx
     Xc, Yc = np.meshgrid(xc, xc)
@@ -62,7 +62,16 @@ def run_one(N, t_end, R=0.15, x0=0.5, y0=0.7, mu_s=0.1, mu_f=0.01, U0=0.3, rho=1
         phi = rebuild_phi_from_reference_map(X1, X2, phi_init)
         sxx, sxy, syy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s, 0.0, phi,
                                                isochoric=isochoric)
-        H = smoothed_heaviside(phi, w_t)
+        if normalize_phi:
+            # 2nd-order-consistent phase field: feed the Heaviside the |grad phi|-
+            # normalized level set (~signed distance), so the blend band has a
+            # consistent physical width w_t even where phi = phi0(xi) is no longer
+            # a signed-distance function (|grad phi| != 1 under deformation).
+            gpx = grad_central_x_2nd(phi, dx); gpy = grad_central_y_2nd(phi, dy)
+            gmag = np.sqrt(gpx * gpx + gpy * gpy) + 1e-12
+            H = smoothed_heaviside(phi / gmag, w_t)
+        else:
+            H = smoothed_heaviside(phi, w_t)
         Sxx = (1 - H) * sxx; Sxy = (1 - H) * sxy; Syy = (1 - H) * syy
         divx = grad_central_x_2nd(Sxx, dx) + grad_central_y_2nd(Sxy, dy)
         divy = grad_central_x_2nd(Sxy, dx) + grad_central_y_2nd(Syy, dy)
