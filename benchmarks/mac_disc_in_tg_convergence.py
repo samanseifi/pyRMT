@@ -28,7 +28,7 @@ NS = [32, 64, 128, 256]
 
 
 def run_one(N, t_end, R=0.15, x0=0.5, y0=0.7, mu_s=0.1, mu_f=0.01, U0=0.3, rho=1.0,
-            scheme="semilagrangian", w_cut_fac=4.0):
+            scheme="semilagrangian", w_cut_fac=4.0, isochoric=False):
     dx, dy = mac_grid(N, N)
     xc = (np.arange(N) + 0.5) * dx
     Xc, Yc = np.meshgrid(xc, xc)
@@ -60,7 +60,8 @@ def run_one(N, t_end, R=0.15, x0=0.5, y0=0.7, mu_s=0.1, mu_f=0.01, U0=0.3, rho=1
         X2 = advect_reference_map(X2, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
         X1, X2 = extrapolate_reference_map(X1, X2, phi, dx, dy, 3)
         phi = rebuild_phi_from_reference_map(X1, X2, phi_init)
-        sxx, sxy, syy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s, 0.0, phi)
+        sxx, sxy, syy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s, 0.0, phi,
+                                               isochoric=isochoric)
         H = smoothed_heaviside(phi, w_t)
         Sxx = (1 - H) * sxx; Sxy = (1 - H) * sxy; Syy = (1 - H) * syy
         divx = grad_central_x_2nd(Sxx, dx) + grad_central_y_2nd(Sxy, dy)
@@ -91,15 +92,15 @@ def _orders(Ns, errs):
     return [np.log(errs[k] / errs[k + 1]) / np.log(Ns[k + 1] / Ns[k]) for k in range(len(errs) - 1)]
 
 
-def run(t_end=0.6, out_root="outputs"):
+def run(t_end=0.6, isochoric=False, out_root="outputs"):
     g = (np.arange(20) + 0.5) / 20
     data = {}
     for sch in SCHEMES:
-        print(f"\n=== scheme: {sch} ===")
+        print(f"\n=== scheme: {sch} (isochoric={isochoric}) ===")
         res = {}
         for N in NS:
             try:
-                res[N] = run_one(N, t_end, scheme=sch)
+                res[N] = run_one(N, t_end, scheme=sch, isochoric=isochoric)
                 print(f"  N={N:4d}  KE={res[N]['KE']:.6f}  Estrain={res[N]['Estrain']:.6f}  max|div|={res[N]['divmax']:.1e}")
             except Exception as e:
                 print(f"  N={N:4d}  FAILED: {type(e).__name__}")
@@ -220,4 +221,5 @@ def replot(out_root="outputs"):
 
 if __name__ == "__main__":
     t_end = float(sys.argv[1]) if len(sys.argv) > 1 else 0.6
-    run(t_end=t_end)
+    isochoric = (len(sys.argv) > 2 and sys.argv[2].lower() in ("1", "true", "iso"))
+    run(t_end=t_end, isochoric=isochoric)

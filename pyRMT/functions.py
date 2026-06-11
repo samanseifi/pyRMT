@@ -543,7 +543,8 @@ def advect_reference_map(q, a, b, X, Y, dt, dx, dy, phi,
 
 
 @njit(parallel=True, cache=True)
-def solid_cauchy_stress(X1, X2, dx, dy, mu_s, kappa, phi, w_cut=0.0, detg_clamp=0.0):
+def solid_cauchy_stress(X1, X2, dx, dy, mu_s, kappa, phi, w_cut=0.0, detg_clamp=0.0,
+                        isochoric=False):
     """Neo-Hookean Cauchy stress sigma = mu_s*b + kappa*(J-1)*I from the
     reference map.
 
@@ -634,12 +635,25 @@ def solid_cauchy_stress(X1, X2, dx, dy, mu_s, kappa, phi, w_cut=0.0, detg_clamp=
                 j_val = 1.0 / detG
                 J[j, i] = j_val
 
-                # 5. Neo-Hookean Stress (Kamrin form): sigma = mu*B + kappa*(J-1)*I
+                # 5. Neo-Hookean Cauchy stress.
                 vol_term = kappa * (j_val - 1.0)
-
-                sxx[j, i] = mu_s * b11 + vol_term
-                sxy[j, i] = mu_s * b12
-                syy[j, i] = mu_s * b22 + vol_term
+                if isochoric:
+                    # 2D isochoric (volume-corrected) neo-Hookean, matching the
+                    # compressible RMT papers (Kamrin-Rycroft-Nave 2015, Rycroft
+                    # FSI): sigma_dev = mu_s J^{-2}(b - 1/2 tr(b) I). The J^{-2}
+                    # damps the stress when the map spuriously inflates (J>1),
+                    # self-correcting numerical J-drift (no clamp needed).
+                    tr_half = 0.5 * (b11 + b22)
+                    jm2 = 1.0 / (j_val * j_val)
+                    sxx[j, i] = mu_s * jm2 * (b11 - tr_half) + vol_term
+                    sxy[j, i] = mu_s * jm2 * b12
+                    syy[j, i] = mu_s * jm2 * (b22 - tr_half) + vol_term
+                else:
+                    # legacy incompressible form (Rycroft 2018 convention):
+                    # sigma = mu_s b (+ kappa(J-1)I); pressure handles the rest.
+                    sxx[j, i] = mu_s * b11 + vol_term
+                    sxy[j, i] = mu_s * b12
+                    syy[j, i] = mu_s * b22 + vol_term
 
     return sxx, sxy, syy, J
 

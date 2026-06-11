@@ -20,7 +20,7 @@ from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
 
 
 def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0,
-        reinit=False, out_root="outputs"):
+        reinit=False, isochoric=False, out_root="outputs"):
     dx, dy = mac_grid(N, N)
     xc = (np.arange(N) + 0.5) * dx
     Xc, Yc = np.meshgrid(xc, xc)
@@ -79,7 +79,7 @@ def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0
             phi = reinitialize_phi_fmm(phi, dx, dy)
 
         sxx, sxy, syy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s, kappa, phi,
-                                               detg_clamp=detg_clamp)
+                                               detg_clamp=detg_clamp, isochoric=isochoric)
         H = smoothed_heaviside(phi, w_t)
         Sxx = (1 - H) * sxx; Sxy = (1 - H) * sxy; Syy = (1 - H) * syy
         divx = grad_central_x_2nd(Sxx, dx) + grad_central_y_2nd(Sxy, dy)   # centres
@@ -91,10 +91,13 @@ def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0
         u, v, p = project(ustar, vstar, dx, dy, dt, rho, eig)
 
         msk = phi <= 0
-        # honest divergence detection: the masking + reinit guards can otherwise
-        # let a blown-up run limp along (disc zeroed out) and look "survived".
-        if not msk.any() or not (np.all(np.isfinite(u)) and np.all(np.isfinite(v))):
-            print(f"  [DIVERGED at step {step}, t={t:.3f}: disc lost or non-finite velocity]")
+        # honest divergence detection. The masking/reinit guards (and the J^{-2}
+        # isochoric damping) can otherwise let a blown-up run limp along looking
+        # "survived" -- so also reject a FOLDED map (minJ<0) or absurd inflation.
+        if (not msk.any() or not (np.all(np.isfinite(u)) and np.all(np.isfinite(v)))
+                or J.min() < 0.0 or J.max() > 20.0):
+            print(f"  [DIVERGED at step {step}, t={t:.3f}: disc lost / non-finite / "
+                  f"folded map (minJ={J.min():.2f}, maxJ={J.max():.2f})]")
             break
         cx = Xc[msk].mean(); cy = Yc[msk].mean()
         t += dt
