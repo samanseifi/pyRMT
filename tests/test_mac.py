@@ -167,3 +167,22 @@ def test_taylor_green_second_order_convergence():
     order = np.log(e32 / e64) / np.log(2)
     assert order > 1.8, f"TG spatial order {order:.2f} < 1.8"
     assert d64 < 1e-12, "periodic projection not divergence-free"
+
+
+def test_contact_stress_trace_free_and_localized():
+    """Rycroft contact stress is trace-free and nonzero only where two solids'
+    blur zones overlap."""
+    from pyRMT.mac import mac_grid, contact_stress
+    N = 48; dx, dy = mac_grid(N, N)
+    xc = (np.arange(N) + 0.5) * dx; X, Y = np.meshgrid(xc, xc)
+    R = 0.15
+    pa = np.sqrt((X - 0.42)**2 + (Y - 0.5)**2) - R      # overlapping pair
+    pb = np.sqrt((X - 0.58)**2 + (Y - 0.5)**2) - R
+    txx, txy, tyy = contact_stress(pa, pb, eta=1.0, Gsum=0.4, eps=3 * dx, dx=dx, dy=dy)
+    assert np.allclose(txx + tyy, 0.0, atol=1e-12)       # trace-free (2D)
+    active = (np.abs(txx) + np.abs(txy) + np.abs(tyy)) > 0
+    assert active.any()                                   # acts in the overlap
+    # far apart -> no contact
+    pb_far = np.sqrt((X - 0.95)**2 + (Y - 0.5)**2) - R
+    t2 = contact_stress(pa, pb_far, 1.0, 0.4, 3 * dx, dx, dy)
+    assert np.allclose(np.abs(t2[0]) + np.abs(t2[1]) + np.abs(t2[2]), 0.0)

@@ -88,10 +88,31 @@ def run(N=128, t_end=2.0, V0=0.3, eta=2.0, mu_s=0.2, mu_f=0.02, rho=1.0,
 
     hist = np.array(hist)
     gmin = np.nanmin(hist[:, 3]); gend = hist[-1, 3]
-    print(f"[2-disc] eta={eta}: min gap={gmin:.3f} (2R={2*R:.3f}, overlap if <2R), end gap={gend:.3f}")
+    imin = int(np.nanargmin(hist[:, 3]))
+    rebound = imin < len(hist) - 2 and gend > gmin + 5e-3
+    print(f"[2-disc] eta={eta}: min gap={gmin:.3f} (2R={2*R:.3f}, overlap if <2R) at t={hist[imin,0]:.2f}, "
+          f"end gap={gend:.3f}  -> {'REBOUND' if rebound else 'no clear rebound'}")
     np.savetxt(os.path.join(out_dir, f"gap_eta{eta}.csv"), hist, delimiter=",",
                header="t,cxA,cxB,gap", comments="")
     return hist
+
+
+def compare(N=64, t_end=3.0, V0=0.5, etas=(0.0, 1.5), **kw):
+    """Run several eta and plot gap(t) to show contact-mediated rebound."""
+    import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
+    R = kw.get("R", 0.12)
+    out_dir = os.path.join(kw.get("out_root", "outputs"), f"mac_two_disc_N{N}")
+    os.makedirs(out_dir, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+    for eta in etas:
+        h = run(N=N, t_end=t_end, V0=V0, eta=eta, **kw)
+        ax.plot(h[:, 0], h[:, 3], lw=2, label=f"eta={eta}")
+    ax.axhline(2 * R, color="r", ls="--", lw=1, label=f"2R={2*R:.2f} (touching)")
+    ax.set_xlabel("t"); ax.set_ylabel("centroid gap")
+    ax.set_title(f"Two-disc collision: gap vs time (V0={V0}, N={N})")
+    ax.legend(); ax.grid(True, alpha=.3); fig.tight_layout()
+    fig.savefig(os.path.join(out_dir, "collision_gap.png"), dpi=140)
+    print(f"  saved {out_dir}/collision_gap.png")
 
 
 if __name__ == "__main__":
