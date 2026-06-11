@@ -69,7 +69,7 @@ def run(N=128, t_end=10.0, U_lid=1.0, mu_s=2.5, mu_f=0.01, rho=1.0, eta=2.5,
     shapes = [shape_square(0.40, 0.62, 0.080, r=0.028),
               shape_circle(0.60, 0.62, 0.085),
               shape_cross(0.40, 0.36, 0.100, 0.040, r=0.025, k=0.045),
-              shape_triangle(0.62, 0.36, 0.110, r=0.04)]
+              shape_triangle(0.62, 0.36, 0.088, r=0.042)]
     names = ["square", "circle", "smooth cross", "triangle"]
     inits = [s[0] for s in shapes]
     refs = []
@@ -130,7 +130,10 @@ def run(N=128, t_end=10.0, U_lid=1.0, mu_s=2.5, mu_f=0.01, rho=1.0, eta=2.5,
             break
         if t >= next_frame:
             uc = 0.5 * (u[:, :-1] + u[:, 1:]); vc = 0.5 * (v[:-1, :] + v[1:, :])
-            frames.append((t, [pp.copy() for pp in phis], uc.copy(), vc.copy()))
+            X1s = [refs[k][0].copy() for k in range(len(refs))]
+            X2s = [refs[k][1].copy() for k in range(len(refs))]
+            frames.append((t, [pp.copy() for pp in phis], X1s, X2s,
+                           np.sqrt(uc**2 + vc**2)))
             next_frame += frame_dt
         if step % 200 == 0:
             print(f"  step {step:5d} t={t:5.2f} minJ={Jmin:.2f} maxJ={Jmax:.2f} max|u|={np.max(np.abs(u)):.2f} frames={len(frames)}")
@@ -140,18 +143,24 @@ def run(N=128, t_end=10.0, U_lid=1.0, mu_s=2.5, mu_f=0.01, rho=1.0, eta=2.5,
     import matplotlib; matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import imageio.v2 as imageio
-    cols = ["#d62728", "#1f77b4", "#2ca02c", "#9467bd", "#ff7f0e"]
+    cols = ["#d62728", "#ffffff", "#00e5ff", "#ff00ff", "#ffd400"]
+    glv = np.arange(0.0, 1.0001, 0.022)                    # reference-map grid levels
     imgs = []
-    for (tt, pps, uc, vc) in frames:
+    for (tt, pps, X1s, X2s, spd) in frames:
         fig, ax = plt.subplots(figsize=(5.6, 5.2), dpi=110)
-        spd = np.sqrt(uc**2 + vc**2)
         im = ax.imshow(spd, origin="lower", extent=[0, 1, 0, 1], cmap="viridis",
                        vmin=0.0, vmax=1.0, interpolation="bilinear")
-        for k, pp in enumerate(pps):                       # opaque coloured solids on top
-            ax.contourf(Xc, Yc, pp, levels=[-1e9, 0.0], colors=[cols[k % len(cols)]])
-            ax.contour(Xc, Yc, pp, levels=[0.0], colors=["white"], linewidths=1.2)
+        for k, pp in enumerate(pps):
+            c = cols[k % len(cols)]
+            inside = pp <= 0
+            ax.contour(Xc, Yc, pp, levels=[0.0], colors=[c], linewidths=1.6)   # outline
+            X1m = np.where(inside, X1s[k], np.nan)          # reference-map grid (dashed)
+            X2m = np.where(inside, X2s[k], np.nan)          # = deforming material grid
+            ax.contour(Xc, Yc, X1m, levels=glv, colors=[c], linestyles="dashed", linewidths=0.7)
+            ax.contour(Xc, Yc, X2m, levels=glv, colors=[c], linestyles="dashed", linewidths=0.7)
         ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.set_aspect("equal")
-        ax.set_xticks([]); ax.set_yticks([]); ax.set_title(f"t = {tt:4.2f}   (colour = speed)")
+        ax.set_xticks([]); ax.set_yticks([])
+        ax.set_title(f"t = {tt:4.2f}   (bg=speed, dashed=reference map)")
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.02, label="|u|")
         fig.tight_layout(pad=0.4)
         fig.canvas.draw()
