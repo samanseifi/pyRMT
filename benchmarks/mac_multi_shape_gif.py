@@ -49,6 +49,22 @@ def shape_bar(cx, cy, bx, by, r=0.03):
     # triangle, whose corners are reference-map singularities that fold fast).
     return (lambda X, Y: _rbox(X, Y, cx, cy, bx, by, r)), max(bx, by)
 
+def shape_ellipse(cx, cy, a, b):
+    # smooth blob (scaled-circle level set; monotone, no corners) -- very robust.
+    s = min(a, b)
+    return (lambda X, Y: (np.sqrt(((X - cx) / a)**2 + ((Y - cy) / b)**2) - 1.0) * s), max(a, b)
+
+def shape_hexagon(cx, cy, R, rr=0.0):
+    # true regular-hexagon SDF (Inigo Quilez), optionally rounded by rr.
+    kx, ky, kz = -0.866025404, 0.5, 0.577350269
+    def f(X, Y):
+        px = np.abs(X - cx); py = np.abs(Y - cy)
+        t = 2.0 * np.minimum(kx * px + ky * py, 0.0)
+        px = px - t * kx; py = py - t * ky
+        px = px - np.clip(px, -kz * R, kz * R); py = py - R
+        return np.sqrt(px * px + py * py) * np.sign(py) - rr
+    return f, R
+
 def shape_triangle(cx, cy, R, r=0.0):
     # true equilateral-triangle SDF (Inigo Quilez), rounded by r -> genuinely
     # rounded corners (the max-of-half-planes form does NOT round).
