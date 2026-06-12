@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pyRMT.mac import (mac_grid, momentum_predictor, project, poisson_eigs_neumann,
                        divergence, contact_stress)
 from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
-    smoothed_heaviside, grad_central_x_2nd, grad_central_y_2nd)
+    smoothed_heaviside, grad_central_x_2nd, grad_central_y_2nd, reinitialize_phi_fmm)
 from pyRMT.interpolators import bilinear_interpolate
 from benchmarks.mac_multi_shape_gif import (shape_square, shape_circle, shape_cross,
                                             shape_triangle)
@@ -37,7 +37,7 @@ def _mm(A, B):
 
 
 def run(N=160, t_end=14.0, U_lid=1.0, mu_s=1.6, mu_f=0.01, rho=1.0, eta=2.5,
-        eta_wall=3.0, reinit_J=1.3, frame_dt=0.1, out_root="outputs"):
+        eta_wall=3.0, reinit_J=1.6, frame_dt=0.1, out_root="outputs"):
     dx, dy = mac_grid(N, N)
     xc = (np.arange(N) + 0.5) * dx
     Xc, Yc = np.meshgrid(xc, xc)
@@ -119,7 +119,10 @@ def run(N=160, t_end=14.0, U_lid=1.0, mu_s=1.6, mu_f=0.01, rho=1.0, eta=2.5,
                 s['F'] = _mm(Fcs[k][:4], s['F'])
                 s['F'][0], s['F'][1] = extrapolate_reference_map(s['F'][0], s['F'][1], phis[k], dx, dy, 3)
                 s['F'][2], s['F'][3] = extrapolate_reference_map(s['F'][2], s['F'][3], phis[k], dx, dy, 3)
-                s['pref'] = phis[k].copy()
+                # FMM-sharpen the captured reference so the stored level set stays
+                # a clean SDF (bilinear resampling of a diffused phi would otherwise
+                # shrink small shapes away over successive reinits).
+                s['pref'] = reinitialize_phi_fmm(phis[k].copy(), dx, dy)
                 s['X1'] = Xc.copy(); s['X2'] = Yc.copy()
                 nre += 1
 
