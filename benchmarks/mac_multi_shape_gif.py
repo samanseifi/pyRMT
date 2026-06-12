@@ -43,6 +43,12 @@ def shape_cross(cx, cy, arm, width, r=0.02, k=0.03):
                      _rbox(X, Y, cx, cy, width, arm, r), k)
     return f, arm
 
+def shape_bar(cx, cy, bx, by, r=0.03):
+    # soft-edged rectangular bar: rounded rectangle (half-extents bx,by, corner
+    # radius r). No sharp corners -> deforms gracefully under shear (unlike the
+    # triangle, whose corners are reference-map singularities that fold fast).
+    return (lambda X, Y: _rbox(X, Y, cx, cy, bx, by, r)), max(bx, by)
+
 def shape_triangle(cx, cy, R, r=0.0):
     # true equilateral-triangle SDF (Inigo Quilez), rounded by r -> genuinely
     # rounded corners (the max-of-half-planes form does NOT round).
@@ -75,8 +81,8 @@ def run(N=128, t_end=10.0, U_lid=0.7, mu_s=2.5, mu_f=0.01, rho=1.0, eta=2.5,
     shapes = [shape_square(0.40, 0.62, 0.080, r=0.028),
               shape_circle(0.60, 0.62, 0.085),
               shape_cross(0.40, 0.36, 0.100, 0.040, r=0.025, k=0.045),
-              shape_triangle(0.62, 0.37, 0.070, r=0.034)]  # small + rounded (not-sharp)
-    names = ["square", "circle", "smooth cross", "triangle"]
+              shape_bar(0.62, 0.37, 0.105, 0.050, r=0.035)]  # soft-edged bar
+    names = ["square", "circle", "smooth cross", "bar"]
     inits = [s[0] for s in shapes]
     refs = []
     for pin in inits:
