@@ -43,15 +43,21 @@ def shape_cross(cx, cy, arm, width, r=0.02, k=0.03):
                      _rbox(X, Y, cx, cy, width, arm, r), k)
     return f, arm
 
-def shape_triangle(cx, cy, R, r=0.02):
-    # up-pointing equilateral triangle (rounded corners), intersection of 3 edges
-    kk = np.sqrt(3) / 2
+def shape_triangle(cx, cy, R, r=0.0):
+    # true equilateral-triangle SDF (Inigo Quilez), rounded by r -> genuinely
+    # rounded corners (the max-of-half-planes form does NOT round).
+    k = np.sqrt(3.0)
     def f(X, Y):
-        x = X - cx; y = Y - cy
-        d_base = -(y + 0.5 * R)
-        d_right = kk * x + 0.5 * (y - R)
-        d_left = -kk * x + 0.5 * (y - R)
-        return np.maximum(np.maximum(d_base, d_right), d_left) - r
+        px = X - cx; py = Y - cy
+        px = np.abs(px) - R
+        py = py + R / k
+        cond = (px + k * py) > 0.0
+        npx = (px - k * py) / 2.0
+        npy = (-k * px - py) / 2.0
+        px = np.where(cond, npx, px)
+        py = np.where(cond, npy, py)
+        px = px - np.clip(px, -2.0 * R, 0.0)
+        return -np.sqrt(px * px + py * py) * np.sign(py) - r
     return f, R
 
 
@@ -69,7 +75,7 @@ def run(N=128, t_end=10.0, U_lid=1.0, mu_s=2.5, mu_f=0.01, rho=1.0, eta=2.5,
     shapes = [shape_square(0.40, 0.62, 0.080, r=0.028),
               shape_circle(0.60, 0.62, 0.085),
               shape_cross(0.40, 0.36, 0.100, 0.040, r=0.025, k=0.045),
-              shape_triangle(0.62, 0.36, 0.088, r=0.042)]
+              shape_triangle(0.62, 0.37, 0.070, r=0.034)]  # small + rounded (not-sharp)
     names = ["square", "circle", "smooth cross", "triangle"]
     inits = [s[0] for s in shapes]
     refs = []
