@@ -61,7 +61,7 @@ def shape_triangle(cx, cy, R, r=0.0):
     return f, R
 
 
-def run(N=128, t_end=10.0, U_lid=1.0, mu_s=2.5, mu_f=0.01, rho=1.0, eta=2.5,
+def run(N=128, t_end=10.0, U_lid=0.7, mu_s=2.5, mu_f=0.01, rho=1.0, eta=2.5,
         eta_wall=3.0, frame_dt=0.1, out_root="outputs"):
     dx, dy = mac_grid(N, N)
     xc = (np.arange(N) + 0.5) * dx
