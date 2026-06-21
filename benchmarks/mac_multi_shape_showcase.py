@@ -87,7 +87,11 @@ def run(N=256, t_end=12.0, render_modes=('speed', 'stress'), U_lid=0.7, mu_s=2.5
     def vonmises(sxx, sxy, syy):
         return np.sqrt(np.maximum(sxx*sxx - sxx*syy + syy*syy + 3.0*sxy*sxy, 0.0))
 
-    frames = []; next_frame = 0.0
+    # stream frames to disk during the sim (RAM is only ~7 GB here; holding ~120
+    # float64 frames in memory OOM-kills the run -- so write each frame as it is made)
+    save_dir = os.path.join(out_root, f"mac_showcase_N{N}")
+    fr_dir = os.path.join(save_dir, "frames"); os.makedirs(fr_dir, exist_ok=True)
+    ts = []; next_frame = 0.0; fidx = 0
     t = 0.0; step = 0
     while t < t_end:
         step += 1
@@ -138,64 +142,46 @@ def run(N=256, t_end=12.0, render_modes=('speed', 'stress'), U_lid=0.7, mu_s=2.5
             print(f"  [stopped at step {step}, t={t:.3f}: minJ={Jmin:.2f} maxJ={Jmax:.2f}]"); break
         if t >= next_frame:
             uc = 0.5 * (u[:, :-1] + u[:, 1:]); vc = 0.5 * (v[:-1, :] + v[1:, :])
-            X1s = [refs[k][0].copy() for k in range(len(refs))]
-            X2s = [refs[k][1].copy() for k in range(len(refs))]
-            frames.append((t, [pp.copy() for pp in phis], X1s, X2s,
-                           np.sqrt(uc**2 + vc**2), uc.copy(), vc.copy(),
-                           Ssxx.copy(), Ssxy.copy(), Ssyy.copy()))
-            next_frame += frame_dt
+            np.savez_compressed(
+                os.path.join(fr_dir, f"f{fidx:04d}.npz"),
+                phis=np.stack(phis).astype(np.float32),
+                X1s=np.stack([refs[k][0] for k in range(len(refs))]).astype(np.float32),
+                X2s=np.stack([refs[k][1] for k in range(len(refs))]).astype(np.float32),
+                uc=uc.astype(np.float32), vc=vc.astype(np.float32),
+                sxx=Ssxx.astype(np.float32), sxy=Ssxy.astype(np.float32), syy=Ssyy.astype(np.float32))
+            ts.append(t); fidx += 1; next_frame += frame_dt
         if step % 200 == 0:
             print(f"  step {step:5d} t={t:5.2f} minJ={Jmin:.2f} maxJ={Jmax:.2f} "
-                  f"vmDev_max={vmd.max():.2f} frames={len(frames)}")
+                  f"vmDev_max={vmd.max():.2f} frames={fidx}")
 
-    # ── persist frames so future visual tweaks re-render instantly (no re-sim) ──
-    save_dir = os.path.join(out_root, f"mac_showcase_N{N}"); os.makedirs(save_dir, exist_ok=True)
-    npz = os.path.join(save_dir, "frames.npz")
-    _save_frames(npz, frames, U_lid)
-    print(f"[showcase] saved {len(frames)} frames -> {npz}")
-    return _render_frames(frames, render_modes, N, U_lid, cols, out_root)
+    np.savez(os.path.join(save_dir, "meta.npz"), t=np.array(ts), U_lid=float(U_lid), nframes=fidx)
+    print(f"[showcase] saved {fidx} frames -> {fr_dir}")
+    return _render_frames(save_dir, render_modes, N, cols, out_root)
 
 
-# ── frame persistence + rendering (decoupled so re-renders skip the simulation) ──
+# ── rendering reads frames from disk one at a time (flat, low memory) ──
 
-def _save_frames(path, frames, U_lid):
-    np.savez_compressed(
-        path,
-        t=np.array([f[0] for f in frames], dtype=np.float64),
-        phis=np.array([np.stack(f[1]) for f in frames], dtype=np.float32),   # (nf,nshape,N,N)
-        X1s=np.array([np.stack(f[2]) for f in frames], dtype=np.float32),
-        X2s=np.array([np.stack(f[3]) for f in frames], dtype=np.float32),
-        spd=np.array([f[4] for f in frames], dtype=np.float32),
-        uc=np.array([f[5] for f in frames], dtype=np.float32),
-        vc=np.array([f[6] for f in frames], dtype=np.float32),
-        sxx=np.array([f[7] for f in frames], dtype=np.float32),
-        sxy=np.array([f[8] for f in frames], dtype=np.float32),
-        syy=np.array([f[9] for f in frames], dtype=np.float32),
-        U_lid=float(U_lid))
-
-
-def _load_frames(path):
-    d = np.load(path)
-    frames = [(float(d['t'][i]), list(d['phis'][i]), list(d['X1s'][i]), list(d['X2s'][i]),
-               d['spd'][i], d['uc'][i], d['vc'][i], d['sxx'][i], d['sxy'][i], d['syy'][i])
-              for i in range(len(d['t']))]
-    return frames, float(d['U_lid'])
-
-
-def _render_frames(frames, render_modes, N, U_lid, cols, out_root="outputs",
-                   vmax_stress=3.0, stream_color="#9ecbff", stream_alpha=0.9):
+def _render_frames(save_dir, render_modes, N, cols, out_root="outputs",
+                   vmax_stress=3.0, stream_color="#9ecbff"):
     if isinstance(render_modes, str):
         render_modes = (render_modes,)
     import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
     import imageio.v2 as imageio
+    meta = np.load(os.path.join(save_dir, "meta.npz"))
+    ts = meta['t']; U_lid = float(meta['U_lid']); nf = int(meta['nframes'])
+    fr_dir = os.path.join(save_dir, "frames")
     dx = 1.0 / N; xc = (np.arange(N) + 0.5) * dx; Xc, Yc = np.meshgrid(xc, xc)
     glv = np.arange(0.0, 1.0001, 0.025)
     gifs = []
     for render_mode in render_modes:
-        print(f"[showcase] rendering {len(frames)} frames ({render_mode}, vmax={vmax_stress}) -> GIF ...")
+        print(f"[showcase] rendering {nf} frames ({render_mode}, vmax={vmax_stress}) -> GIF ...")
         out_dir = os.path.join(out_root, f"mac_showcase_{render_mode}_N{N}"); os.makedirs(out_dir, exist_ok=True)
         imgs = []
-        for (tt, pps, X1s, X2s, spd, uc, vc, sxx, sxy, syy) in frames:
+        for i in range(nf):
+            d = np.load(os.path.join(fr_dir, f"f{i:04d}.npz"))
+            tt = float(ts[i]); pps = list(d['phis']); X1s = list(d['X1s']); X2s = list(d['X2s'])
+            uc = d['uc']; vc = d['vc']; sxx = d['sxx']; sxy = d['sxy']; syy = d['syy']
+            spd = np.sqrt(uc**2 + vc**2)
             vmf = np.sqrt(3.0 * (0.25 * (sxx - syy)**2 + sxy**2))   # deviatoric von Mises
             fig, ax = plt.subplots(figsize=(5.6, 5.2), dpi=110)
             if render_mode == 'speed':
@@ -240,12 +226,11 @@ def _render_frames(frames, render_modes, N, U_lid, cols, out_root="outputs",
 
 
 def rerender(N=256, render_modes=('speed', 'stress'), out_root="outputs", vmax_stress=3.0):
-    """Re-render the GIFs from saved frames (instant -- no re-simulation)."""
-    cols = ["#d62728", "#1f77b4", "#2ca02c", "#9467bd", "#ff7f0e"]
-    npz = os.path.join(out_root, f"mac_showcase_N{N}", "frames.npz")
-    frames, U_lid = _load_frames(npz)
-    print(f"[showcase] re-rendering {len(frames)} saved frames (N={N}) ...")
-    return _render_frames(frames, render_modes, N, U_lid, cols, out_root, vmax_stress)
+    """Re-render the GIFs from saved frames on disk (instant -- no re-simulation)."""
+    cols = ["#d62728", "#1f77b4", "#2ca02c", "#9467bd", "#ff7f0e", "#17becf"]
+    save_dir = os.path.join(out_root, f"mac_showcase_N{N}")
+    print(f"[showcase] re-rendering saved frames (N={N}) from {save_dir} ...")
+    return _render_frames(save_dir, render_modes, N, cols, out_root, vmax_stress)
 
 
 if __name__ == "__main__":
