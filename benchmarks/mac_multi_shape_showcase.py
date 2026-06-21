@@ -28,17 +28,24 @@ from benchmarks.mac_multi_shape_gif import (shape_square, shape_circle, shape_cr
 
 
 def _check_no_overlap(inits, Xc, Yc, eps):
-    """Assert the shapes' solid regions (plus a one-band guard) do not overlap at t=0."""
-    masks = [(pin(Xc, Yc) <= eps) for pin in inits]          # inside + contact band
-    bad = []
-    for i in range(len(masks)):
-        for j in range(i + 1, len(masks)):
-            if np.logical_and(masks[i], masks[j]).any():
-                bad.append((i, j))
-    if bad:
-        raise SystemExit(f"[showcase] initial shapes overlap (within contact band): pairs {bad} "
-                         f"-- adjust placement/sizes.")
-    print("[showcase] initial placement OK: no shape overlaps (incl. contact band).")
+    """Hard-fail if any two solids' INTERIORS overlap at t=0 (resolution-independent);
+    only NOTE if they merely start within the contact band (band width ~3 dx grows on
+    coarse grids, so band-proximity is not an error)."""
+    phis = [pin(Xc, Yc) for pin in inits]
+    interior = [(p <= 0.0) for p in phis]
+    band = [(p <= eps) for p in phis]
+    hard, soft = [], []
+    for i in range(len(phis)):
+        for j in range(i + 1, len(phis)):
+            if np.logical_and(interior[i], interior[j]).any():
+                hard.append((i, j))
+            elif np.logical_and(band[i], band[j]).any():
+                soft.append((i, j))
+    if hard:
+        raise SystemExit(f"[showcase] initial shapes OVERLAP (interiors): {hard} -- fix placement.")
+    if soft:
+        print(f"[showcase] note: pairs within contact band at t=0 (no interior overlap): {soft}")
+    print("[showcase] initial placement OK: no interior overlap.")
 
 
 def run(N=256, t_end=12.0, render_modes=('speed', 'stress'), U_lid=0.7, mu_s=2.5,
@@ -96,14 +103,19 @@ def run(N=256, t_end=12.0, render_modes=('speed', 'stress'), U_lid=0.7, mu_s=2.5
             phis.append(rebuild_phi_from_reference_map(X1, X2, pin))
 
         Sxx = np.zeros((N, N)); Sxy = np.zeros((N, N)); Syy = np.zeros((N, N))
-        vm = np.zeros((N, N)); Jmin = 1.0; Jmax = 1.0
+        # solid (elastic) stress components, gated to the solids -- stored so the
+        # stress measure (deviatoric von Mises) and colour range are render-time choices
+        Ssxx = np.zeros((N, N)); Ssxy = np.zeros((N, N)); Ssyy = np.zeros((N, N))
+        Jmin = 1.0; Jmax = 1.0
         for k in range(len(refs)):
             sxx, sxy, syy, J = solid_cauchy_stress(refs[k][0], refs[k][1], dx, dy, mu_s, 0.0, phis[k])
             H = smoothed_heaviside(phis[k], w_t)
             Sxx += (1 - H) * sxx; Sxy += (1 - H) * sxy; Syy += (1 - H) * syy
-            inside = phis[k] <= 0
-            vm = np.where(inside, vonmises(sxx, sxy, syy), vm)         # per-shape, no overlap
+            inside = phis[k] <= 0                                       # no overlap -> where() ok
+            Ssxx = np.where(inside, sxx, Ssxx); Ssxy = np.where(inside, sxy, Ssxy)
+            Ssyy = np.where(inside, syy, Ssyy)
             Jmin = min(Jmin, J.min()); Jmax = max(Jmax, J.max())
+        vmd = np.sqrt(3.0 * (0.25 * (Ssxx - Ssyy)**2 + Ssxy**2))       # deviatoric von Mises
         for i in range(len(phis)):
             for j in range(i + 1, len(phis)):
                 txx, txy, tyy = contact_stress(phis[i], phis[j], eta, 2 * mu_s, eps, dx, dy)
@@ -127,23 +139,62 @@ def run(N=256, t_end=12.0, render_modes=('speed', 'stress'), U_lid=0.7, mu_s=2.5
             X1s = [refs[k][0].copy() for k in range(len(refs))]
             X2s = [refs[k][1].copy() for k in range(len(refs))]
             frames.append((t, [pp.copy() for pp in phis], X1s, X2s,
-                           np.sqrt(uc**2 + vc**2), uc.copy(), vc.copy(), vm.copy()))
+                           np.sqrt(uc**2 + vc**2), uc.copy(), vc.copy(),
+                           Ssxx.copy(), Ssxy.copy(), Ssyy.copy()))
             next_frame += frame_dt
         if step % 200 == 0:
             print(f"  step {step:5d} t={t:5.2f} minJ={Jmin:.2f} maxJ={Jmax:.2f} "
-                  f"vm_max={vm.max():.2f} frames={len(frames)}")
+                  f"vmDev_max={vmd.max():.2f} frames={len(frames)}")
 
-    # ── render (one simulation, both views) ──
+    # ── persist frames so future visual tweaks re-render instantly (no re-sim) ──
+    save_dir = os.path.join(out_root, f"mac_showcase_N{N}"); os.makedirs(save_dir, exist_ok=True)
+    npz = os.path.join(save_dir, "frames.npz")
+    _save_frames(npz, frames, U_lid)
+    print(f"[showcase] saved {len(frames)} frames -> {npz}")
+    return _render_frames(frames, render_modes, N, U_lid, cols, out_root)
+
+
+# ── frame persistence + rendering (decoupled so re-renders skip the simulation) ──
+
+def _save_frames(path, frames, U_lid):
+    np.savez_compressed(
+        path,
+        t=np.array([f[0] for f in frames], dtype=np.float64),
+        phis=np.array([np.stack(f[1]) for f in frames], dtype=np.float32),   # (nf,nshape,N,N)
+        X1s=np.array([np.stack(f[2]) for f in frames], dtype=np.float32),
+        X2s=np.array([np.stack(f[3]) for f in frames], dtype=np.float32),
+        spd=np.array([f[4] for f in frames], dtype=np.float32),
+        uc=np.array([f[5] for f in frames], dtype=np.float32),
+        vc=np.array([f[6] for f in frames], dtype=np.float32),
+        sxx=np.array([f[7] for f in frames], dtype=np.float32),
+        sxy=np.array([f[8] for f in frames], dtype=np.float32),
+        syy=np.array([f[9] for f in frames], dtype=np.float32),
+        U_lid=float(U_lid))
+
+
+def _load_frames(path):
+    d = np.load(path)
+    frames = [(float(d['t'][i]), list(d['phis'][i]), list(d['X1s'][i]), list(d['X2s'][i]),
+               d['spd'][i], d['uc'][i], d['vc'][i], d['sxx'][i], d['sxy'][i], d['syy'][i])
+              for i in range(len(d['t']))]
+    return frames, float(d['U_lid'])
+
+
+def _render_frames(frames, render_modes, N, U_lid, cols, out_root="outputs",
+                   vmax_stress=4.0, stream_color="#9ecbff", stream_alpha=0.9):
+    if isinstance(render_modes, str):
+        render_modes = (render_modes,)
     import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
     import imageio.v2 as imageio
+    dx = 1.0 / N; xc = (np.arange(N) + 0.5) * dx; Xc, Yc = np.meshgrid(xc, xc)
     glv = np.arange(0.0, 1.0001, 0.025)
-    vmax_stress = max((fr[7].max() for fr in frames), default=1.0) or 1.0
     gifs = []
     for render_mode in render_modes:
-        print(f"[showcase] rendering {len(frames)} frames ({render_mode}) -> GIF ...")
+        print(f"[showcase] rendering {len(frames)} frames ({render_mode}, vmax={vmax_stress}) -> GIF ...")
         out_dir = os.path.join(out_root, f"mac_showcase_{render_mode}_N{N}"); os.makedirs(out_dir, exist_ok=True)
         imgs = []
-        for (tt, pps, X1s, X2s, spd, uc, vc, vmf) in frames:
+        for (tt, pps, X1s, X2s, spd, uc, vc, sxx, sxy, syy) in frames:
+            vmf = np.sqrt(3.0 * (0.25 * (sxx - syy)**2 + sxy**2))   # deviatoric von Mises
             fig, ax = plt.subplots(figsize=(5.6, 5.2), dpi=110)
             if render_mode == 'speed':
                 im = ax.imshow(spd, origin="lower", extent=[0, 1, 0, 1], cmap="viridis",
@@ -151,21 +202,26 @@ def run(N=256, t_end=12.0, render_modes=('speed', 'stress'), U_lid=0.7, mu_s=2.5
                 for k, pp in enumerate(pps):
                     ax.contourf(Xc, Yc, pp, levels=[-1e9, 0.0], colors=[cols[k]], alpha=0.92)
                     ax.contour(Xc, Yc, pp, levels=[0.0], colors=["white"], linewidths=1.1)
+                    inside = pp <= 0                       # dashed reference-map grid (deforming)
+                    X1m = np.where(inside, X1s[k], np.nan); X2m = np.where(inside, X2s[k], np.nan)
+                    ax.contour(Xc, Yc, X1m, levels=glv, colors=["k"], linestyles="dashed", linewidths=0.45, alpha=0.65)
+                    ax.contour(Xc, Yc, X2m, levels=glv, colors=["k"], linestyles="dashed", linewidths=0.45, alpha=0.65)
                 cb_label = "|u|"
-            else:  # stress: faded streamlines + shapes coloured by von Mises + reference-map grid
+            else:  # stress: faded streamlines + SOLID von Mises (crisp, capped) + reference-map grid
                 ax.set_facecolor("#0b0b0b")
-                ax.streamplot(xc, xc, uc, vc, density=1.1, color="#9ecbff",
+                ax.streamplot(xc, xc, uc, vc, density=1.1, color=stream_color,
                               linewidth=0.6, arrowsize=0.5)
-                vmm = np.where(np.stack([pp <= 0 for pp in pps]).any(0), vmf, np.nan)
+                solid = np.stack([pp <= 0 for pp in pps]).any(0)
+                vmm = np.where(solid, vmf, np.nan)         # solid stress only
                 im = ax.imshow(np.ma.masked_invalid(vmm), origin="lower", extent=[0, 1, 0, 1],
-                               cmap="inferno", vmin=0, vmax=vmax_stress, interpolation="bilinear")
+                               cmap="inferno", vmin=0, vmax=vmax_stress, interpolation="nearest")
                 for k, pp in enumerate(pps):
                     ax.contour(Xc, Yc, pp, levels=[0.0], colors=["white"], linewidths=1.3)
                     inside = pp <= 0
                     X1m = np.where(inside, X1s[k], np.nan); X2m = np.where(inside, X2s[k], np.nan)
-                    ax.contour(Xc, Yc, X1m, levels=glv, colors=["#ffffff"], linestyles="dashed", linewidths=0.5, alpha=0.6)
-                    ax.contour(Xc, Yc, X2m, levels=glv, colors=["#ffffff"], linestyles="dashed", linewidths=0.5, alpha=0.6)
-                cb_label = "von Mises stress"
+                    ax.contour(Xc, Yc, X1m, levels=glv, colors=["#ffffff"], linestyles="dashed", linewidths=0.5, alpha=0.5)
+                    ax.contour(Xc, Yc, X2m, levels=glv, colors=["#ffffff"], linestyles="dashed", linewidths=0.5, alpha=0.5)
+                cb_label = "von Mises stress (solid)"
             ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.set_aspect("equal")
             ax.set_xticks([]); ax.set_yticks([])
             ax.set_title(f"t = {tt:4.2f}   ({render_mode})")
@@ -181,8 +237,23 @@ def run(N=256, t_end=12.0, render_modes=('speed', 'stress'), U_lid=0.7, mu_s=2.5
     return gifs
 
 
+def rerender(N=256, render_modes=('speed', 'stress'), out_root="outputs", vmax_stress=4.0):
+    """Re-render the GIFs from saved frames (instant -- no re-simulation)."""
+    cols = ["#d62728", "#1f77b4", "#2ca02c", "#9467bd", "#ff7f0e"]
+    npz = os.path.join(out_root, f"mac_showcase_N{N}", "frames.npz")
+    frames, U_lid = _load_frames(npz)
+    print(f"[showcase] re-rendering {len(frames)} saved frames (N={N}) ...")
+    return _render_frames(frames, render_modes, N, U_lid, cols, out_root, vmax_stress)
+
+
 if __name__ == "__main__":
-    N = int(sys.argv[1]) if len(sys.argv) > 1 else 256
-    t_end = float(sys.argv[2]) if len(sys.argv) > 2 else 12.0
-    modes = (sys.argv[3],) if len(sys.argv) > 3 else ('speed', 'stress')
-    run(N=N, t_end=t_end, render_modes=modes)
+    # re-render from saved frames (no simulation):  ... rerender 256 [mode]
+    if len(sys.argv) > 1 and sys.argv[1] == "rerender":
+        N = int(sys.argv[2]) if len(sys.argv) > 2 else 256
+        modes = (sys.argv[3],) if len(sys.argv) > 3 else ('speed', 'stress')
+        rerender(N=N, render_modes=modes)
+    else:
+        N = int(sys.argv[1]) if len(sys.argv) > 1 else 256
+        t_end = float(sys.argv[2]) if len(sys.argv) > 2 else 12.0
+        modes = (sys.argv[3],) if len(sys.argv) > 3 else ('speed', 'stress')
+        run(N=N, t_end=t_end, render_modes=modes)
