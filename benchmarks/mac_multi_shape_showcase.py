@@ -24,7 +24,7 @@ from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
     rebuild_phi_from_reference_map, solid_cauchy_stress, smoothed_heaviside,
     grad_central_x_2nd, grad_central_y_2nd)
 from benchmarks.mac_multi_shape_gif import (shape_square, shape_circle, shape_cross,
-                                            shape_bar, shape_triangle)
+                                            shape_bar, shape_triangle, shape_trapezoid)
 
 
 def _check_no_overlap(inits, Xc, Yc, eps):
@@ -59,14 +59,16 @@ def run(N=256, t_end=12.0, render_modes=('speed', 'stress'), U_lid=0.7, mu_s=2.5
     w_t = 2.0 * dx; nu = mu_f / rho; eps = 3.0 * dx
     phi_wall = np.minimum(np.minimum(Xc, 1.0 - Xc), np.minimum(Yc, 1.0 - Yc))
 
-    # five shapes, spaced so none overlap (checked below). All rounded -> graceful.
-    shapes = [shape_square(0.24, 0.70, 0.072, r=0.026),
-              shape_circle(0.50, 0.73, 0.076),
-              shape_triangle(0.77, 0.67, 0.090, r=0.030),
-              shape_cross(0.30, 0.38, 0.082, 0.032, r=0.022, k=0.040),
-              shape_bar(0.66, 0.39, 0.098, 0.044, r=0.032)]
-    names = ["square", "circle", "triangle", "cross", "bar"]
-    cols = ["#d62728", "#1f77b4", "#2ca02c", "#9467bd", "#ff7f0e"]
+    # six shapes in a non-overlapping 2x3 layout (checked below). ALL rounded
+    # (no sharp corners) and gentle lid -> they deform, collide, but don't fall apart.
+    shapes = [shape_square(0.22, 0.72, 0.068, r=0.024),
+              shape_circle(0.50, 0.74, 0.072),
+              shape_triangle(0.79, 0.71, 0.082, r=0.030),
+              shape_cross(0.22, 0.40, 0.076, 0.030, r=0.022, k=0.038),
+              shape_bar(0.50, 0.40, 0.090, 0.042, r=0.030),
+              shape_trapezoid(0.79, 0.40, 0.082, 0.050, 0.058, r=0.022)]
+    names = ["square", "circle", "triangle", "cross", "bar", "trapezoid"]
+    cols = ["#d62728", "#1f77b4", "#2ca02c", "#9467bd", "#ff7f0e", "#17becf"]
     inits = [s[0] for s in shapes]
     _check_no_overlap(inits, Xc, Yc, eps)
 
@@ -181,7 +183,7 @@ def _load_frames(path):
 
 
 def _render_frames(frames, render_modes, N, U_lid, cols, out_root="outputs",
-                   vmax_stress=4.0, stream_color="#9ecbff", stream_alpha=0.9):
+                   vmax_stress=3.0, stream_color="#9ecbff", stream_alpha=0.9):
     if isinstance(render_modes, str):
         render_modes = (render_modes,)
     import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
@@ -237,7 +239,7 @@ def _render_frames(frames, render_modes, N, U_lid, cols, out_root="outputs",
     return gifs
 
 
-def rerender(N=256, render_modes=('speed', 'stress'), out_root="outputs", vmax_stress=4.0):
+def rerender(N=256, render_modes=('speed', 'stress'), out_root="outputs", vmax_stress=3.0):
     """Re-render the GIFs from saved frames (instant -- no re-simulation)."""
     cols = ["#d62728", "#1f77b4", "#2ca02c", "#9467bd", "#ff7f0e"]
     npz = os.path.join(out_root, f"mac_showcase_N{N}", "frames.npz")

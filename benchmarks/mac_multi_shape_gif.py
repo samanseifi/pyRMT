@@ -49,6 +49,21 @@ def shape_bar(cx, cy, bx, by, r=0.03):
     # triangle, whose corners are reference-map singularities that fold fast).
     return (lambda X, Y: _rbox(X, Y, cx, cy, bx, by, r)), max(bx, by)
 
+def shape_trapezoid(cx, cy, r1, r2, he, r=0.0):
+    # isosceles trapezoid (Inigo Quilez exact SDF), rounded by r. r1=bottom
+    # half-width, r2=top half-width, he=half-height. Rounded corners -> stable.
+    def f(X, Y):
+        px = np.abs(X - cx); py = Y - cy
+        k1x, k1y = r2, he
+        k2x, k2y = r2 - r1, 2.0 * he
+        rsel = np.where(py < 0.0, r1, r2)
+        cax = px - np.minimum(px, rsel); cay = np.abs(py) - he
+        hh = np.clip(((k1x - px) * k2x + (k1y - py) * k2y) / (k2x * k2x + k2y * k2y), 0.0, 1.0)
+        cbx = px - k1x + k2x * hh; cby = py - k1y + k2y * hh
+        s = np.where((cbx < 0.0) & (cay < 0.0), -1.0, 1.0)
+        return s * np.sqrt(np.minimum(cax * cax + cay * cay, cbx * cbx + cby * cby)) - r
+    return f, max(r1, r2, he)
+
 def shape_ellipse(cx, cy, a, b):
     # smooth blob (scaled-circle level set; monotone, no corners) -- very robust.
     s = min(a, b)
