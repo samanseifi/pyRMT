@@ -195,7 +195,7 @@ def _render_frames(save_dir, render_modes, N, cols, out_root="outputs",
                     ax.contour(Xc, Yc, X1m, levels=glv, colors=["k"], linestyles="dashed", linewidths=0.45, alpha=0.65)
                     ax.contour(Xc, Yc, X2m, levels=glv, colors=["k"], linestyles="dashed", linewidths=0.45, alpha=0.65)
                 cb_label = "|u|"
-            else:  # stress: faded streamlines + SOLID von Mises (crisp, capped) + reference-map grid
+            elif render_mode == 'stress':  # faded streamlines + SOLID von Mises + reference-map grid
                 ax.set_facecolor("#0b0b0b")
                 ax.streamplot(xc, xc, uc, vc, density=1.1, color=stream_color,
                               linewidth=0.6, arrowsize=0.5)
@@ -210,6 +210,26 @@ def _render_frames(save_dir, render_modes, N, cols, out_root="outputs",
                     ax.contour(Xc, Yc, X1m, levels=glv, colors=["#ffffff"], linestyles="dashed", linewidths=0.5, alpha=0.5)
                     ax.contour(Xc, Yc, X2m, levels=glv, colors=["#ffffff"], linestyles="dashed", linewidths=0.5, alpha=0.5)
                 cb_label = "von Mises stress (solid)"
+            else:  # 'contact': ONLY the contact stress -> bright exactly where parts touch
+                ax.set_facecolor("#0b0b0b")
+                ax.streamplot(xc, xc, uc, vc, density=1.0, color=stream_color,
+                              linewidth=0.5, arrowsize=0.4)
+                eta_c, gsum_c, eps_c, etaw_c = 2.5, 5.0, 3.0 * dx, 3.0   # match the run
+                phiw = np.minimum(np.minimum(Xc, 1.0 - Xc), np.minimum(Yc, 1.0 - Yc))
+                cxx = np.zeros((N, N)); cxy = np.zeros((N, N)); cyy = np.zeros((N, N))
+                ns = len(pps)
+                for a in range(ns):
+                    for b in range(a + 1, ns):                          # part-part contact
+                        tx, ty, tz = contact_stress(pps[a], pps[b], eta_c, gsum_c, eps_c, dx, dx)
+                        cxx += tx; cxy += ty; cyy += tz
+                    tx, ty, tz = contact_stress(pps[a], phiw, etaw_c, gsum_c, eps_c, dx, dx)  # part-wall
+                    cxx += tx; cxy += ty; cyy += tz
+                cvm = np.sqrt(3.0 * (0.25 * (cxx - cyy)**2 + cxy**2))
+                im = ax.imshow(cvm, origin="lower", extent=[0, 1, 0, 1], cmap="inferno",
+                               vmin=0, vmax=vmax_stress, interpolation="bilinear")
+                for k, pp in enumerate(pps):
+                    ax.contour(Xc, Yc, pp, levels=[0.0], colors=["white"], linewidths=1.2)
+                cb_label = "contact stress"
             ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.set_aspect("equal")
             ax.set_xticks([]); ax.set_yticks([])
             ax.set_title(f"t = {tt:4.2f}   ({render_mode})")
