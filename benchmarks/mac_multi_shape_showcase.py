@@ -1,5 +1,5 @@
-"""Showcase: FIVE soft shapes (square, circle, smooth-cross, soft bar, smooth
-triangle) stirred by a lid-driven cavity, with two render modes.
+"""Showcase: SIX soft shapes (square, circle, smooth-triangle, smooth-cross, soft
+bar, rounded trapezoid) stirred by a lid-driven cavity, with two render modes.
 
   render_mode='speed'  -> speed field background + filled shapes (the classic view,
                           now with 5 shapes and guaranteed non-overlapping start so
