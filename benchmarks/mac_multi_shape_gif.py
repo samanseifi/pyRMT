@@ -1,0 +1,222 @@
+"""Three different-shaped soft solids (square, circle, smooth cross) stirred by a
+lid-driven cavity, colliding via the contact STRESS -- rendered as an animated GIF
+with the velocity field overlaid (MAC grid).
+
+Each solid carries its own reference map + level set (any shape works -- phi_init is
+just the analytic shape SDF). Blended solid stress + all-pairs Rycroft contact stress
+-> face force; lid-driven momentum + exact projection.
+
+Usage: python benchmarks/mac_multi_shape_gif.py [N] [t_end]
+"""
+import os, sys
+import numpy as np
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from pyRMT.mac import (mac_grid, momentum_predictor, project, poisson_eigs_neumann,
+                       divergence, contact_stress)
+from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
+    rebuild_phi_from_reference_map, solid_cauchy_stress, smoothed_heaviside,
+    grad_central_x_2nd, grad_central_y_2nd)
+
+
+# ── shape signed-distance functions (phi < 0 inside) ─────────────────────────
+def shape_circle(cx, cy, R):
+    return (lambda X, Y: np.sqrt((X - cx)**2 + (Y - cy)**2) - R), R
+
+def shape_square(cx, cy, h, r=0.02):
+    # lightly-rounded square: still visually a square, but the corners aren't
+    # infinitely sharp reference-map singularities (which fold fast on a 128 grid)
+    return (lambda X, Y: _rbox(X, Y, cx, cy, h, h, r)), h
+
+def _rbox(X, Y, cx, cy, bx, by, r):
+    qx = np.abs(X - cx) - bx + r; qy = np.abs(Y - cy) - by + r
+    return (np.sqrt(np.maximum(qx, 0)**2 + np.maximum(qy, 0)**2)
+            + np.minimum(np.maximum(qx, qy), 0) - r)
+
+def _smin(a, b, k):                      # smooth union (rounds the inner corners)
+    h = np.clip(0.5 + 0.5 * (b - a) / k, 0.0, 1.0)
+    return b * (1 - h) + a * h - k * h * (1 - h)
+
+def shape_cross(cx, cy, arm, width, r=0.02, k=0.03):
+    def f(X, Y):
+        return _smin(_rbox(X, Y, cx, cy, arm, width, r),
+                     _rbox(X, Y, cx, cy, width, arm, r), k)
+    return f, arm
+
+def shape_bar(cx, cy, bx, by, r=0.03):
+    # soft-edged rectangular bar: rounded rectangle (half-extents bx,by, corner
+    # radius r). No sharp corners -> deforms gracefully under shear (unlike the
+    # triangle, whose corners are reference-map singularities that fold fast).
+    return (lambda X, Y: _rbox(X, Y, cx, cy, bx, by, r)), max(bx, by)
+
+def shape_trapezoid(cx, cy, r1, r2, he, r=0.0):
+    # isosceles trapezoid (Inigo Quilez exact SDF), rounded by r. r1=bottom
+    # half-width, r2=top half-width, he=half-height. Rounded corners -> stable.
+    def f(X, Y):
+        px = np.abs(X - cx); py = Y - cy
+        k1x, k1y = r2, he
+        k2x, k2y = r2 - r1, 2.0 * he
+        rsel = np.where(py < 0.0, r1, r2)
+        cax = px - np.minimum(px, rsel); cay = np.abs(py) - he
+        hh = np.clip(((k1x - px) * k2x + (k1y - py) * k2y) / (k2x * k2x + k2y * k2y), 0.0, 1.0)
+        cbx = px - k1x + k2x * hh; cby = py - k1y + k2y * hh
+        s = np.where((cbx < 0.0) & (cay < 0.0), -1.0, 1.0)
+        return s * np.sqrt(np.minimum(cax * cax + cay * cay, cbx * cbx + cby * cby)) - r
+    return f, max(r1, r2, he)
+
+def shape_ellipse(cx, cy, a, b):
+    # smooth blob (scaled-circle level set; monotone, no corners) -- very robust.
+    s = min(a, b)
+    return (lambda X, Y: (np.sqrt(((X - cx) / a)**2 + ((Y - cy) / b)**2) - 1.0) * s), max(a, b)
+
+def shape_hexagon(cx, cy, R, rr=0.0):
+    # true regular-hexagon SDF (Inigo Quilez), optionally rounded by rr.
+    kx, ky, kz = -0.866025404, 0.5, 0.577350269
+    def f(X, Y):
+        px = np.abs(X - cx); py = np.abs(Y - cy)
+        t = 2.0 * np.minimum(kx * px + ky * py, 0.0)
+        px = px - t * kx; py = py - t * ky
+        px = px - np.clip(px, -kz * R, kz * R); py = py - R
+        return np.sqrt(px * px + py * py) * np.sign(py) - rr
+    return f, R
+
+def shape_triangle(cx, cy, R, r=0.0):
+    # true equilateral-triangle SDF (Inigo Quilez), rounded by r -> genuinely
+    # rounded corners (the max-of-half-planes form does NOT round).
+    k = np.sqrt(3.0)
+    def f(X, Y):
+        px = X - cx; py = Y - cy
+        px = np.abs(px) - R
+        py = py + R / k
+        cond = (px + k * py) > 0.0
+        npx = (px - k * py) / 2.0
+        npy = (-k * px - py) / 2.0
+        px = np.where(cond, npx, px)
+        py = np.where(cond, npy, py)
+        px = px - np.clip(px, -2.0 * R, 0.0)
+        return -np.sqrt(px * px + py * py) * np.sign(py) - r
+    return f, R
+
+
+def run(N=128, t_end=10.0, U_lid=0.7, mu_s=2.5, mu_f=0.01, rho=1.0, eta=2.5,
+        eta_wall=3.0, frame_dt=0.1, out_root="outputs"):
+    dx, dy = mac_grid(N, N)
+    xc = (np.arange(N) + 0.5) * dx
+    Xc, Yc = np.meshgrid(xc, xc)
+    Xg, Yg = np.meshgrid(np.arange(N) * dx, np.arange(N) * dy)
+    w_t = 2.0 * dx; nu = mu_f / rho; eps = 3.0 * dx
+    # wall level set: phi_wall < 0 OUTSIDE the box -> solids feel a contact stress
+    # against the walls (keeps them from being squeezed into corners and folding).
+    phi_wall = np.minimum(np.minimum(Xc, 1.0 - Xc), np.minimum(Yc, 1.0 - Yc))
+
+    shapes = [shape_square(0.40, 0.62, 0.080, r=0.028),
+              shape_circle(0.60, 0.62, 0.085),
+              shape_cross(0.40, 0.36, 0.100, 0.040, r=0.025, k=0.045),
+              shape_bar(0.62, 0.37, 0.105, 0.050, r=0.035)]  # soft-edged bar
+    names = ["square", "circle", "smooth cross", "bar"]
+    inits = [s[0] for s in shapes]
+    refs = []
+    for pin in inits:
+        phi = pin(Xc, Yc); m = (phi <= 0).astype(float)
+        X1, X2 = extrapolate_reference_map(Xc * m, Yc * m, phi, dx, dy, 3)
+        refs.append([X1, X2])
+
+    u = np.zeros((N, N + 1)); v = np.zeros((N + 1, N))
+    eig = poisson_eigs_neumann(N, N, dx, dy)
+    cs = np.sqrt(mu_s / rho)
+    dt = min(0.3 * dx / U_lid, 0.2 * dx * dx / nu, 0.3 * dx / (cs + 1e-9))
+    out_dir = os.path.join(out_root, f"mac_multi_shape_N{N}"); os.makedirs(out_dir, exist_ok=True)
+    print(f"[multi-shape] N={N} solids={names} mu_s={mu_s} eta={eta} t_end={t_end} dt={dt:.2e}")
+
+    frames = []; next_frame = 0.0
+    t = 0.0; step = 0
+    while t < t_end:
+        step += 1
+        if t + dt > t_end:
+            dt = t_end - t
+        u_c = 0.5 * (u[:, :-1] + u[:, 1:]); v_c = 0.5 * (v[:-1, :] + v[1:, :])
+        phis = []
+        for k, pin in enumerate(inits):
+            X1, X2 = refs[k]
+            phi = rebuild_phi_from_reference_map(X1, X2, pin); m = (phi <= 0).astype(float)
+            X1 = advect_reference_map(X1, u_c, v_c, Xg, Yg, dt, dx, dy, phi, 'semilagrangian', 0.0) * m
+            X2 = advect_reference_map(X2, u_c, v_c, Xg, Yg, dt, dx, dy, phi, 'semilagrangian', 0.0) * m
+            X1, X2 = extrapolate_reference_map(X1, X2, phi, dx, dy, 3)
+            refs[k] = [X1, X2]
+            phis.append(rebuild_phi_from_reference_map(X1, X2, pin))
+
+        Sxx = np.zeros((N, N)); Sxy = np.zeros((N, N)); Syy = np.zeros((N, N))
+        Jmin = 1.0; Jmax = 1.0
+        for k in range(len(refs)):
+            sxx, sxy, syy, J = solid_cauchy_stress(refs[k][0], refs[k][1], dx, dy, mu_s, 0.0, phis[k])
+            H = smoothed_heaviside(phis[k], w_t)
+            Sxx += (1 - H) * sxx; Sxy += (1 - H) * sxy; Syy += (1 - H) * syy
+            Jmin = min(Jmin, J.min()); Jmax = max(Jmax, J.max())
+        for i in range(len(phis)):
+            for j in range(i + 1, len(phis)):
+                txx, txy, tyy = contact_stress(phis[i], phis[j], eta, 2 * mu_s, eps, dx, dy)
+                Sxx += txx; Sxy += txy; Syy += tyy
+            if eta_wall > 0:                       # solid-wall contact
+                txx, txy, tyy = contact_stress(phis[i], phi_wall, eta_wall, 2 * mu_s, eps, dx, dy)
+                Sxx += txx; Sxy += txy; Syy += tyy
+
+        divx = grad_central_x_2nd(Sxx, dx) + grad_central_y_2nd(Sxy, dy)
+        divy = grad_central_x_2nd(Sxy, dx) + grad_central_y_2nd(Syy, dy)
+        fu = np.zeros((N, N + 1)); fu[:, 1:-1] = 0.5 * (divx[:, 1:] + divx[:, :-1])
+        fv = np.zeros((N + 1, N)); fv[1:-1, :] = 0.5 * (divy[1:, :] + divy[:-1, :])
+        ustar, vstar = momentum_predictor(u, v, nu, dx, dy, dt, U_lid, fu=fu, fv=fv, rho=rho)
+        u, v, p = project(ustar, vstar, dx, dy, dt, rho, eig)
+        t += dt
+
+        if not np.all(np.isfinite(u)) or Jmin < 0.0 or Jmax > 25.0 or any(not (pp <= 0).any() for pp in phis):
+            print(f"  [stopped at step {step}, t={t:.3f}: minJ={Jmin:.2f} maxJ={Jmax:.2f}]")
+            break
+        if t >= next_frame:
+            uc = 0.5 * (u[:, :-1] + u[:, 1:]); vc = 0.5 * (v[:-1, :] + v[1:, :])
+            X1s = [refs[k][0].copy() for k in range(len(refs))]
+            X2s = [refs[k][1].copy() for k in range(len(refs))]
+            frames.append((t, [pp.copy() for pp in phis], X1s, X2s,
+                           np.sqrt(uc**2 + vc**2)))
+            next_frame += frame_dt
+        if step % 200 == 0:
+            print(f"  step {step:5d} t={t:5.2f} minJ={Jmin:.2f} maxJ={Jmax:.2f} max|u|={np.max(np.abs(u)):.2f} frames={len(frames)}")
+
+    # ── render GIF: filled solids (coloured) + velocity quiver ──
+    print(f"[multi-shape] rendering {len(frames)} frames -> GIF ...")
+    import matplotlib; matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import imageio.v2 as imageio
+    cols = ["#d62728", "#ffffff", "#00e5ff", "#ff00ff", "#ffd400"]
+    glv = np.arange(0.0, 1.0001, 0.022)                    # reference-map grid levels
+    imgs = []
+    for (tt, pps, X1s, X2s, spd) in frames:
+        fig, ax = plt.subplots(figsize=(5.6, 5.2), dpi=110)
+        im = ax.imshow(spd, origin="lower", extent=[0, 1, 0, 1], cmap="viridis",
+                       vmin=0.0, vmax=1.0, interpolation="bilinear")
+        for k, pp in enumerate(pps):
+            c = cols[k % len(cols)]
+            inside = pp <= 0
+            ax.contour(Xc, Yc, pp, levels=[0.0], colors=[c], linewidths=1.6)   # outline
+            X1m = np.where(inside, X1s[k], np.nan)          # reference-map grid (dashed)
+            X2m = np.where(inside, X2s[k], np.nan)          # = deforming material grid
+            ax.contour(Xc, Yc, X1m, levels=glv, colors=[c], linestyles="dashed", linewidths=0.7)
+            ax.contour(Xc, Yc, X2m, levels=glv, colors=[c], linestyles="dashed", linewidths=0.7)
+        ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.set_aspect("equal")
+        ax.set_xticks([]); ax.set_yticks([])
+        ax.set_title(f"t = {tt:4.2f}   (bg=speed, dashed=reference map)")
+        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.02, label="|u|")
+        fig.tight_layout(pad=0.4)
+        fig.canvas.draw()
+        w, h = fig.canvas.get_width_height()
+        img = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8).reshape(h, w, 4)[..., :3]
+        imgs.append(img.copy()); plt.close(fig)
+    gif = os.path.join(out_dir, "multi_shape_lid.gif")
+    imageio.mimsave(gif, imgs, duration=0.08, loop=0)
+    print(f"  saved {gif}  ({len(imgs)} frames)")
+    return gif
+
+
+if __name__ == "__main__":
+    N = int(sys.argv[1]) if len(sys.argv) > 1 else 128
+    t_end = float(sys.argv[2]) if len(sys.argv) > 2 else 6.0
+    run(N=N, t_end=t_end)

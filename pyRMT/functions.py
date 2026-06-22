@@ -227,6 +227,30 @@ def advect_semilagrangian_rk4(q, a, b, X, Y, dt, dx, dy):
     return q_new
 
 
+@njit(cache=True)
+def advect_semilagrangian_cubic_rk4(q, a, b, X, Y, dt, dx, dy):
+    """Semi-Lagrangian RK4 backtrace using MONOTONE bicubic (Catmull-Rom)
+    interpolation -- much less diffusive than bilinear, so higher effective order,
+    while the interpolation's local min/max limiter keeps it stable at the
+    reference-map kink (no physical-quantity clamping needed). Unconditionally
+    stable like the bilinear SL."""
+    Ny, Nx = q.shape
+
+    def interp(u, xq, yq):
+        return bicubic_interpolate(u, xq, yq, dx, dy, Nx, Ny)
+
+    k1x = interp(a, X, Y); k1y = interp(b, X, Y)
+    X2 = X - 0.5 * dt * k1x; Y2 = Y - 0.5 * dt * k1y
+    k2x = interp(a, X2, Y2); k2y = interp(b, X2, Y2)
+    X3 = X - 0.5 * dt * k2x; Y3 = Y - 0.5 * dt * k2y
+    k3x = interp(a, X3, Y3); k3y = interp(b, X3, Y3)
+    X4 = X - dt * k3x; Y4 = Y - dt * k3y
+    k4x = interp(a, X4, Y4); k4y = interp(b, X4, Y4)
+    X_back = X - (dt / 6.0) * (k1x + 2*k2x + 2*k3x + k4x)
+    Y_back = Y - (dt / 6.0) * (k1y + 2*k2y + 2*k3y + k4y)
+    return interp(q, X_back, Y_back)
+
+
 # ── WENO5 + SSP-RK3 Eulerian advection ───────────────────────────────────────
 
 @njit(cache=True)
@@ -435,6 +459,43 @@ def advect_central2_rk3(q, a, b, dx, dy, dt, phi, w_cut=0.0):
     return q_new
 
 
+@njit(parallel=True, cache=True)
+def _conservative_rhs(q, a, b, dx, dy, phi, w_cut):
+    """RHS = -div(u q) -- the CONSERVATIVE, Heaviside-gated flux form of the
+    reference-map advection (Jain, Kamrin & Mani 2019, Eq. 26):
+
+        d(xi)/dt + H(x) div[u xi] = 0,   H = 1 in the solid (phi<=w_cut), else 0.
+
+    Computed with 2nd-order central differences. The H-gating clips xi to the
+    solid in the advection step itself, which "eliminates the high-frequency
+    content in the xi field" so central differences stay stable without the
+    artificial diffusion of a TVD scheme (which the paper shows corrupts the
+    level-set reconstruction). Stencil width is +/-1 (one extrapolation layer).
+    """
+    Ny, Nx = q.shape
+    rhs = np.zeros_like(q)
+    inv_2dx = 0.5 / dx
+    inv_2dy = 0.5 / dy
+    for j in prange(1, Ny - 1):
+        for i in range(1, Nx - 1):
+            if phi[j, i] > w_cut:
+                continue
+            d_uq_dx = (a[j, i+1] * q[j, i+1] - a[j, i-1] * q[j, i-1]) * inv_2dx
+            d_vq_dy = (b[j+1, i] * q[j+1, i] - b[j-1, i] * q[j-1, i]) * inv_2dy
+            rhs[j, i] = -(d_uq_dx + d_vq_dy)
+    return rhs
+
+
+def advect_conservative_rk3(q, a, b, dx, dy, dt, phi, w_cut=0.0):
+    """Jain 2019 Eq. 26: conservative, Heaviside-gated reference-map advection
+    (central differences + SSP-RK3). w_cut=0 advects strictly the solid; the band
+    is filled by extrapolation. Pairs with per-step level-set reinitialization."""
+    q1 = q + dt * _conservative_rhs(q, a, b, dx, dy, phi, w_cut)
+    q2 = 0.75 * q + 0.25 * (q1 + dt * _conservative_rhs(q1, a, b, dx, dy, phi, w_cut))
+    q_new = (1.0/3.0) * q + (2.0/3.0) * (q2 + dt * _conservative_rhs(q2, a, b, dx, dy, phi, w_cut))
+    return q_new
+
+
 # ── Switchable reference-map advection dispatcher ────────────────────────────
 
 def advect_reference_map(q, a, b, X, Y, dt, dx, dy, phi,
@@ -466,19 +527,24 @@ def advect_reference_map(q, a, b, X, Y, dt, dx, dy, phi,
 
     if scheme == 'semilagrangian':
         return advect_semilagrangian_rk4(q, a, b, X, Y, dt, dx, dy)
+    elif scheme == 'semilagrangian_cubic':
+        return advect_semilagrangian_cubic_rk4(q, a, b, X, Y, dt, dx, dy)
     elif scheme == 'central2':
         return advect_central2_rk3(q, a, b, dx, dy, dt, phi, w_cut)
     elif scheme == 'weno5':
         return advect_weno5_rk3(q, a, b, dx, dy, dt, phi, w_cut)
+    elif scheme == 'conservative':
+        return advect_conservative_rk3(q, a, b, dx, dy, dt, phi, w_cut)
     else:
         raise ValueError(
             "Unknown advection scheme %r (expected 'semilagrangian', "
-            "'central2' or 'weno5')" % (scheme,)
+            "'central2', 'weno5' or 'conservative')" % (scheme,)
         )
 
 
 @njit(parallel=True, cache=True)
-def solid_cauchy_stress(X1, X2, dx, dy, mu_s, kappa, phi, w_cut=0.0, detg_clamp=0.0):
+def solid_cauchy_stress(X1, X2, dx, dy, mu_s, kappa, phi, w_cut=0.0, detg_clamp=0.0,
+                        isochoric=False):
     """Neo-Hookean Cauchy stress sigma = mu_s*b + kappa*(J-1)*I from the
     reference map.
 
@@ -569,12 +635,25 @@ def solid_cauchy_stress(X1, X2, dx, dy, mu_s, kappa, phi, w_cut=0.0, detg_clamp=
                 j_val = 1.0 / detG
                 J[j, i] = j_val
 
-                # 5. Neo-Hookean Stress (Kamrin form): sigma = mu*B + kappa*(J-1)*I
+                # 5. Neo-Hookean Cauchy stress.
                 vol_term = kappa * (j_val - 1.0)
-
-                sxx[j, i] = mu_s * b11 + vol_term
-                sxy[j, i] = mu_s * b12
-                syy[j, i] = mu_s * b22 + vol_term
+                if isochoric:
+                    # 2D isochoric (volume-corrected) neo-Hookean, matching the
+                    # compressible RMT papers (Kamrin-Rycroft-Nave 2015, Rycroft
+                    # FSI): sigma_dev = mu_s J^{-2}(b - 1/2 tr(b) I). The J^{-2}
+                    # damps the stress when the map spuriously inflates (J>1),
+                    # self-correcting numerical J-drift (no clamp needed).
+                    tr_half = 0.5 * (b11 + b22)
+                    jm2 = 1.0 / (j_val * j_val)
+                    sxx[j, i] = mu_s * jm2 * (b11 - tr_half) + vol_term
+                    sxy[j, i] = mu_s * jm2 * b12
+                    syy[j, i] = mu_s * jm2 * (b22 - tr_half) + vol_term
+                else:
+                    # legacy incompressible form (Rycroft 2018 convention):
+                    # sigma = mu_s b (+ kappa(J-1)I); pressure handles the rest.
+                    sxx[j, i] = mu_s * b11 + vol_term
+                    sxy[j, i] = mu_s * b12
+                    syy[j, i] = mu_s * b22 + vol_term
 
     return sxx, sxy, syy, J
 
@@ -1347,6 +1426,10 @@ def reinitialize_phi_fmm(phi, dx, dy):
         raise ImportError(
             "reinitialize_phi_fmm requires scikit-fmm (pip install scikit-fmm)"
         ) from exc
+    # skfmm needs a finite field with a zero crossing; if phi has gone non-finite
+    # or the front left the domain, keep phi rather than crash.
+    if not np.all(np.isfinite(phi)) or phi.min() > 0.0 or phi.max() < 0.0:
+        return phi
     return skfmm.distance(phi, dx=[float(dy), float(dx)])
 
 
