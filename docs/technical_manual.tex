@@ -1,0 +1,397 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+\usepackage{listings}
+\usepackage{enumitem}
+
+\lstset{basicstyle=\ttfamily\small,breaklines=true,frame=single,
+  backgroundcolor=\color{black!4},columns=fullflexible,showstringspaces=false}
+\newcommand{\xv}{\bm{x}}
+\newcommand{\uv}{\bm{u}}
+\newcommand{\xiv}{\bm{\xi}}
+\newcommand{\Ften}{\bm{F}}
+\newcommand{\bten}{\bm{b}}
+\newcommand{\grad}{\nabla}
+\newcommand{\dd}[2]{\frac{\partial #1}{\partial #2}}
+
+\title{\textbf{pyRMT --- Technical Manual}\\[2mm]
+\large A staggered-grid Reference Map Technique for 2D incompressible
+fluid--structure interaction}
+\author{Saman Seifi \\ \small Method, discretization, and implementation reference}
+\date{\today}
+
+\begin{document}
+\maketitle
+\begin{abstract}
+\noindent
+pyRMT is a research code for two-dimensional, incompressible fluid--structure
+interaction (FSI) in which a hyperelastic (or viscoelastic) solid and a Newtonian
+fluid share a single velocity field, pressure, and fixed Eulerian grid. The solid
+is tracked by the \emph{Reference Map Technique} (RMT): an Eulerian field
+$\xiv(\xv,t)$ that records, for each spatial point currently occupied by solid,
+its original (material) position. This manual documents the governing equations,
+the constitutive models (neo-Hookean and finite-strain viscoelasticity via the
+log-conformation method), the spatial and temporal discretization on a
+Marker-and-Cell (MAC) staggered grid with an \emph{exact} discrete projection, the
+interface, surface-tension and contact treatments, and the verification and
+validation evidence. A companion \emph{User Manual} covers installation, the public
+API, and how to run the benchmarks.
+\end{abstract}
+
+\tableofcontents
+
+\section{Scope and two solver families}
+The package contains two solver families that share the same RMT idea but differ in
+their grid arrangement:
+\begin{itemize}[nosep]
+  \item \textbf{Collocated} (\texttt{pyRMT/functions.py}): velocity and pressure at
+  cell centres, Rhie--Chow interpolation to suppress checkerboarding; direct DCT/FFT
+  Poisson solves and an AMG fallback for variable density. This is the original
+  solver (after Jain, Kamrin \& Mani, 2019).
+  \item \textbf{Staggered / MAC} (\texttt{pyRMT/mac.py}): pressure at cell centres,
+  normal velocities on cell faces. The discrete divergence and gradient are exact
+  transposes, so the projection is divergence-free to machine precision and no
+  Rhie--Chow correction is needed. This is the recommended path for surface tension
+  and contact, and is the basis for the viscoelastic extension.
+\end{itemize}
+Unless stated otherwise, this manual documents the \textbf{staggered/MAC} solver.
+
+\section{Governing equations}
+The one-fluid incompressible momentum and continuity equations on the whole domain
+$\Omega$ are
+\begin{align}
+\rho\!\left(\dd{\uv}{t}+\uv\!\cdot\!\grad\uv\right)
+&= -\grad p + \grad\!\cdot\!\bm{\sigma}_{\!d} + \bm{f}, \\
+\grad\!\cdot\!\uv &= 0,
+\end{align}
+where $p$ is the pressure (the incompressibility Lagrange multiplier),
+$\bm{\sigma}_{\!d}$ is the deviatoric stress, and $\bm{f}$ collects body and
+interfacial forces. The deviatoric stress is \emph{blended} between fluid and solid
+through a smoothed indicator $H$ (Section~\ref{sec:interface}):
+\begin{equation}
+\bm{\sigma}_{\!d} = H\,\bm{\sigma}_{\!f} + (1-H)\,\bm{\sigma}_{\!s},
+\qquad
+\bm{\sigma}_{\!f} = 2\mu_f\,\bm{D}(\uv),
+\label{eq:blend}
+\end{equation}
+with $\bm{D}=\tfrac12(\grad\uv+\grad\uv^{\!\top})$. Here $H=1$ in fluid and $H=0$
+in solid. A single density $\rho$ is used by default (variable density
+$\rho_s\neq\rho_f$ is available only in the collocated AMG path).
+
+\section{The Reference Map Technique}
+The reference map $\xiv(\xv,t)$ satisfies pure advection in the solid,
+\begin{equation}
+\dd{\xiv}{t}+\uv\!\cdot\!\grad\xiv = \bm{0},
+\qquad \xiv(\xv,0)=\xv ,
+\label{eq:xi}
+\end{equation}
+so $\xiv$ maps a current point back to its material point. The deformation gradient
+and left Cauchy--Green (Finger) tensor follow from $\xiv$:
+\begin{equation}
+\Ften = (\grad\xiv)^{-1},\qquad \bten = \Ften\Ften^{\!\top},\qquad J=\det\Ften .
+\end{equation}
+The solid region is recovered from a reference (material) level set $\phi_0$ via the
+compatibility relation $\phi(\xv,t)=\phi_0(\xiv(\xv,t))$; the zero contour is the
+fluid--solid interface. Outside the solid the reference map is undefined, so after
+each advection step it is \emph{extrapolated} a few cells into the surrounding band
+(Section~\ref{sec:interface}).
+
+\section{Constitutive models}
+\subsection{Incompressible neo-Hookean solid}
+The default solid stress is the neo-Hookean Cauchy stress in the convention of
+Rycroft \emph{et al.} (2018),
+\begin{equation}
+\bm{\sigma}_{\!s} = \mu_s\,\bten ,
+\label{eq:neo}
+\end{equation}
+with shear modulus $\mu_s$. The hydrostatic part is carried by the pressure (the
+material is incompressible, $\kappa=0$ by default), so only the deviatoric part of
+\eqref{eq:neo} is dynamically relevant.
+\paragraph{Convention note.} Some references (e.g.\ Jain \emph{et al.}, 2019) write
+$\bm\sigma_s = 2\mu_s\,\mathrm{dev}(\bten)$. The factor difference is purely a
+definition of $\mu_s$ (the strain energy is written with $\tfrac12$ vs.\ $1$); it is
+\emph{not} a discrepancy. An optional volume-corrected (isochoric) form
+$\bm\sigma_s=\mu_s J^{-2}(\bten-\tfrac12\mathrm{tr}(\bten)\bm I)+\kappa(J-1)\bm I$ is
+implemented in \texttt{solid\_cauchy\_stress} but is neutral on convergence and is
+not the default.
+
+\subsection{Finite-strain viscoelasticity (log-conformation)}
+\label{sec:ve}
+For viscoelastic solids the stress is carried by an \emph{elastic} Finger tensor
+$\bten_e$ evolved by the upper-convected Maxwell (UCM) model with relaxation time
+$\tau$,
+\begin{equation}
+\dd{\bten_e}{t}+(\uv\!\cdot\!\grad)\bten_e - \bm{L}\bten_e - \bten_e\bm{L}^{\!\top}
+= -\frac{1}{\tau}\bigl(\bten_e-\bm I\bigr),
+\qquad \bm L=\grad\uv ,
+\label{eq:ucm}
+\end{equation}
+and the stress
+\begin{equation}
+\bm{\sigma}_{\!s} = G\,\bten_e \;+\; G_\infty\,\mathrm{dev}(\Ften\Ften^{\!\top}).
+\label{eq:vestress}
+\end{equation}
+The optional second term is a non-relaxing equilibrium (Zener / standard-linear-solid)
+branch, so that $G_\infty>0$ keeps the body a \emph{solid} (returns to shape) while
+$G_\infty=0$ gives a Maxwell material (flows under sustained load). The limit
+$\tau\!\to\!\infty$ recovers the neo-Hookean solid \eqref{eq:neo}.
+
+\paragraph{Log-conformation.} Advecting $\bten_e$ directly fails on a grid: a
+diffusive scheme artificially relaxes it (kills the elastic strain), while a
+non-dissipative scheme loses positive-definiteness and blows up. Following Fattal \&
+Kupferman (2004) we evolve $\bm\psi=\log\bten_e$, so $\bten_e=\exp(\bm\psi)$ is
+symmetric positive-definite \emph{by construction} for any $\bm\psi$. In the
+eigenframe of $\bm\psi$ the homogeneous evolution is
+\begin{equation}
+\dot{\bm\psi} = (\bm\Omega\bm\psi-\bm\psi\bm\Omega) + 2\bm B
+ + \tfrac{1}{\tau}\bigl(e^{-\bm\psi}-\bm I\bigr),
+\end{equation}
+with the extensional ($\bm B$) and rotational ($\bm\Omega$) parts obtained from the
+velocity gradient projected into that frame; the $2\times2$ closed form is in
+\texttt{logconf\_local\_rhs}. The local update has been verified to machine
+precision against the analytic step-strain relaxation, the steady-shear viscometric
+functions (including the first normal-stress difference $N_1=2G\tau^2\dot\gamma^2$),
+and the $\tau\!\to\!\infty$ elastic limit (Section~\ref{sec:vv}).
+
+\section{Spatial discretization: the MAC staggered grid}
+On an $N_x\times N_y$ grid with spacing $(\Delta x,\Delta y)$:
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+field & location & array shape \\
+\midrule
+pressure $p$ & cell centres & $(N_y,N_x)$ \\
+$u$ (x-velocity) & $x$-faces & $(N_y,N_x{+}1)$ \\
+$v$ (y-velocity) & $y$-faces & $(N_y{+}1,N_x)$ \\
+$\xiv,\phi,\bm\psi$ & cell centres & $(N_y,N_x)$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+The discrete divergence (\texttt{divergence}) maps face velocities to cell centres
+and the pressure gradient (\texttt{gradient\_p\_u/v}) maps centres back to faces;
+they are exact transposes, $\mathrm{div}=-\mathrm{grad}^{\!\top}$. Consequently the
+Laplacian $\mathrm{div}\,\mathrm{grad}$ used in the pressure solve is consistent with
+the operators used in the correction, which is what makes the projection exact.
+
+\section{Pressure projection and Poisson solvers}
+A fractional-step (Chorin) projection is used. Given a provisional velocity
+$\uv^{*}$ the pressure (here $\phi=p\,\Delta t/\rho$) solves
+\begin{equation}
+\nabla^2\phi = \frac{\rho}{\Delta t}\,\grad\!\cdot\!\uv^{*},
+\qquad
+\uv^{n+1} = \uv^{*}-\frac{\Delta t}{\rho}\grad\phi .
+\end{equation}
+Two direct $O(N\log N)$ solvers are provided:
+\begin{itemize}[nosep]
+  \item \textbf{Neumann walls} (\texttt{poisson\_eigs\_neumann},
+  \texttt{solve\_poisson\_neumann}): a discrete cosine transform (DCT-II); the
+  homogeneous Neumann pressure condition means the projection leaves the wall-normal
+  velocity unchanged, which is exploited to impose prescribed inflow/outflow
+  boundary velocities (e.g.\ uniform extension) as long as the net wall flux is zero.
+  \item \textbf{Periodic} (\texttt{poisson\_eigs\_periodic},
+  \texttt{solve\_poisson\_periodic}): an FFT.
+\end{itemize}
+Because the operators are consistent, the resulting velocity is divergence-free to
+$\sim\!10^{-14}$ regardless of the flow (verified in the benchmarks). The collocated
+solver additionally offers a PyAMG multigrid solve for variable-coefficient
+(variable-density) projections.
+
+\section{Time integration}
+The default scheme is an explicit predictor followed by the projection:
+\begin{enumerate}[nosep]
+  \item Advect the reference map (and $\bm\psi$, $\bten_e$) with the cell-centred
+  velocity (Section~\ref{sec:advect}), then mask to the solid and extrapolate.
+  \item Compute the blended stress and assemble the face force $\bm f$.
+  \item Predictor (\texttt{momentum\_predictor}, central advection $+$ diffusion,
+  forward Euler) producing $\uv^{*}$, with optional face body forces $f_u,f_v$ added
+  as $f/\rho$.
+  \item Project to obtain the divergence-free $\uv^{n+1}$ and $p$.
+\end{enumerate}
+Three momentum predictors are provided: lid-driven (top wall moves at $U_{\text{lid}}$,
+others no-slip), free-slip box, and periodic. The collocated solver additionally
+offers an RK4 momentum step (\texttt{momentum\_step\_rk4}).
+The time step obeys the advective, viscous, and elastic-wave CFL limits,
+\(
+\Delta t \le \min\!\bigl(C\,\Delta x/U,\;
+C_\nu\,\Delta x^2/\nu,\;
+C\,\Delta x/c_s\bigr),
+\)
+with $c_s=\sqrt{\mu_s/\rho}$.
+
+\subsection{Reference-map advection schemes}
+\label{sec:advect}
+The dispatcher \texttt{advect\_reference\_map(\dots, scheme)} selects among
+(\texttt{semilagrangian} bilinear RK4 --- default and most robust;
+\texttt{semilagrangian\_cubic} monotone Catmull--Rom;
+\texttt{central2} $+$ SSP-RK3;
+\texttt{weno5} $+$ SSP-RK3;
+\texttt{conservative} Jain Eq.~26 with the divergence-free face velocity). The choice
+trades robustness against formal order; see Section~\ref{sec:conv}.
+
+\section{Interface, extrapolation and reinitialization}
+\label{sec:interface}
+\paragraph{Smoothed indicator.} The blend \eqref{eq:blend} uses a smoothed Heaviside
+$H=\tfrac12\bigl(1+\tanh(\phi/w_t)\bigr)$ (\texttt{smoothed\_heaviside}) over a
+transition width $w_t\sim 2\Delta x$, giving a \emph{diffuse} interface of a few
+cells.
+\paragraph{Extrapolation.} After advection the reference map is defined only inside
+the solid; \texttt{extrapolate\_reference\_map} fills a narrow band outside the zero
+contour (a few layers) so that gradients and the rebuilt level set are well defined.
+\paragraph{Level-set rebuild.} The interface is reconstructed each step from the
+reference map, $\phi=\phi_0(\xiv)$ (\texttt{rebuild\_phi\_from\_reference\_map}), or
+by bilinear interpolation of a stored grid level set.
+\paragraph{Reinitialization.} Two notions are distinguished:
+\begin{itemize}[nosep]
+  \item \emph{Level-set} reinitialization to a signed distance (FMM via
+  \texttt{reinitialize\_phi\_fmm}, requires \texttt{scikit-fmm}; or the PDE scheme).
+  Per-step FMM is not volume-preserving; it is applied infrequently.
+  \item \emph{Reference-map} reinitialization (Rycroft F-storage): when the
+  per-epoch distortion grows large, reset $\xiv=\xv$, fold the current deformation
+  into a stored gradient $\Ften_{\text{stored}}\!\leftarrow\!\Ften\Ften_{\text{stored}}$,
+  and adopt the current shape as the new reference. Stress then uses
+  $\Ften_{\text{tot}}=\Ften\Ften_{\text{stored}}$. This lets a solid under sustained
+  \emph{smooth} shear run indefinitely. It does \emph{not} cure folds caused by
+  rigid rotation winding (use the viscoelastic decoupling, Section~\ref{sec:ve}) or
+  by under-resolved contact crushing (use resolution / lubrication).
+\end{itemize}
+
+\section{Surface tension}
+Surface tension is added as a balanced-force continuum surface force (CSF) evaluated
+\emph{on the faces}:
+\begin{equation}
+\bm f_{\text{st}} = -\gamma\,\kappa\,\grad H ,
+\end{equation}
+with curvature $\kappa=-\grad\!\cdot\!(\grad\phi/|\grad\phi|)$
+(\texttt{compute\_curvature}) and the \emph{same compact face gradient} used for the
+pressure (\texttt{interfacial\_force\_faces}). Using the identical operator for the
+force and the pressure gradient makes the discrete balance exact for a static drop,
+which suppresses parasitic currents (measured $\sim\!5.5\times$ smaller than the
+collocated discretization). The static Laplace jump is reproduced to $\sim\!0.4\%$.
+
+\section{Contact between solids}
+A repulsive \emph{body} force between near-contacting solids is curl-free and is
+therefore removed by the exact projection (it has no effect). Contact is instead
+added as a trace-free \emph{stress} (Rycroft \emph{et al.}, 2018,
+Eqs.~4.10--4.12), implemented in \texttt{contact\_stress}:
+\begin{equation}
+\bm\tau_{\text{col}} = -\eta\,\min\!\bigl(f(\phi_i),f(\phi_j)\bigr)\,(G_i{+}G_j)
+\Bigl(\bm n\!\otimes\!\bm n-\tfrac12\bm I\Bigr),
+\end{equation}
+active where the two diffuse bands overlap (width $\varepsilon\sim 3\Delta x$), with
+$\bm n$ from the level-set gradient. Its divergence is a momentum-conserving force
+that survives the projection; the stiffness $\eta$ controls the rebound.
+Solid--wall contact uses the same routine against a wall level set
+$\phi_{\text{wall}}=\min(x,1{-}x,y,1{-}y)$.
+\paragraph{Limitation \& outlook.} The penalty contact prevents overlap but is not a
+quantitative model of the thin lubricating film; near-contact at gaps below the grid
+scale is under-resolved (it folds unless refined). A \emph{lubrication} reformulation
+(adapting Fai \& Rycroft, 2018, to the diffuse-band RMT, using the signed-distance
+fields as a height function) is planned to make the contact force physical and
+resolution-robust.
+
+\section{Verification and validation}
+\label{sec:vv}
+\subsection{Operators and projection}
+The discrete divergence/gradient transpose property and the projection are checked
+in \texttt{tests/test\_mac.py}; the divergence of the projected field is
+$\sim\!10^{-14}$.
+
+\subsection{Spatial convergence}
+\label{sec:conv}
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+case & quantity & observed order \\
+\midrule
+Taylor--Green (pure fluid) & $L_2$ velocity & $2.01\!\to\!2.06\!\to\!2.25$ \\
+Disc-in-Taylor--Green (FSI), bilinear SL & velocity & $1.31$ \\
+\quad cubic SL & velocity & $1.72$ \\
+\quad central2 & velocity & $1.74$ \\
+\quad WENO5 & velocity & $2.10$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+The pure-fluid solver is second order. The FSI velocity order is below~2 and is
+\emph{capped by the diffuse interface} (the smeared stress jump), not by the
+advection scheme: improving the scheme raises the order only up to the
+diffuse-interface ceiling (issue tracked as ``2nd-order fields require a sharper
+interface''). The divergence stays at machine zero across all schemes and
+resolutions.
+
+\subsection{Benchmarks against the literature}
+\begin{itemize}[nosep]
+  \item \textbf{Lid-driven cavity} vs.\ Ghia \emph{et al.} (1982): RMS error in
+  $u(y)$ at $x{=}0.5$ of $1.7\times10^{-3}$ (Re~100) and $2.8\times10^{-2}$
+  (Re~1000), $N{=}129$.
+  \item \textbf{Soft disc in lid-driven cavity} vs.\ Sugiyama \emph{et al.} (2011)
+  / Jain \emph{et al.} (2019): centroid trajectory matches; the deformed interface
+  is grid-converged ($N{=}64\approx N{=}128$).
+  \item \textbf{Surface tension}: static Laplace jump to $0.4\%$; a square relaxes
+  to a circle (circularity $0.999$, area conserved to $\sim2\%$ with infrequent
+  reinitialization).
+  \item \textbf{Contact}: two-disc collision rebound (monotone in $\eta$);
+  multi-body and multi-shape stirring.
+\end{itemize}
+
+\subsection{Viscoelasticity}
+The constitutive update (both the plain $\bten_e$ and the log-conformation form) is
+verified to machine precision against analytic responses: step-strain relaxation
+$\sigma_{xy}=G\gamma e^{-t/\tau}$ ($\sim\!10^{-10}$), steady shear
+$\sigma_{xy}=G\tau\dot\gamma$ and $N_1=2G\tau^2\dot\gamma^2$ ($\sim\!10^{-12}$), and
+the elastic limit $\bten_e=\Ften\Ften^{\!\top}$ ($\sim\!10^{-13}$); see
+\texttt{tests/test\_viscoelastic.py}. Under imposed uniform planar extension the
+solver reproduces the analytic plateau $b_e^{xx}\!\to\!1/(1-2\,\mathrm{Wi})$ to four
+digits ($\tau{=}0.25\!\to\!1.3333$, $\tau{=}0.5\!\to\!1.997$ vs.\ $2.0$) and is
+resolution-independent ($N{=}64/96/128$ overlap), while the elastic case diverges as
+$e^{2\varepsilon t}$ (Fig.~\texttt{viscoelastic\_uniform\_money.png}).
+
+\section{Limitations}
+\begin{itemize}[nosep]
+  \item Two-dimensional; single density by default (variable density only in the
+  collocated AMG path).
+  \item Diffuse-interface FSI fields converge below second order
+  (Section~\ref{sec:conv}); a sharp-interface treatment is future work.
+  \item Penalty contact is non-quantitative near contact (lubrication planned).
+  \item Explicit time stepping ties $\Delta t$ to the elastic-wave / viscous CFL.
+  \item Long, high-resolution runs are memory bound; frame data should be streamed
+  to disk (the showcase driver does this).
+\end{itemize}
+
+\section{Module map}
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+file & contents \\
+\midrule
+\texttt{pyRMT/mac.py} & staggered grid, exact projection, momentum predictors, \\
+ & periodic/Neumann Poisson, interfacial \& contact stress \\
+\texttt{pyRMT/functions.py} & collocated solver, advection schemes, neo-Hookean stress, \\
+ & extrapolation, reinitialization, AMG projection \\
+\texttt{pyRMT/viscoelastic.py} & UCM $\bten_e$, log-conformation, $\exp/\log$ of $2{\times}2$ SPD \\
+\texttt{pyRMT/interpolators.py} & bilinear / bicubic interpolation (Numba) \\
+\texttt{pyRMT/utils.py} & finite-difference gradient/Laplacian helpers \\
+\texttt{pyRMT/output.py} & kinetic / strain energy, dissipation, HDF5 output \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section*{References}
+\begin{enumerate}[nosep]
+  \item K.~Kamrin, C.~H.~Rycroft, J.-C.~Nave, \emph{Reference map technique for
+  finite-strain elasticity and fluid--solid interaction}, JMPS (2012).
+  \item C.~H.~Rycroft \emph{et al.}, \emph{Reference map technique for
+  incompressible fluid--structure interaction}, JFM (2020).
+  \item S.~S.~Jain, K.~Kamrin, A.~Mani, \emph{A conservative and non-dissipative
+  Eulerian formulation for the simulation of soft solids in fluids}, JCP (2019).
+  \item R.~Fattal, R.~Kupferman, \emph{Constitutive laws for the matrix-logarithm of
+  the conformation tensor}, JNNFM (2004).
+  \item T.~G.~Fai, C.~H.~Rycroft, \emph{Lubricated immersed boundary method in two
+  dimensions}, JCP (2018).
+  \item U.~Ghia, K.~N.~Ghia, C.~T.~Shin, \emph{High-Re solutions \dots}, JCP (1982).
+\end{enumerate}
+
+\end{document}

@@ -43,3 +43,8 @@ archive/
 # numba cache
 *.nbi
 *.nbc
+docs/*.pdf
+docs/*.aux
+docs/*.log
+docs/*.out
+docs/*.toc

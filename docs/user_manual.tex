@@ -1,0 +1,305 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,bm}
+\newcommand{\bten}{\bm{b}}
+\newcommand{\xiv}{\bm{\xi}}
+\newcommand{\Ften}{\bm{F}}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+\usepackage{listings}
+\usepackage{enumitem}
+
+\definecolor{kw}{rgb}{0.10,0.30,0.65}
+\definecolor{cm}{rgb}{0.30,0.50,0.30}
+\definecolor{st}{rgb}{0.60,0.20,0.20}
+\lstdefinestyle{py}{language=Python,basicstyle=\ttfamily\small,breaklines=true,
+  frame=single,backgroundcolor=\color{black!4},columns=fullflexible,
+  showstringspaces=false,keywordstyle=\color{kw},commentstyle=\color{cm},
+  stringstyle=\color{st}}
+\lstdefinestyle{sh}{basicstyle=\ttfamily\small,breaklines=true,frame=single,
+  backgroundcolor=\color{black!4},columns=fullflexible}
+\lstset{style=py}
+
+\title{\textbf{pyRMT --- User Manual}\\[2mm]
+\large Installing, running, and building simulations with the
+Reference Map Technique solver}
+\author{Saman Seifi}
+\date{\today}
+
+\begin{document}
+\maketitle
+\begin{abstract}
+\noindent
+This manual is the practical guide to pyRMT: how to install it, run the supplied
+benchmarks, use the public API, build a custom 2D fluid--structure-interaction
+simulation, and interpret the outputs. For the underlying method and equations see
+the companion \emph{Technical Manual}.
+\end{abstract}
+\tableofcontents
+
+\section{Overview}
+pyRMT simulates 2D incompressible fluid--structure interaction (FSI) with the
+Reference Map Technique: a hyperelastic or viscoelastic solid and a Newtonian fluid
+share one velocity field on a fixed Eulerian grid. It provides two solver families:
+\begin{itemize}[nosep]
+  \item \textbf{Staggered / MAC} (\texttt{pyRMT/mac.py}) --- exact divergence-free
+  projection; recommended for surface tension, contact, and viscoelasticity.
+  \item \textbf{Collocated} (\texttt{pyRMT/functions.py}) --- Rhie--Chow; the
+  original solver, with a variable-density (AMG) option.
+\end{itemize}
+
+\section{Installation}
+\paragraph{Requirements.} Python $\ge 3.10$ and \texttt{numpy}, \texttt{scipy},
+\texttt{matplotlib}, \texttt{h5py}, \texttt{pyamg}, \texttt{numba}. Optional:
+\texttt{scikit-fmm} (fast-marching level-set reinitialization), \texttt{imageio}
+(animated GIF benchmarks), \texttt{pytest} (tests).
+\begin{lstlisting}[style=sh]
+git clone https://github.com/samanseifi/pyRMT.git
+cd pyRMT
+pip install -e ".[test]"     # editable install + pytest + scikit-fmm
+# minimal:           pip install -e .
+# with FMM only:     pip install -e ".[fmm]"
+\end{lstlisting}
+The Numba-JIT kernels compile on first use (a one-time startup cost; caching is
+enabled). The branching model is: develop from \texttt{develop}; \texttt{main} is the
+stable branch.
+
+\section{Repository layout}
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+path & contents \\
+\midrule
+\texttt{pyRMT/} & the importable package (see Technical Manual, Module map) \\
+\texttt{benchmarks/} & runnable cases (validation, demos, animations) \\
+\texttt{tests/} & \texttt{pytest} suite \\
+\texttt{docs/} & this manual, the technical manual, figures (\texttt{docs/img/}) \\
+\texttt{outputs/} & generated CSV / figures / GIFs / frame data \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Quick start}
+Run any benchmark as a script; outputs land under \texttt{outputs/}.
+\begin{lstlisting}[style=sh]
+# --- pure fluid validation (collocated) ---
+python benchmarks/lid_driven_cavity.py 1000           # Re=1000 vs Ghia
+
+# --- MAC solver ---
+python benchmarks/mac_lid_driven.py                   # lid cavity (staggered)
+python benchmarks/mac_taylor_green_convergence.py     # 2nd-order fluid
+python benchmarks/mac_disc_in_tg_convergence.py       # FSI convergence study
+python benchmarks/mac_soft_disc_lid.py                # soft disc vs Sugiyama
+python benchmarks/mac_surface_tension_relax.py        # square -> circle
+
+# --- contact & multi-body (GIFs; need imageio) ---
+python benchmarks/mac_two_disc_contact.py
+python benchmarks/mac_multi_shape_showcase.py 256 12.0      # 6 shapes, two views
+python benchmarks/mac_settling_shapes_gif.py
+
+# --- viscoelasticity ---
+python benchmarks/viscoelastic_relaxation_test.py          # 0-D verification
+python benchmarks/mac_viscoelastic_uniform.py 96 6.0 0.5   # extension, tau=0.5
+python benchmarks/mac_viscoelastic_uniform.py plot         # money figure
+\end{lstlisting}
+
+\section{Benchmark catalogue}
+Most MAC drivers take command-line arguments \texttt{[N] [t\_end] [\dots]} and print
+their resolution / parameters on startup. Selected cases:
+\begin{center}
+\small
+\begin{tabular}{lll}
+\toprule
+script & what it shows & typical call \\
+\midrule
+\texttt{mac\_lid\_driven.py} & lid cavity (Ghia) & \texttt{... [Re]} \\
+\texttt{mac\_taylor\_green\_convergence.py} & 2nd-order fluid & \texttt{...} \\
+\texttt{mac\_disc\_in\_tg\_convergence.py} & FSI order, all schemes & \texttt{...} \\
+\texttt{mac\_soft\_disc\_lid.py} & soft disc vs Sugiyama & \texttt{... [N] [scheme] [t]} \\
+\texttt{mac\_surface\_tension\_drop.py} & static Laplace jump & \texttt{... [N]} \\
+\texttt{mac\_surface\_tension\_relax.py} & square $\to$ circle & \texttt{... [N]} \\
+\texttt{mac\_two\_disc\_contact.py} & collision rebound vs $\eta$ & \texttt{...} \\
+\texttt{mac\_multi\_shape\_showcase.py} & 6 shapes, speed/stress/contact & \texttt{... N t [mode]} \\
+\texttt{mac\_settling\_shapes\_gif.py} & gravity settling pile & \texttt{... [N] [t]} \\
+\texttt{mac\_reinit\_test.py} & reference-map reinit & \texttt{... [N] [t] [reinit]} \\
+\texttt{mac\_viscoelastic\_uniform.py} & extension, exact plateau & \texttt{... N t tau} \\
+\texttt{viscoelastic\_relaxation\_test.py} & 0-D constitutive checks & \texttt{...} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\texttt{tau<=0} selects the elastic ($\tau\!\to\!\infty$) limit; \texttt{scheme} is
+one of \texttt{semilagrangian}, \texttt{semilagrangian\_cubic}, \texttt{central2},
+\texttt{weno5}, \texttt{conservative}. The showcase \texttt{mode} is
+\texttt{speed}/\texttt{stress}/\texttt{contact}; passing \texttt{rerender N} re-renders
+saved frames without re-simulating.
+
+\section{Public API tour}
+After \texttt{pip install -e .} the package is importable as \texttt{pyRMT}.
+\subsection{Grid, operators, projection (MAC)}
+\begin{lstlisting}
+import numpy as np
+from pyRMT.mac import (mac_grid, poisson_eigs_neumann, project,
+                       momentum_predictor, divergence)
+
+N = 128
+dx, dy = mac_grid(N, N)                 # spacing on the unit square
+u = np.zeros((N, N+1))                  # x-velocity on x-faces
+v = np.zeros((N+1, N))                  # y-velocity on y-faces
+eig = poisson_eigs_neumann(N, N, dx, dy)  # precompute DCT eigenvalues
+
+# one lid-driven predictor + exact projection step
+ustar, vstar = momentum_predictor(u, v, nu=0.01, dx=dx, dy=dy, dt=1e-3,
+                                   U_lid=1.0)
+u, v, p = project(ustar, vstar, dx, dy, dt=1e-3, rho=1.0, eig=eig)
+print("max|div| =", np.abs(divergence(u, v, dx, dy)).max())   # ~1e-14
+\end{lstlisting}
+
+\subsection{Reference map, stress, advection}
+\begin{lstlisting}
+from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
+    rebuild_phi_from_reference_map, solid_cauchy_stress, smoothed_heaviside)
+
+# initialise a disc: phi<0 inside
+xc = (np.arange(N)+0.5)*dx; X, Y = np.meshgrid(xc, xc)
+pin = lambda Xa, Ya: np.sqrt((Xa-0.5)**2 + (Ya-0.5)**2) - 0.2
+phi = pin(X, Y); m = (phi <= 0).astype(float)
+X1, X2 = extrapolate_reference_map(X*m, Y*m, phi, dx, dy, 3)   # reference map
+
+# advect one step (cell-centred velocity u_c, v_c), then re-extrapolate
+X1 = advect_reference_map(X1, u_c, v_c, Xg, Yg, dt, dx, dy, phi, 'semilagrangian', 0.0)*m
+X1, X2 = extrapolate_reference_map(X1, X2, phi, dx, dy, 3)
+phi = rebuild_phi_from_reference_map(X1, X2, pin)
+
+# neo-Hookean solid stress, blended into the momentum force
+sxx, sxy, syy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s=1.0, kappa=0.0, phi=phi)
+H = smoothed_heaviside(phi, 2*dx)
+Sxx = (1-H)*sxx     # (1-H) is the solid indicator
+\end{lstlisting}
+
+\subsection{Viscoelastic stress (log-conformation)}
+\begin{lstlisting}
+from pyRMT.viscoelastic import logconf_local_step, sym_exp, sym_log
+
+# psi = log(b_e); start unstressed
+p11 = np.zeros((N,N)); p12 = np.zeros((N,N)); p22 = np.zeros((N,N))
+# advect psi like the reference map, then relax + stretch locally:
+p11, p12, p22 = logconf_local_step(p11, p12, p22,
+                                   L11, L12, L21, L22, tau=0.5, dt=dt)
+be11, be12, be22 = sym_exp(p11, p12, p22)        # SPD by construction
+Sxx = (1-H) * G * be11                            # sigma = G b_e
+\end{lstlisting}
+
+\subsection{Contact and surface tension}
+\begin{lstlisting}
+from pyRMT.mac import contact_stress, interfacial_force_faces
+# trace-free contact stress between two solids (add to the stress tensor)
+txx, txy, tyy = contact_stress(phi_a, phi_b, eta=2.5, Gsum=2*mu_s,
+                               eps=3*dx, dx=dx, dy=dy)
+# balanced-force surface tension as face forces
+fu, fv = interfacial_force_faces(kappa, H, gamma=1.0, dx=dx, dy=dy)
+\end{lstlisting}
+
+\section{Building a custom simulation (MAC)}
+A minimal soft-disc-in-flow loop:
+\begin{lstlisting}
+import numpy as np
+from pyRMT.mac import (mac_grid, poisson_eigs_neumann, project, momentum_predictor)
+from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
+    rebuild_phi_from_reference_map, solid_cauchy_stress, smoothed_heaviside,
+    grad_central_x_2nd, grad_central_y_2nd)
+
+N, mu_s, nu, rho, U = 128, 1.0, 0.01, 1.0, 1.0
+dx, dy = mac_grid(N, N)
+xc = (np.arange(N)+0.5)*dx; X, Y = np.meshgrid(xc, xc)
+Xg, Yg = np.meshgrid(np.arange(N)*dx, np.arange(N)*dy)
+eig = poisson_eigs_neumann(N, N, dx, dy)
+u = np.zeros((N, N+1)); v = np.zeros((N+1, N))
+pin = lambda Xa, Ya: np.sqrt((Xa-0.5)**2+(Ya-0.5)**2) - 0.2
+phi = pin(X, Y); m = (phi <= 0).astype(float)
+X1, X2 = extrapolate_reference_map(X*m, Y*m, phi, dx, dy, 3)
+dt = min(0.3*dx/U, 0.2*dx*dx/nu, 0.3*dx/np.sqrt(mu_s/rho))
+
+for step in range(2000):
+    u_c = 0.5*(u[:, :-1]+u[:, 1:]); v_c = 0.5*(v[:-1, :]+v[1:, :])
+    phi = rebuild_phi_from_reference_map(X1, X2, pin); m = (phi <= 0).astype(float)
+    X1 = advect_reference_map(X1, u_c, v_c, Xg, Yg, dt, dx, dy, phi, 'semilagrangian', 0.)*m
+    X2 = advect_reference_map(X2, u_c, v_c, Xg, Yg, dt, dx, dy, phi, 'semilagrangian', 0.)*m
+    X1, X2 = extrapolate_reference_map(X1, X2, phi, dx, dy, 3)
+
+    sxx, sxy, syy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s, 0.0, phi)
+    H = smoothed_heaviside(phi, 2*dx)
+    Sxx, Sxy, Syy = (1-H)*sxx, (1-H)*sxy, (1-H)*syy
+    divx = grad_central_x_2nd(Sxx, dx) + grad_central_y_2nd(Sxy, dy)
+    divy = grad_central_x_2nd(Sxy, dx) + grad_central_y_2nd(Syy, dy)
+    fu = np.zeros((N, N+1)); fu[:, 1:-1] = 0.5*(divx[:, 1:]+divx[:, :-1])
+    fv = np.zeros((N+1, N)); fv[1:-1, :] = 0.5*(divy[1:, :]+divy[:-1, :])
+
+    ustar, vstar = momentum_predictor(u, v, nu, dx, dy, dt, U, fu=fu, fv=fv, rho=rho)
+    u, v, p = project(ustar, vstar, dx, dy, dt, rho, eig)
+\end{lstlisting}
+To make it viscoelastic, carry $\bm\psi=\log\bten_e$ (three cell-centred arrays),
+advect them like \texttt{X1/X2}, call \texttt{logconf\_local\_step} with the velocity
+gradient, set the stress to \texttt{(1-H)*G*be} via \texttt{sym\_exp}. For multiple
+solids, keep one $(\xiv,\phi)$ per body and add \texttt{contact\_stress} for every
+pair plus the walls. For periodic or free-slip boxes use
+\texttt{momentum\_predictor\_periodic}/\texttt{\_freeslip} with the matching
+projection.
+
+\section{Outputs}
+Benchmarks write to \texttt{outputs/<case>/}: CSV time series, PNG figures, and
+(for the demos) animated GIFs. Long animations \emph{stream} per-frame field data to
+\texttt{outputs/<case>/frames/} so they can be re-rendered cheaply
+(\texttt{... rerender N}) without re-simulating. The curated figures used in the
+documentation live under \texttt{docs/img/}.
+
+\section{Testing}
+\begin{lstlisting}[style=sh]
+pytest                 # runs tests/ (operators, projection, Poisson, stress,
+                       # contact, reinit, interpolation, viscoelastic)
+pytest tests/test_viscoelastic.py -q
+\end{lstlisting}
+The suite checks the discrete operators and exact projection, the neo-Hookean
+stress, contact, reinitialization, and the viscoelastic constitutive update against
+analytic responses.
+
+\section{Performance and memory notes}
+\begin{itemize}[nosep]
+  \item Numba JIT: first call compiles (cached). The bilinear/bicubic interpolators
+  are deliberately non-parallel to avoid a Numba parallel-codegen issue.
+  \item Direct Poisson solves are $O(N\log N)$; the projection is the cheap part.
+  \item Time step is CFL-limited by the elastic-wave speed $\sqrt{\mu_s/\rho}$ and
+  viscosity; stiff/fast solids force small $\Delta t$.
+  \item Memory: holding all frames of a high-resolution animation in RAM can exceed
+  a small machine; the showcase driver streams frames to disk to keep memory flat.
+\end{itemize}
+
+\section{Troubleshooting}
+\begin{center}
+\small
+\begin{tabular}{p{0.46\textwidth}p{0.46\textwidth}}
+\toprule
+symptom & remedy \\
+\midrule
+\texttt{ImportError: scikit-fmm} & \texttt{pip install scikit-fmm} (or avoid FMM reinit) \\
+GIF benchmark errors on save & \texttt{pip install imageio} \\
+run dies silently, no error & likely OOM on a small box --- lower $N$, stream frames \\
+solid ``folds'' (\,$\min J<0$\,) under sustained shear & enable reference-map reinit,
+or use the viscoelastic model; for contact crushing, increase $N$ \\
+near-contacting bodies stick / pinch & resolution-limited penalty contact; refine or
+soften the lid (lubrication model planned) \\
+FSI fields converge below 2nd order & expected: the diffuse interface caps the order \\
+slow first run & Numba compilation; subsequent runs use the cache \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Building this documentation}
+\begin{lstlisting}[style=sh]
+cd docs
+pdflatex user_manual.tex
+pdflatex technical_manual.tex
+\end{lstlisting}
+
+\end{document}
