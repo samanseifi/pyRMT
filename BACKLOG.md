@@ -55,6 +55,39 @@ Advect ξ with the same discrete flux as momentum (Jain Eq. 26 conservative form
 in `mac.py` as `advect_xi_conservative`; make it the default & validate). Reduces the
 numerical diffusion that seeds wrinkles → folds.
 
+## Time integration
+
+### 14. Implicit / monolithic time integration (P2→P1, large) — *potential JCP flagship*
+The solver is fully **explicit** (forward-Euler predictor); `dt` is CFL-limited by the
+elastic-wave speed `c_s=√(μ_s/ρ)`, viscosity `Δx²/ν`, and advection. Lift this.
+The one-fluid RMT is **already monolithic in space** (one velocity field, no
+partitioned added-mass instability) — only the *time* discretization is explicit.
+
+**Why it could be a flagship:** the dominant RMT papers (Kamrin–Rycroft–Nave,
+Rycroft 2020, Jain 2019) are all explicit; an *implicit monolithic* RMT appears to
+be an open gap (needs a lit check). It would unify viscoelasticity ([[1]]), contact
+([[4]]) and surface tension under one framework and enable **stiff solids** and
+**high-Weissenberg** (small τ) regimes where explicit dies. Likely JCP/JFM if novel
+AND robustness + net speedup are shown.
+
+**Staging (de-risk):**
+1. **IMEX (low risk):** implicit viscous diffusion `(I−νΔt∇²)` — diagonalized by the
+   same DCT/FFT used for pressure — + implicit/exponential relaxation `−(1/τ)(b_e−I)`
+   (local). Lifts the viscous + small-τ CFL with the existing transform solvers;
+   keep semi-Lagrangian advection (already unconditionally stable) explicit.
+2. **Fully-implicit elastic kernel (hard):** Newton/JFNK over `(u,v,p,ξ,b_e)`;
+   implicit `∇·σ(ξ)` (analytic material tangent) coupled to flux-form ξ-advection;
+   saddle-point preconditioner (reuse the projection as the pressure preconditioner).
+   Lifts the elastic-wave CFL.
+
+**Obstacles:** the saddle-point solve (preconditioner needed); and the **non-smooth
+operators** (semi-Lagrangian interp, `extrapolate_reference_map`, level-set rebuild,
+contact `min`) break a clean Newton — switch ξ-advection to the differentiable
+conservative flux form ([[6]]) and regularize the interface ops, or use JFNK.
+**Must demonstrate:** `dt` 10–100× the explicit limit AND net speedup (not just
+feasibility), else the contribution is thin. Novelty gated by a lit check
+("implicit reference map technique", "monolithic Eulerian FSI hyperelastic implicit").
+
 ## Capability gaps (reviewers will ask)
 
 ### 7. Variable-density projection ρ_s ≠ ρ_f (P2, medium)
