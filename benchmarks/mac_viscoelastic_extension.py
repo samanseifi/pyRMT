@@ -36,7 +36,7 @@ def _lam_max(b11, b12, b22):
 
 
 def run(N=128, t_end=12.0, tau=0.5, eps_rate=0.5, G=0.3, mu_f=0.05, rho=1.0,
-        R=0.13, out_root="outputs"):
+        R=0.13, frame_dt=0.15, save_frames=True, out_root="outputs"):
     dx, dy = mac_grid(N, N)
     xc = (np.arange(N) + 0.5) * dx; xf = np.arange(N) * dx
     Xc, Yc = np.meshgrid(xc, xc)
@@ -67,7 +67,11 @@ def run(N=128, t_end=12.0, tau=0.5, eps_rate=0.5, G=0.3, mu_f=0.05, rho=1.0,
     print(f"[ve-extension] N={N} eps={eps_rate} tau={tau} Wi={Wi:.3f} G={G} "
           f"-> analytic b_xx_steady={bxx_analytic:.3f}  dt={dt:.2e}")
 
-    hist = []
+    base_dir = os.path.join(out_root, "mac_ve_extension"); os.makedirs(base_dir, exist_ok=True)
+    fr_dir = os.path.join(base_dir, f"frames_{tag}")
+    if save_frames:
+        os.makedirs(fr_dir, exist_ok=True)
+    hist = []; ts_frames = []; next_frame = 0.0; fidx = 0
     t = 0.0; step = 0
     while t < t_end:
         step += 1
@@ -112,17 +116,23 @@ def run(N=128, t_end=12.0, tau=0.5, eps_rate=0.5, G=0.3, mu_f=0.05, rho=1.0,
         bxx_c = float(be11[ci, ci])
         if step % 100 == 0 or t >= t_end:
             hist.append((t, lam, bxx_c, float(np.max(np.abs(u)))))
+        if save_frames and t >= next_frame:
+            np.savez_compressed(os.path.join(fr_dir, f"f{fidx:04d}.npz"),
+                phi=phi.astype(np.float32), lam=_lam_max(be11, be12, be22).astype(np.float32),
+                X1=X1.astype(np.float32), X2=X2.astype(np.float32))
+            ts_frames.append(t); fidx += 1; next_frame += frame_dt
         if not np.all(np.isfinite(u)) or not sm.any() or lam > 1e4:
             print(f"  [stopped step {step} t={t:.3f}: lam_max={lam:.2e}]"); break
         if step % 500 == 0:
             print(f"  step {step:5d} t={t:6.3f} lam_max={lam:8.2f} b_xx(c)={bxx_c:7.3f} "
                   f"max|u|={np.max(np.abs(u)):.3f}")
 
-    out_dir = os.path.join(out_root, "mac_ve_extension"); os.makedirs(out_dir, exist_ok=True)
-    np.savez(os.path.join(out_dir, f"hist_{tag}.npz"),
+    np.savez(os.path.join(base_dir, f"hist_{tag}.npz"),
              t=np.array([h[0] for h in hist]), lam=np.array([h[1] for h in hist]),
              bxx=np.array([h[2] for h in hist]), umax=np.array([h[3] for h in hist]),
              Wi=Wi, bxx_analytic=bxx_analytic, eps=eps_rate, tau=(0.0 if tau == np.inf else tau))
+    if save_frames:
+        np.savez(os.path.join(base_dir, f"meta_{tag}.npz"), t=np.array(ts_frames), nframes=fidx)
     print(f"[ve-extension] {tag}: reached t={t:.2f}, final lam_max={hist[-1][1]:.2f}, "
           f"b_xx(c)={hist[-1][2]:.3f}")
     return t, hist
@@ -148,9 +158,53 @@ def plot(N=128, out_root="outputs"):
     print(f"saved {out}")
 
 
+def side_by_side_gif(left='elastic', right='tau0.5', right_label=None, N=96,
+                     vmax=6.0, out_root='outputs'):
+    """Two-panel GIF: same imposed extension, elastic (left) vs viscoelastic (right),
+    blob coloured by its b_e stretch with the deforming reference-map grid."""
+    import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt
+    import imageio.v2 as imageio
+    base = os.path.join(out_root, 'mac_ve_extension')
+    dx = 1.0 / N; xc = (np.arange(N) + 0.5) * dx; Xc, Yc = np.meshgrid(xc, xc)
+    glv = np.arange(0.0, 1.0001, 0.04)
+    mL = np.load(os.path.join(base, f'meta_{left}.npz'))
+    mR = np.load(os.path.join(base, f'meta_{right}.npz'))
+    tt = mL['t']; nf = min(int(mL['nframes']), int(mR['nframes']))
+    rlabel = right_label or f'viscoelastic ({right})'
+    imgs = []
+    for i in range(nf):
+        dL = np.load(os.path.join(base, f'frames_{left}/f{i:04d}.npz'))
+        dR = np.load(os.path.join(base, f'frames_{right}/f{i:04d}.npz'))
+        fig, axes = plt.subplots(1, 2, figsize=(9.2, 4.7), dpi=110)
+        for ax, d, title in ((axes[0], dL, 'elastic ($\\tau=\\infty$)'), (axes[1], dR, rlabel)):
+            phi = d['phi']; inside = phi <= 0
+            ax.set_facecolor('#000000')
+            im = ax.imshow(np.ma.masked_invalid(np.where(inside, d['lam'], np.nan)),
+                           origin='lower', extent=[0, 1, 0, 1], cmap='inferno', vmin=1.0, vmax=vmax)
+            ax.contour(Xc, Yc, phi, levels=[0.0], colors=['white'], linewidths=1.3)
+            X1m = np.where(inside, d['X1'], np.nan); X2m = np.where(inside, d['X2'], np.nan)
+            ax.contour(Xc, Yc, X1m, levels=glv, colors=['white'], linestyles='dashed', linewidths=0.4, alpha=0.55)
+            ax.contour(Xc, Yc, X2m, levels=glv, colors=['white'], linestyles='dashed', linewidths=0.4, alpha=0.55)
+            ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.set_aspect('equal')
+            ax.set_xticks([]); ax.set_yticks([]); ax.set_title(title)
+        fig.suptitle(f't = {float(tt[i]):.2f}   (colour = $b_e$ stretch, same extensional flow)')
+        fig.colorbar(im, ax=axes, fraction=0.04, pad=0.02, label=r'max eig $b_e$')
+        fig.canvas.draw()
+        w, h = fig.canvas.get_width_height()
+        imgs.append(np.frombuffer(fig.canvas.buffer_rgba(), np.uint8).reshape(h, w, 4)[..., :3].copy())
+        plt.close(fig)
+    gif = os.path.join(base, 've_extension_sidebyside.gif')
+    imageio.mimsave(gif, imgs, duration=0.08, loop=0)
+    print(f"saved {gif}  ({len(imgs)} frames)")
+    return gif
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "plot":
         plot(N=int(sys.argv[2]) if len(sys.argv) > 2 else 128)
+    elif len(sys.argv) > 1 and sys.argv[1] == "gif":
+        side_by_side_gif(N=int(sys.argv[2]) if len(sys.argv) > 2 else 96,
+                         right_label='viscoelastic ($\\tau=0.5$)')
     else:
         N = int(sys.argv[1]) if len(sys.argv) > 1 else 128
         t_end = float(sys.argv[2]) if len(sys.argv) > 2 else 12.0
