@@ -23,11 +23,12 @@ import os, sys
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pyRMT.mac import (mac_grid, momentum_predictor_periodic, project_per,
-                       poisson_eigs_periodic, divergence_per)
+from pyRMT.mac import (mac_grid, momentum_predictor_periodic,
+                       momentum_predictor_periodic_imex, lap_eigs_periodic,
+                       project_per, poisson_eigs_periodic, divergence_per)
 from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
     rebuild_phi_from_reference_map, smoothed_heaviside, grad_central_x_2nd, grad_central_y_2nd)
-from pyRMT.viscoelastic import logconf_local_step, sym_exp
+from pyRMT.viscoelastic import logconf_local_step, logconf_local_step_strang, sym_exp
 
 
 def _lam_max(b11, b12, b22):
@@ -36,7 +37,15 @@ def _lam_max(b11, b12, b22):
 
 
 def run(N=128, t_end=12.0, tau=0.5, eps_rate=0.5, G=0.3, mu_f=0.05, rho=1.0,
-        R=0.13, frame_dt=0.15, save_frames=True, out_root="outputs"):
+        R=0.13, frame_dt=0.15, save_frames=True, out_root="outputs",
+        imex=False, dt=None, write=True):
+    """Four-roll-mill extensional stretch of a viscoelastic blob.
+
+    imex=True uses the IMEX time integration (backward-Euler viscosity #14.1 +
+    Strang exact relaxation #14.2), which lifts the viscous CFL dt<0.2 dx^2/nu and
+    the dt<~tau relaxation limit; dt is then set by advection / the elastic wave.
+    Pass an explicit dt to override the automatic estimate (e.g. to compare
+    integrators at a matched step).  Returns a history dict."""
     dx, dy = mac_grid(N, N)
     xc = (np.arange(N) + 0.5) * dx; xf = np.arange(N) * dx
     Xc, Yc = np.meshgrid(xc, xc)
@@ -57,15 +66,23 @@ def run(N=128, t_end=12.0, tau=0.5, eps_rate=0.5, G=0.3, mu_f=0.05, rho=1.0,
 
     u = np.zeros((N, N)); v = np.zeros((N, N))
     eig = poisson_eigs_periodic(N, N, dx, dy)
+    lap_eig = lap_eigs_periodic(N, N, dx, dy) if imex else None
     cs = np.sqrt(G / rho)
-    dt = min(0.25 * dx / max(U0, 0.1), 0.2 * dx * dx / nu, 0.3 * dx / (cs + 1e-9))
+    dt_adv = 0.25 * dx / max(U0, 0.1)
+    dt_visc = 0.2 * dx * dx / nu
+    dt_elastic = 0.3 * dx / (cs + 1e-9)
+    if dt is None:
+        # IMEX lifts the viscous (and dt<~tau relaxation) limit -> advection/elastic only
+        dt = min(dt_adv, dt_elastic) if imex else min(dt_adv, dt_visc, dt_elastic)
     if tau <= 0:
         tau = np.inf
     Wi = eps_rate * tau
     tag = "elastic" if tau == np.inf else f"tau{tau:g}"
     bxx_analytic = np.inf if (tau == np.inf or Wi >= 0.5) else 1.0 / (1.0 - 2.0 * Wi)
     print(f"[ve-extension] N={N} eps={eps_rate} tau={tau} Wi={Wi:.3f} G={G} "
-          f"-> analytic b_xx_steady={bxx_analytic:.3f}  dt={dt:.2e}")
+          f"integrator={'IMEX' if imex else 'explicit'} "
+          f"-> analytic b_xx_steady={bxx_analytic:.3f}  dt={dt:.2e}"
+          f"{'' if imex else ' (visc-limited: %.2e)' % dt_visc}")
 
     base_dir = os.path.join(out_root, "mac_ve_extension"); os.makedirs(base_dir, exist_ok=True)
     fr_dir = os.path.join(base_dir, f"frames_{tag}")
@@ -92,7 +109,8 @@ def run(N=128, t_end=12.0, tau=0.5, eps_rate=0.5, G=0.3, mu_f=0.05, rho=1.0,
         p22, _ = extrapolate_reference_map(p22, np.zeros((N, N)), phi, dx, dy, 3)
         L11 = grad_central_x_2nd(u_c, dx); L12 = grad_central_y_2nd(u_c, dy)
         L21 = grad_central_x_2nd(v_c, dx); L22 = grad_central_y_2nd(v_c, dy)
-        p11, p12, p22 = logconf_local_step(p11, p12, p22, L11, L12, L21, L22, tau, dt)
+        local_step = logconf_local_step_strang if imex else logconf_local_step
+        p11, p12, p22 = local_step(p11, p12, p22, L11, L12, L21, L22, tau, dt)
         be11, be12, be22 = sym_exp(p11, p12, p22)
 
         H = smoothed_heaviside(phi, w_t)
@@ -102,11 +120,21 @@ def run(N=128, t_end=12.0, tau=0.5, eps_rate=0.5, G=0.3, mu_f=0.05, rho=1.0,
         f_su = 0.5 * (divx + np.roll(divx, 1, 1))        # solid force -> x-faces
         f_sv = 0.5 * (divy + np.roll(divy, 1, 0))        # solid force -> y-faces
         Hu = 0.5 * (H + np.roll(H, 1, 1)); Hv = 0.5 * (H + np.roll(H, 1, 0))
-        fu = f_su + Hu * beta * (u_mill - u)            # H=1 in fluid -> lock fluid to mill
-        fv = f_sv + Hv * beta * (v_mill - v)
 
-        ustar, vstar = momentum_predictor_periodic(u, v, nu, dx, dy, dt)
-        ustar = ustar + dt * fu / rho; vstar = vstar + dt * fv / rho
+        if imex:
+            # implicit viscosity + solid stress explicit; the stiff fluid-locking
+            # penalization (rate beta) is a local linear relaxation of u toward the
+            # mill -> integrate it EXACTLY (A-stable), so dt is not capped at 2/beta.
+            ustar, vstar = momentum_predictor_periodic_imex(u, v, nu, dx, dy, dt, lap_eig)
+            ustar = ustar + dt * f_su / rho; vstar = vstar + dt * f_sv / rho
+            epu = np.exp(-dt * beta * Hu / rho); epv = np.exp(-dt * beta * Hv / rho)
+            ustar = u_mill + (ustar - u_mill) * epu
+            vstar = v_mill + (vstar - v_mill) * epv
+        else:
+            fu = f_su + Hu * beta * (u_mill - u)        # H=1 in fluid -> lock fluid to mill
+            fv = f_sv + Hv * beta * (v_mill - v)
+            ustar, vstar = momentum_predictor_periodic(u, v, nu, dx, dy, dt)
+            ustar = ustar + dt * fu / rho; vstar = vstar + dt * fv / rho
         u, v, p = project_per(ustar, vstar, dx, dy, dt, rho, eig)
         t += dt
 
@@ -127,14 +155,19 @@ def run(N=128, t_end=12.0, tau=0.5, eps_rate=0.5, G=0.3, mu_f=0.05, rho=1.0,
             print(f"  step {step:5d} t={t:6.3f} lam_max={lam:8.2f} b_xx(c)={bxx_c:7.3f} "
                   f"max|u|={np.max(np.abs(u)):.3f}")
 
-    np.savez(os.path.join(base_dir, f"hist_{tag}.npz"),
-             t=np.array([h[0] for h in hist]), lam=np.array([h[1] for h in hist]),
-             bxx=np.array([h[2] for h in hist]), umax=np.array([h[3] for h in hist]),
-             Wi=Wi, bxx_analytic=bxx_analytic, eps=eps_rate, tau=(0.0 if tau == np.inf else tau))
+    if write:
+        np.savez(os.path.join(base_dir, f"hist_{tag}.npz"),
+                 t=np.array([h[0] for h in hist]), lam=np.array([h[1] for h in hist]),
+                 bxx=np.array([h[2] for h in hist]), umax=np.array([h[3] for h in hist]),
+                 Wi=Wi, bxx_analytic=bxx_analytic, eps=eps_rate, tau=(0.0 if tau == np.inf else tau))
     if save_frames:
         np.savez(os.path.join(base_dir, f"meta_{tag}.npz"), t=np.array(ts_frames), nframes=fidx)
-    print(f"[ve-extension] {tag}: reached t={t:.2f}, final lam_max={hist[-1][1]:.2f}, "
-          f"b_xx(c)={hist[-1][2]:.3f}")
+    if hist:
+        print(f"[ve-extension] {tag}: reached t={t:.2f}, final lam_max={hist[-1][1]:.2f}, "
+              f"b_xx(c)={hist[-1][2]:.3f}  ({'IMEX' if imex else 'explicit'}, dt={dt:.2e})")
+    else:
+        print(f"[ve-extension] {tag}: diverged before first sample at t={t:.3f} "
+              f"({'IMEX' if imex else 'explicit'}, dt={dt:.2e})")
     return t, hist
 
 
@@ -199,8 +232,40 @@ def side_by_side_gif(left='elastic', right='tau0.5', right_label=None, N=96,
     return gif
 
 
+def compare_integrators(N=40, tau=0.5, t_end=1.0, eps_rate=0.5, G=0.3, mu_f=0.05):
+    """Reproducibility table for #14.3: explicit vs IMEX at matched dt (regression),
+    and IMEX at dt above the explicit viscous CFL (capability)."""
+    dx = 1.0 / N; nu = mu_f
+    dt_visc = 0.2 * dx * dx / nu
+    dt_elastic = 0.3 * dx / (np.sqrt(G) + 1e-9)
+    cfg = dict(N=N, tau=tau, t_end=t_end, eps_rate=eps_rate, G=G, mu_f=mu_f,
+               save_frames=False, write=False)
+    print(f"\n[compare] N={N} tau={tau}  dt_visc={dt_visc:.3e}  dt_elastic={dt_elastic:.3e} "
+          f"(elastic/visc = {dt_elastic/dt_visc:.1f}x)")
+    _, hr = run(imex=False, dt=dt_visc, **cfg)
+    br = hr[-1][2] if hr else float("nan")
+    _, hs = run(imex=True, dt=dt_visc, **cfg)
+    bs = hs[-1][2] if hs else float("nan")
+    print(f"  regression : explicit b_xx={br:.4f}  IMEX(same dt) b_xx={bs:.4f}  "
+          f"rel diff={abs(bs-br)/br:.2e}")
+    for fac in (2, 3, 4):
+        dt = fac * dt_visc
+        with np.errstate(over="ignore", invalid="ignore"):
+            _, he = run(imex=False, dt=dt, **cfg)
+        _, hi = run(imex=True, dt=dt, **cfg)
+        e_end = bool(he) and he[-1][0] >= t_end - 1e-9
+        i_end = bool(hi) and hi[-1][0] >= t_end - 1e-9
+        bi = hi[-1][2] if hi else float("nan")
+        print(f"  dt={fac}x visc : explicit reached_end={e_end!s:5}  "
+              f"IMEX reached_end={i_end!s:5} b_xx={bi:.4f} rel={abs(bi-br)/br:.2e}")
+    print("  (IMEX lifts the viscous CFL; residual ceiling is the elastic-wave dt "
+          "-> targeted by the fully-implicit elastic kernel, #14.4)")
+
+
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "plot":
+    if len(sys.argv) > 1 and sys.argv[1] == "compare":
+        compare_integrators(N=int(sys.argv[2]) if len(sys.argv) > 2 else 40)
+    elif len(sys.argv) > 1 and sys.argv[1] == "plot":
         plot(N=int(sys.argv[2]) if len(sys.argv) > 2 else 128)
     elif len(sys.argv) > 1 and sys.argv[1] == "gif":
         side_by_side_gif(N=int(sys.argv[2]) if len(sys.argv) > 2 else 96,
