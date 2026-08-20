@@ -24,7 +24,8 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pyRMT.mac import (mac_grid, momentum_predictor_periodic,
-                       momentum_predictor_periodic_imex, lap_eigs_periodic,
+                       momentum_predictor_periodic_imex,
+                       momentum_predictor_periodic_imex_elastic, lap_eigs_periodic,
                        project_per, poisson_eigs_periodic, divergence_per)
 from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
     rebuild_phi_from_reference_map, smoothed_heaviside, grad_central_x_2nd, grad_central_y_2nd)
@@ -38,7 +39,7 @@ def _lam_max(b11, b12, b22):
 
 def run(N=128, t_end=12.0, tau=0.5, eps_rate=0.5, G=0.3, mu_f=0.05, rho=1.0,
         R=0.13, frame_dt=0.15, save_frames=True, out_root="outputs",
-        imex=False, dt=None, write=True):
+        imex=False, elastic_imex=False, dt=None, write=True):
     """Four-roll-mill extensional stretch of a viscoelastic blob.
 
     imex=True uses the IMEX time integration (backward-Euler viscosity #14.1 +
@@ -64,6 +65,7 @@ def run(N=128, t_end=12.0, tau=0.5, eps_rate=0.5, G=0.3, mu_f=0.05, rho=1.0,
     X1, X2 = extrapolate_reference_map(Xc * m, Yc * m, phi, dx, dy, 3)
     p11 = np.zeros((N, N)); p12 = np.zeros((N, N)); p22 = np.zeros((N, N))   # psi = log b_e = 0
 
+    imex = imex or elastic_imex          # elastic-IMEX implies the viscous/relaxation IMEX
     u = np.zeros((N, N)); v = np.zeros((N, N))
     eig = poisson_eigs_periodic(N, N, dx, dy)
     lap_eig = lap_eigs_periodic(N, N, dx, dy) if imex else None
@@ -72,8 +74,12 @@ def run(N=128, t_end=12.0, tau=0.5, eps_rate=0.5, G=0.3, mu_f=0.05, rho=1.0,
     dt_visc = 0.2 * dx * dx / nu
     dt_elastic = 0.3 * dx / (cs + 1e-9)
     if dt is None:
-        # IMEX lifts the viscous (and dt<~tau relaxation) limit -> advection/elastic only
-        dt = min(dt_adv, dt_elastic) if imex else min(dt_adv, dt_visc, dt_elastic)
+        if elastic_imex:                 # viscous + relaxation + elastic-wave all lifted
+            dt = dt_adv
+        elif imex:                       # viscous + relaxation lifted; elastic wave remains
+            dt = min(dt_adv, dt_elastic)
+        else:
+            dt = min(dt_adv, dt_visc, dt_elastic)
     if tau <= 0:
         tau = np.inf
     Wi = eps_rate * tau
@@ -121,7 +127,16 @@ def run(N=128, t_end=12.0, tau=0.5, eps_rate=0.5, G=0.3, mu_f=0.05, rho=1.0,
         f_sv = 0.5 * (divy + np.roll(divy, 1, 0))        # solid force -> y-faces
         Hu = 0.5 * (H + np.roll(H, 1, 1)); Hv = 0.5 * (H + np.roll(H, 1, 0))
 
-        if imex:
+        if elastic_imex:
+            # additionally lift the elastic-wave CFL: the solid stress enters the
+            # implicit solve as a linearly-implicit wave stabilizer (force INSIDE the
+            # RHS -- required for stability). chi = 1-H is the solid indicator.
+            ustar, vstar = momentum_predictor_periodic_imex_elastic(
+                u, v, nu, dx, dy, dt, lap_eig, G / rho, 1.0 - H, f_su, f_sv, rho)
+            epu = np.exp(-dt * beta * Hu / rho); epv = np.exp(-dt * beta * Hv / rho)
+            ustar = u_mill + (ustar - u_mill) * epu
+            vstar = v_mill + (vstar - v_mill) * epv
+        elif imex:
             # implicit viscosity + solid stress explicit; the stiff fluid-locking
             # penalization (rate beta) is a local linear relaxation of u toward the
             # mill -> integrate it EXACTLY (A-stable), so dt is not capped at 2/beta.
