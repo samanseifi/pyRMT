@@ -13,11 +13,12 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pyRMT.mac import (mac_grid, momentum_predictor, project,
-                       poisson_eigs_neumann, divergence)
+from pyRMT.mac import (mac_grid, momentum_predictor, momentum_predictor_lid_imex,
+                       project, poisson_eigs_neumann, divergence)
 
 
-def run(Re=100.0, N=128, max_steps=120000, steady_tol=2e-6, out_root="outputs"):
+def run(Re=100.0, N=128, max_steps=120000, steady_tol=2e-6, out_root="outputs",
+        imex=False, dt_fac=1.0):
     Lx = Ly = 1.0
     U_lid = 1.0
     dx, dy = mac_grid(N, N, Lx, Ly)
@@ -28,14 +29,20 @@ def run(Re=100.0, N=128, max_steps=120000, steady_tol=2e-6, out_root="outputs"):
     v = np.zeros((N + 1, N))      # y-faces
     eig = poisson_eigs_neumann(N, N, dx, dy)
 
-    # explicit stability: advection (CFL) + diffusion
-    dt = min(0.35 * dx / U_lid, 0.20 * dx * dx / nu)
-    print(f"[MAC lid] Re={Re:.0f} N={N} nu={nu:.3e} dt={dt:.2e}")
+    # explicit stability: advection (CFL) + diffusion. IMEX lifts the diffusion limit.
+    dt_adv = 0.35 * dx / U_lid
+    dt_visc = 0.20 * dx * dx / nu
+    dt = (dt_adv if imex else min(dt_adv, dt_visc)) * dt_fac
+    print(f"[MAC lid] Re={Re:.0f} N={N} nu={nu:.3e} dt={dt:.2e} "
+          f"integrator={'IMEX' if imex else 'explicit'}")
 
     t = 0.0
     for step in range(1, max_steps + 1):
         u_prev = u
-        ustar, vstar = momentum_predictor(u, v, nu, dx, dy, dt, U_lid)
+        if imex:
+            ustar, vstar = momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid)
+        else:
+            ustar, vstar = momentum_predictor(u, v, nu, dx, dy, dt, U_lid)
         u, v, p = project(ustar, vstar, dx, dy, dt, rho, eig)
         t += dt
         if step % 500 == 0 or step == 1:

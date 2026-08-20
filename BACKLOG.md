@@ -141,8 +141,18 @@ here `ψ=log b_e` carries stress, decoupled from a geometry-only ξ).
     within **~2%** of the reference. Tests: `tests/test_ve_imex_fsi.py`. Full suite green.
   - **Residual ceiling:** the elastic-wave dt (`0.3 dx/cs`, ≈5.5× the viscous CFL here) —
     the still-explicit `∇·σ_el` blows up beyond it. That is exactly what **#14.4** targets.
-  - **Follow-on (planned):** soft-disc-in-lid-driven regression — needs the wall/DCT-Neumann
-    Helmholtz variant of #14.1 (the lid driver is not periodic).
+  - **Follow-on ✅ DONE:** wall-bounded implicit viscosity + soft-disc-in-lid regression
+    (`feat/imex-wall-helmholtz`). The lid velocity BCs are Dirichlet (no-slip + moving lid),
+    which the DCT (Neumann) pressure transform does not diagonalize, so the viscous
+    Helmholtz is solved **matrix-free by CG** reusing the exact ghost-cell viscous stencil
+    (`momentum_predictor_lid_imex`, `_lap_u_lid_hom`/`_lap_v_lid_hom`, `_cg_helmholtz` in
+    `mac.py`); the lid enters as an RHS inhomogeneity. This is SPD and generalizes to
+    variable (one-fluid) viscosity — and is the Helmholtz/Stokes solve #14.4 will reuse.
+  - **Verified:** lid cavity IMEX reproduces the Ghia steady state (RMS 1.68e-2 vs explicit
+    1.71e-2 at N=48) and stays correct at 5× the explicit viscous CFL; soft-disc-in-lid
+    IMEX reproduces the explicit (Sugiyama-validated) centroid trajectory to **2e-3**
+    (identical minJ). Tests: `tests/test_imex_wall.py`; `mac_lid_driven.py`/`mac_soft_disc_lid.py`
+    gain `imex=True`. Full suite green.
 - **#14.4 — Fully-implicit elastic kernel.** (`feat/implicit-elastic-kernel`)
   Newton/JFNK over `(u,p,ξ,ψ)`; implicit `∇·σ_el(ξ,ψ)`; conservative (differentiable)
   ξ/ψ advection ([[6]]); projection as pressure preconditioner; frozen-interface

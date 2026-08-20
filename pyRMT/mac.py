@@ -16,6 +16,7 @@ Rhie-Chow needed).
 
 import numpy as np
 from scipy.fft import dctn, idctn
+from scipy.sparse.linalg import cg, LinearOperator
 
 
 def mac_grid(Nx, Ny, Lx=1.0, Ly=1.0):
@@ -173,6 +174,85 @@ def momentum_predictor(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None, rho=1.0):
     vstar = v.copy()
     vstar[1:-1, :] = vc + dt * rhs_v
     vstar[0, :] = 0.0; vstar[-1, :] = 0.0
+    return ustar, vstar
+
+
+# ── IMEX wall/lid implicit viscosity (matrix-free CG Helmholtz) — backlog #14.1 ──
+# The lid-cavity velocity BCs are Dirichlet (no-slip walls + moving lid), so the
+# viscous Helmholtz operator (I - dt*nu*Laplacian) does not diagonalise under the
+# DCT used for the (Neumann) pressure. Instead we solve it matrix-free with CG,
+# reusing the SAME ghost-cell viscous stencil as the explicit predictor -- this
+# guarantees the implicit solve is consistent with the validated explicit operator
+# and generalises to variable (one-fluid) viscosity. SPD -> CG converges quickly.
+
+def _lap_u_lid_hom(u, dx, dy):
+    """Homogeneous-BC Laplacian of u (Ny,Nx+1) on the interior faces (Ny,Nx-1):
+    no-slip walls u=0 at i=0,Nx and reflect ghosts (U_lid=0) top & bottom."""
+    Ny, Nxp1 = u.shape
+    up = np.empty((Ny + 2, Nxp1)); up[1:-1] = u; up[0] = -u[0]; up[-1] = -u[-1]
+    uc = u[:, 1:-1]
+    return ((u[:, 2:] - 2 * uc + u[:, :-2]) / dx**2
+            + (up[2:, 1:-1] - 2 * up[1:-1, 1:-1] + up[:-2, 1:-1]) / dy**2)
+
+
+def _lap_v_lid_hom(v, dx, dy):
+    """Homogeneous-BC Laplacian of v (Ny+1,Nx) on the interior faces (Ny-1,Nx):
+    no-slip v=0 at j=0,Ny and reflect ghosts left & right."""
+    Nyp1, Nx = v.shape
+    vp = np.empty((Nyp1, Nx + 2)); vp[:, 1:-1] = v; vp[:, 0] = -v[:, 0]; vp[:, -1] = -v[:, -1]
+    vc = v[1:-1, :]
+    return ((vp[1:-1, 2:] - 2 * vp[1:-1, 1:-1] + vp[1:-1, :-2]) / dx**2
+            + (v[2:, :] - 2 * vc + v[:-2, :]) / dy**2)
+
+
+def _cg_helmholtz(rhs_int, apply_lap_hom, embed, coef, rtol=1e-10, maxiter=500):
+    """Solve (I - coef*Lap_hom) x = rhs_int on interior DOFs by CG. apply_lap_hom
+    takes the full (BC-embedded) field and returns the interior Laplacian; embed
+    places an interior vector into a full zero-padded field."""
+    shp = rhs_int.shape
+
+    def matvec(xflat):
+        x = xflat.reshape(shp)
+        return (x - coef * apply_lap_hom(embed(x))).ravel()
+
+    A = LinearOperator((rhs_int.size, rhs_int.size), matvec=matvec)
+    sol, info = cg(A, rhs_int.ravel(), x0=rhs_int.ravel(), rtol=rtol, atol=0.0, maxiter=maxiter)
+    return sol.reshape(shp)
+
+
+def momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None,
+                                rho=1.0, rtol=1e-10):
+    """IMEX predictor for the lid-driven cavity: explicit central advection + face
+    forces, implicit (backward-Euler) viscous diffusion solved by CG. Same advection
+    and BCs as momentum_predictor, but the viscous CFL dt < dx^2/(4 nu) is removed.
+    Returns u*, v* with wall (normal) faces zeroed."""
+    Ny, Nxp1 = u.shape; Nx = Nxp1 - 1
+    up = _u_ghost_y(u, U_lid); vp = _v_ghost_x(v)
+
+    # --- u: explicit advection + force -> rhs; implicit diffusion via CG ---
+    uc = u[:, 1:-1]
+    dudx = (u[:, 2:] - u[:, :-2]) / (2 * dx)
+    dudy = (up[2:, 1:-1] - up[:-2, 1:-1]) / (2 * dy)
+    v_u = _v_at_u(v)
+    rhs_u = uc + dt * (-(uc * dudx + v_u * dudy))
+    if fu is not None:
+        rhs_u = rhs_u + dt * fu[:, 1:-1] / rho
+    rhs_u[-1, :] += dt * nu * (2.0 * U_lid / dy**2)      # lid inhomogeneity -> RHS
+    embed_u = lambda x: np.pad(x, ((0, 0), (1, 1)))       # walls (i=0,Nx) = 0
+    sol_u = _cg_helmholtz(rhs_u, lambda w: _lap_u_lid_hom(w, dx, dy), embed_u, dt * nu, rtol)
+    ustar = u.copy(); ustar[:, 1:-1] = sol_u; ustar[:, 0] = 0.0; ustar[:, -1] = 0.0
+
+    # --- v: explicit advection + force -> rhs; implicit diffusion via CG ---
+    vc = v[1:-1, :]
+    dvdy = (v[2:, :] - v[:-2, :]) / (2 * dy)
+    dvdx = (vp[1:-1, 2:] - vp[1:-1, :-2]) / (2 * dx)
+    u_v = _u_at_v(u)
+    rhs_v = vc + dt * (-(u_v * dvdx + vc * dvdy))
+    if fv is not None:
+        rhs_v = rhs_v + dt * fv[1:-1, :] / rho
+    embed_v = lambda x: np.pad(x, ((1, 1), (0, 0)))       # walls (j=0,Ny) = 0
+    sol_v = _cg_helmholtz(rhs_v, lambda w: _lap_v_lid_hom(w, dx, dy), embed_v, dt * nu, rtol)
+    vstar = v.copy(); vstar[1:-1, :] = sol_v; vstar[0, :] = 0.0; vstar[-1, :] = 0.0
     return ustar, vstar
 
 
