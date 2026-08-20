@@ -169,6 +169,48 @@ def test_taylor_green_second_order_convergence():
     assert d64 < 1e-12, "periodic projection not divergence-free"
 
 
+def test_helmholtz_periodic_roundtrip():
+    """(I - c*L) applied to the FFT Helmholtz solve recovers the rhs to machine
+    precision -- the operator that makes implicit viscosity exact (#14.1)."""
+    from pyRMT.mac import lap_eigs_periodic, solve_helmholtz_periodic
+    N = 32; dx = 2 * np.pi / N
+    rng = np.random.default_rng(1)
+    rhs = rng.standard_normal((N, N))
+    lap_eig = lap_eigs_periodic(N, N, dx, dx)
+    c = 0.7
+    x = solve_helmholtz_periodic(rhs, lap_eig, c)
+    # apply (I - c*L) with the same roll stencil the eigenvalues diagonalise
+    lapx = ((np.roll(x, -1, 1) - 2 * x + np.roll(x, 1, 1)) / dx**2
+            + (np.roll(x, -1, 0) - 2 * x + np.roll(x, 1, 0)) / dx**2)
+    assert np.max(np.abs((x - c * lapx) - rhs)) < 1e-10
+
+
+def test_imex_viscous_stable_beyond_explicit_cfl():
+    """IMEX (implicit viscosity, #14.1) integrates Taylor-Green accurately at a dt
+    far above the explicit parabolic limit dt<dx^2/(4 nu), where the explicit
+    predictor diverges -- and the projection stays divergence-free."""
+    from benchmarks.mac_taylor_green_convergence import run_one
+    N, nu = 64, 0.2
+    dx = 2 * np.pi / N
+    dt = 6.0 * dx**2 / (4 * nu)                 # 6x the explicit viscous CFL
+    with np.errstate(over="ignore", invalid="ignore"):   # explicit run overflows on purpose
+        e_exp, _ = run_one(N, nu=nu, T=2.0, dt=dt, implicit_visc=False)
+    e_imp, d_imp = run_one(N, nu=nu, T=2.0, dt=dt, implicit_visc=True)
+    assert (not np.isfinite(e_exp)) or e_exp > 1e2, "explicit should be unstable here"
+    assert e_imp < 5e-3, f"implicit err {e_imp:.2e} too large"
+    assert d_imp < 1e-12, "IMEX projection not divergence-free"
+
+
+def test_imex_second_order_convergence():
+    """The IMEX predictor keeps the MAC 2nd-order spatial accuracy at small dt
+    (implicit viscosity does not degrade the spatial order)."""
+    from benchmarks.mac_taylor_green_convergence import run_one
+    e32, _ = run_one(32, nu=0.05, T=0.1, dt=2e-4, implicit_visc=True)
+    e64, _ = run_one(64, nu=0.05, T=0.1, dt=2e-4, implicit_visc=True)
+    order = np.log(e32 / e64) / np.log(2)
+    assert order > 1.8, f"IMEX spatial order {order:.2f} < 1.8"
+
+
 def test_contact_stress_trace_free_and_localized():
     """Rycroft contact stress is trace-free and nonzero only where two solids'
     blur zones overlap."""

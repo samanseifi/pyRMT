@@ -224,6 +224,56 @@ def _u_at_v_per(u):
                    + np.roll(np.roll(u, 1, 0), -1, 1))
 
 
+# ── IMEX: implicit (backward-Euler) viscous diffusion — backlog #14.1 ─────────
+# The explicit predictors are limited by the parabolic stability bound dt < dx^2/(4 nu).
+# Treating the viscous term implicitly removes it: the Helmholtz operator
+# (I - dt*nu*Laplacian) diagonalises under the SAME FFT used for the pressure Poisson
+# solve, so one extra transform-solve per component per step buys an unconditionally-
+# stable diffusion. Advection stays explicit (this is the de-risking IMEX step; the
+# semi-Lagrangian FSI advection is already unconditionally stable).
+
+def lap_eigs_periodic(Nx, Ny, dx, dy):
+    """Eigenvalues of the periodic discrete Laplacian (the np.roll 3-point stencil),
+    diagonalised by the FFT.  lambda_k = -4 sin^2(pi k/N)/h^2 <= 0.  NOT pinned: the
+    k=0 mode is the true eigenvalue 0, and the Helmholtz symbol (1 - coef*lambda) = 1
+    there, so it is invertible without a pin (unlike the pure-Poisson solve)."""
+    kx = np.arange(Nx); ky = np.arange(Ny)
+    lx = -4.0 * np.sin(np.pi * kx / Nx) ** 2 / dx**2
+    ly = -4.0 * np.sin(np.pi * ky / Ny) ** 2 / dy**2
+    return lx[np.newaxis, :] + ly[:, np.newaxis]
+
+
+def solve_helmholtz_periodic(rhs, lap_eig, coef):
+    """Solve (I - coef*Laplacian) x = rhs on the periodic grid via FFT.
+    coef = dt*nu >= 0, so the symbol (1 - coef*lap_eig) >= 1 -> unconditionally
+    invertible and unconditionally stable (backward Euler on the diffusion term)."""
+    rhat = np.fft.fft2(rhs)
+    xhat = rhat / (1.0 - coef * lap_eig)
+    return np.real(np.fft.ifft2(xhat))
+
+
+def momentum_predictor_periodic_imex(u, v, nu, dx, dy, dt, lap_eig):
+    """IMEX predictor on the periodic staggered grid: explicit central advection,
+    implicit (backward-Euler) viscous diffusion.  Solves
+
+        (I - dt*nu*Laplacian) u* = u - dt*(u.grad)u
+
+    per velocity component, removing the viscous CFL (dt < dx^2/4nu).  dt is then
+    limited only by advection.  `lap_eig` from lap_eigs_periodic(Nx,Ny,dx,dy)."""
+    # explicit advection (same central stencil as the explicit predictor)
+    dudx = (np.roll(u, -1, 1) - np.roll(u, 1, 1)) / (2 * dx)
+    dudy = (np.roll(u, -1, 0) - np.roll(u, 1, 0)) / (2 * dy)
+    adv_u = u * dudx + _v_at_u_per(v) * dudy
+
+    dvdx = (np.roll(v, -1, 1) - np.roll(v, 1, 1)) / (2 * dx)
+    dvdy = (np.roll(v, -1, 0) - np.roll(v, 1, 0)) / (2 * dy)
+    adv_v = _u_at_v_per(u) * dvdx + v * dvdy
+
+    ustar = solve_helmholtz_periodic(u - dt * adv_u, lap_eig, dt * nu)
+    vstar = solve_helmholtz_periodic(v - dt * adv_v, lap_eig, dt * nu)
+    return ustar, vstar
+
+
 def momentum_predictor_periodic(u, v, nu, dx, dy, dt):
     """Forward-Euler predictor (central advection + diffusion) on the periodic
     staggered grid. Returns u*, v*."""
