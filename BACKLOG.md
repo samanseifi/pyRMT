@@ -8,7 +8,7 @@ add / reviewer-proofing, **P3** = nice-to-have. Effort is rough.
 
 ## Method / constitutive (paper headline)
 
-### 1. Viscoelastic relaxation (P1, large) — *headline contribution*
+### 1. Viscoelastic relaxation (P1, large) — *headline contribution* ✅ CLOSED (viscoelastic-extension, merged)
 Carry an elastic Finger tensor `b_e` evolved by upper-convected Maxwell with
 relaxation time τ:
 `∂b_e/∂t + (u·∇)b_e − L·b_e − b_e·Lᵀ = −(1/τ)(b_e − I)`, `σ = G∞·dev(FFᵀ) + G_v·dev(b_e)`.
@@ -19,10 +19,17 @@ relaxation time τ:
 - Standard-linear-solid form (keep `G∞` elastic branch) = stays a solid; drop it = Maxwell fluid.
 - Needs **log-conformation** (Fattal–Kupferman) advection to keep `b_e` SPD.
 - See [[mac-reinit-scope]]: this is the fix reinit can't be.
+- **Done:** `pyRMT/viscoelastic.py` (UCM + SLS, log-conformation `ψ=log b_e`, closed-form 2×2
+  eigen-update, SPD by construction); extensional money figures (`mac_viscoelastic_extension.py`,
+  `mac_viscoelastic_uniform.py`); τ→∞ elastic limit verified.
+- **Remaining follow-up (new item #15):** promote the hand-rolled benchmark loop into a
+  first-class solver routine in `mac.py` with a full-solver integration test.
 
-### 2. Stress-relaxation / creep verification (P1, small)
+### 2. Stress-relaxation / creep verification (P1, small) ✅ CLOSED
 Step-strain and step-stress tests vs the analytical Maxwell/SLS response; verifies τ
 quantitatively. First, self-contained de-risking step for #1.
+- **Done:** `tests/test_viscoelastic.py` — step-strain relaxation `σ_xy=Gγe^{-t/τ}`, steady-shear
+  viscometric (`N1=2Gτ²γ̇²`), τ→∞ elastic limit, SPD-under-extreme-shear (log-conformation).
 
 ### 3. Elastoplastic (von Mises yield) variant (P3, medium)
 Multiplicative split with a yield criterion (Kamrin connection). Bonus capability;
@@ -87,6 +94,38 @@ conservative flux form ([[6]]) and regularize the interface ops, or use JFNK.
 **Must demonstrate:** `dt` 10–100× the explicit limit AND net speedup (not just
 feasibility), else the contribution is thin. Novelty gated by a lit check
 ("implicit reference map technique", "monolithic Eulerian FSI hyperelastic implicit").
+Distinct from the GPR / Peshkov–Romenski–Dumbser unified hyperbolic model (that is
+**compressible**; the incompressible implicit RMT is the open gap) and from the
+adaptive-reference-map relaxation of Kamrin–Rycroft (that relaxes the *geometry* map;
+here `ψ=log b_e` carries stress, decoupled from a geometry-only ξ).
+
+**Tracked sub-issues (branches `feat/imex-*`, `feat/implicit-elastic-kernel`):**
+
+- **#14.1 — Implicit viscosity (Helmholtz-DCT/FFT). ⏳ IN PROGRESS** (`feat/imex-implicit-viscosity`)
+  Backward-Euler viscous term: `(I − Δt·ν∇²)u* = u − Δt(u·∇)u`, advection explicit.
+  The Helmholtz operator diagonalizes under the SAME FFT/DCT as the pressure Poisson
+  solve → one extra transform-solve per component per step; removes `dt<dx²/4ν`.
+  Validate on periodic Taylor–Green (analytic decay). Start here — lowest risk, proves
+  the "reuse the transform solver" pattern the whole implicit program leans on.
+- **#14.2 — Exact/exponential relaxation.** (`feat/imex-exact-relaxation`)
+  Strang-split the log-conformation update; integrate the relaxation half-steps
+  analytically `b_e ← I + (b_e−I)e^{−Δt/2τ}` (A-stable ∀τ) → removes the small-τ /
+  high-Weissenberg stiffness. Validate vs the existing step-strain / steady-shear tests
+  at `Δt≫τ`; SPD preserved.
+- **#14.3 — IMEX combined (= #14.1 + #14.2).** (`feat/imex-combined`)
+  Wire both into the full FSI loop; measure lifted `Δt` and net speedup. Publishable
+  IMEX viscoelastic RMT (Computers & Fluids scale) on its own.
+- **#14.4 — Fully-implicit elastic kernel.** (`feat/implicit-elastic-kernel`)
+  Newton/JFNK over `(u,p,ξ,ψ)`; implicit `∇·σ_el(ξ,ψ)`; conservative (differentiable)
+  ξ/ψ advection ([[6]]); projection as pressure preconditioner; frozen-interface
+  linearization for the non-smooth geometry ops. Lifts the elastic-wave CFL → JCP-class
+  *if* the 10–100× + net-speedup bar is cleared.
+
+### 15. Promote viscoelastic loop to a first-class solver routine (P1, small) — *follow-up to #1*
+The log-conformation FSI loop is currently hand-rolled inside
+`benchmarks/mac_viscoelastic_extension.py`. Lift the advect→extrapolate→relax→stress
+sequence into a reusable routine in `mac.py` (or a `driver.py`) with a full-solver
+integration test, so the headline is an API a reviewer can rerun, not a demo script.
 
 ## Capability gaps (reviewers will ask)
 
