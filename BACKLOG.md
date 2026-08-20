@@ -128,9 +128,21 @@ here `ψ=log b_e` carries stress, decoupled from a geometry-only ξ).
     `tests/test_viscoelastic.py`; full suite green (no regression to TG/MAC/FSI).
   - Note: log-conformation keeps `b_e=exp(ψ)` SPD for both steppers, so the explicit
     failure mode is ψ accuracy/divergence, not loss of positive-definiteness.
-- **#14.3 — IMEX combined (= #14.1 + #14.2).** (`feat/imex-combined`)
-  Wire both into the full FSI loop; measure lifted `Δt` and net speedup. Publishable
-  IMEX viscoelastic RMT (Computers & Fluids scale) on its own.
+- **#14.3 — IMEX combined (= #14.1 + #14.2). ✅ DONE** (`feat/imex-combined`)
+  Wire both into the full FSI loop; measure lifted `Δt` and net speedup.
+  - **Done:** `benchmarks/mac_viscoelastic_extension.py run(..., imex=True)` swaps in the
+    IMEX viscous predictor + Strang relaxation; the stiff fluid-locking penalization
+    (rate β) is also made exact (local exponential relaxation), so *every* stiff term
+    (viscous, relaxation, penalization) is implicit/exact and only advection + the
+    elastic wave stay explicit. `compare_integrators()` prints the reproducibility table.
+  - **Verified** (four-roll extensional blob, a Taylor-Green-family flow): at matched
+    dt the IMEX driver reproduces explicit `b_xx(centre)` to **0.55%**; at 2–4× the
+    explicit viscous CFL the explicit driver **diverges** while IMEX completes and stays
+    within **~2%** of the reference. Tests: `tests/test_ve_imex_fsi.py`. Full suite green.
+  - **Residual ceiling:** the elastic-wave dt (`0.3 dx/cs`, ≈5.5× the viscous CFL here) —
+    the still-explicit `∇·σ_el` blows up beyond it. That is exactly what **#14.4** targets.
+  - **Follow-on (planned):** soft-disc-in-lid-driven regression — needs the wall/DCT-Neumann
+    Helmholtz variant of #14.1 (the lid driver is not periodic).
 - **#14.4 — Fully-implicit elastic kernel.** (`feat/implicit-elastic-kernel`)
   Newton/JFNK over `(u,p,ξ,ψ)`; implicit `∇·σ_el(ξ,ψ)`; conservative (differentiable)
   ξ/ψ advection ([[6]]); projection as pressure preconditioner; frozen-interface
