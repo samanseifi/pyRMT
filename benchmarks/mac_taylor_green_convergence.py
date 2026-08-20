@@ -14,7 +14,8 @@ import os, sys
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pyRMT.mac import (momentum_predictor_periodic, project_per,
+from pyRMT.mac import (momentum_predictor_periodic, momentum_predictor_periodic_imex,
+                       lap_eigs_periodic, project_per,
                        poisson_eigs_periodic, divergence_per)
 
 L = 2 * np.pi
@@ -35,14 +36,21 @@ def tg_exact(Xu, Yu, Xv, Yv, nu, t):
     return (-np.cos(Xu) * np.sin(Yu) * e, np.sin(Xv) * np.cos(Yv) * e)
 
 
-def run_one(N, nu=0.05, T=0.2, dt=2e-4):
+def run_one(N, nu=0.05, T=0.2, dt=2e-4, implicit_visc=False):
+    """Integrate Taylor-Green to T and return (L2 error in u vs exact, max|div|).
+    implicit_visc=True uses the IMEX predictor (backward-Euler viscosity, #14.1),
+    which is stable for dt above the explicit parabolic limit dx^2/(4 nu)."""
     dx = L / N
     _, Xu, Yu, Xv, Yv = _faces(N)
     u, v = tg_exact(Xu, Yu, Xv, Yv, nu, 0.0)
     eig = poisson_eigs_periodic(N, N, dx, dx)
+    lap_eig = lap_eigs_periodic(N, N, dx, dx) if implicit_visc else None
     nsteps = int(round(T / dt))
     for _ in range(nsteps):
-        us, vs = momentum_predictor_periodic(u, v, nu, dx, dx, dt)
+        if implicit_visc:
+            us, vs = momentum_predictor_periodic_imex(u, v, nu, dx, dx, dt, lap_eig)
+        else:
+            us, vs = momentum_predictor_periodic(u, v, nu, dx, dx, dt)
         u, v, _ = project_per(us, vs, dx, dx, dt, 1.0, eig)
     ue, ve = tg_exact(Xu, Yu, Xv, Yv, nu, nsteps * dt)
     erru = np.sqrt(np.mean((u - ue) ** 2))
