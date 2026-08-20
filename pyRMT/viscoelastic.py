@@ -125,6 +125,45 @@ def logconf_local_step(p11, p12, p22, L11, L12, L21, L22, tau, dt):
             p22 + 0.5*dt*(k1[2]+k2[2]))
 
 
+# ── exact/exponential relaxation (Strang split) — backlog #14.2 ───────────────
+# The explicit steps above are limited by dt <~ tau: the stiff relaxation term
+# -(1/tau)(b_e - I) forces small dt at high Weissenberg (small tau). Integrating the
+# relaxation sub-step ANALYTICALLY removes that limit -- it is A-stable for any tau.
+
+def relax_exact(p11, p12, p22, tau, dt):
+    """Exact integration of the pure-relaxation sub-step of psi = log(b_e).
+
+    The Finger tensor relaxes toward the identity,  d b_e/dt = -(1/tau)(b_e - I),
+    whose closed-form solution is  b_e <- I + (b_e - I) exp(-dt/tau).  Returned in
+    log form.  Unconditionally stable and SPD-preserving: the update is the convex
+    blend (1-e) I + e b_e of two SPD tensors (0 < e = exp(-dt/tau) <= 1)."""
+    if tau == np.inf or dt == 0.0:
+        return p11, p12, p22
+    b11, b12, b22 = sym_exp(p11, p12, p22)
+    e = np.exp(-dt / tau)
+    b11 = 1.0 + (b11 - 1.0) * e
+    b12 = b12 * e
+    b22 = 1.0 + (b22 - 1.0) * e
+    return sym_log(b11, b12, b22)
+
+
+def logconf_local_step_strang(p11, p12, p22, L11, L12, L21, L22, tau, dt):
+    """Advance psi = log(b_e) one homogeneous step with Strang splitting:
+
+        relax(dt/2)  ->  stretch(dt)  ->  relax(dt/2)
+
+    where the relaxation half-steps are integrated EXACTLY (relax_exact) and the
+    stretch full-step reuses the explicit RK2 step with tau=inf (the pure upper-
+    convected stretch, which is not stiff -- it is bounded by the velocity-gradient
+    CFL like advection).  2nd-order in dt and UNCONDITIONALLY stable in tau, unlike
+    logconf_local_step.  For tau=inf it is byte-for-byte the explicit stretch step,
+    so it reduces exactly to the pure-elastic (neo-Hookean-limit) integrator."""
+    p11, p12, p22 = relax_exact(p11, p12, p22, tau, 0.5 * dt)
+    p11, p12, p22 = logconf_local_step(p11, p12, p22, L11, L12, L21, L22, np.inf, dt)
+    p11, p12, p22 = relax_exact(p11, p12, p22, tau, 0.5 * dt)
+    return p11, p12, p22
+
+
 def viscoelastic_stress(b11, b12, b22, G, b_ref=None, G_inf=0.0):
     """Cauchy stress components from the elastic Finger tensor.
 

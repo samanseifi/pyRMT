@@ -107,11 +107,21 @@ here `ψ=log b_e` carries stress, decoupled from a geometry-only ξ).
   solve → one extra transform-solve per component per step; removes `dt<dx²/4ν`.
   Validate on periodic Taylor–Green (analytic decay). Start here — lowest risk, proves
   the "reuse the transform solver" pattern the whole implicit program leans on.
-- **#14.2 — Exact/exponential relaxation.** (`feat/imex-exact-relaxation`)
+- **#14.2 — Exact/exponential relaxation. ✅ DONE** (`feat/imex-exact-relaxation`)
   Strang-split the log-conformation update; integrate the relaxation half-steps
   analytically `b_e ← I + (b_e−I)e^{−Δt/2τ}` (A-stable ∀τ) → removes the small-τ /
-  high-Weissenberg stiffness. Validate vs the existing step-strain / steady-shear tests
-  at `Δt≫τ`; SPD preserved.
+  high-Weissenberg stiffness.
+  - **Done:** `viscoelastic.py` `relax_exact`, `logconf_local_step_strang`
+    (relax dt/2 → explicit stretch dt → relax dt/2). For τ=∞ it is byte-for-byte the
+    explicit stretch step (exact neo-Hookean-limit recovery).
+  - **Verified:** step-strain is now exact to machine precision at ANY dt; at dt/τ=2 the
+    explicit step errs by 0.29 (blows up at dt/τ=5) while Strang stays exact; steady-shear
+    viscometric functions reproduced; SPD preserved. Taylor-Green field regression
+    (`benchmarks/viscoelastic_taylor_green.py`): `||ψ_explicit−ψ_strang||=1.2e-5` at small
+    dt (old physics reproduced), explicit ψ diverges for dt≳τ. Tests in
+    `tests/test_viscoelastic.py`; full suite green (no regression to TG/MAC/FSI).
+  - Note: log-conformation keeps `b_e=exp(ψ)` SPD for both steppers, so the explicit
+    failure mode is ψ accuracy/divergence, not loss of positive-definiteness.
 - **#14.3 — IMEX combined (= #14.1 + #14.2).** (`feat/imex-combined`)
   Wire both into the full FSI loop; measure lifted `Δt` and net speedup. Publishable
   IMEX viscoelastic RMT (Computers & Fluids scale) on its own.
