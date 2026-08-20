@@ -101,12 +101,18 @@ here `ψ=log b_e` carries stress, decoupled from a geometry-only ξ).
 
 **Tracked sub-issues (branches `feat/imex-*`, `feat/implicit-elastic-kernel`):**
 
-- **#14.1 — Implicit viscosity (Helmholtz-DCT/FFT). ⏳ IN PROGRESS** (`feat/imex-implicit-viscosity`)
+- **#14.1 — Implicit viscosity (Helmholtz-DCT/FFT). ✅ DONE** (`feat/imex-implicit-viscosity`)
   Backward-Euler viscous term: `(I − Δt·ν∇²)u* = u − Δt(u·∇)u`, advection explicit.
   The Helmholtz operator diagonalizes under the SAME FFT/DCT as the pressure Poisson
   solve → one extra transform-solve per component per step; removes `dt<dx²/4ν`.
-  Validate on periodic Taylor–Green (analytic decay). Start here — lowest risk, proves
-  the "reuse the transform solver" pattern the whole implicit program leans on.
+  - **Done (periodic solver):** `mac.py` `lap_eigs_periodic`, `solve_helmholtz_periodic`,
+    `momentum_predictor_periodic_imex`; `run_one(..., implicit_visc=True)`.
+  - **Verified:** Helmholtz round-trip to machine precision; Taylor–Green stable & accurate
+    (div ~1e-14) up to **dt = 50× the explicit viscous CFL**, where explicit → NaN;
+    2nd-order spatial accuracy preserved at small dt.
+  - **Remaining for #14.3:** the wall/free-slip (DCT-Neumann) Helmholtz variant needed by
+    the coupled FSI drivers (with the constant-μ₀ frozen-coefficient split for the
+    one-fluid variable viscosity).
 - **#14.2 — Exact/exponential relaxation. ✅ DONE** (`feat/imex-exact-relaxation`)
   Strang-split the log-conformation update; integrate the relaxation half-steps
   analytically `b_e ← I + (b_e−I)e^{−Δt/2τ}` (A-stable ∀τ) → removes the small-τ /
