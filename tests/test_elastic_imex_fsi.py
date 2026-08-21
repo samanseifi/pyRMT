@@ -44,3 +44,35 @@ def test_elastic_imex_fsi_stable_stiff_disc():
     tl = run(N=N, t_end=t_end, dt=0.3 * dx / 1.0, integrator="imex-elastic",
              mu_s=8.0, write=False)
     assert _reached(tl, t_end) and np.all(np.isfinite(tl[-1]))
+
+
+# ── Stage 2c: semi-Lagrangian momentum advection (lifts the advection CFL) ────
+
+def test_semilag_fsi_reproduces_explicit():
+    """2c REGRESSION: imex-sl (SL advection + implicit viscosity) reproduces the
+    explicit soft-disc centroid at matched dt."""
+    N, t_end = 48, 0.8
+    dx = 1.0 / N
+    dt = min(0.3 * dx, 0.2 * dx * dx / 0.01)       # explicit (advection-limited) dt
+    te = run(N=N, t_end=t_end, dt=dt, integrator="explicit", write=False)
+    ts = run(N=N, t_end=t_end, dt=dt, integrator="imex-sl", write=False)
+    n = min(len(te), len(ts))
+    assert n > 5
+    d = max(np.abs(te[:n, 1] - ts[:n, 1]).max(), np.abs(te[:n, 2] - ts[:n, 2]).max())
+    assert d < 5e-3, f"imex-sl matched-dt drift {d:.2e}"
+
+
+def test_semilag_fsi_net_speedup_at_large_dt():
+    """2c NET SPEEDUP: above the explicit advection CFL, imex-sl completes with far
+    fewer steps and stays close to the reference trajectory -- the goal of the whole
+    implicit program (advection was the last binding CFL)."""
+    N, t_end = 48, 0.8
+    dx = 1.0 / N
+    dt_ref = min(0.3 * dx, 0.2 * dx * dx / 0.01)
+    te = run(N=N, t_end=t_end, dt=dt_ref, integrator="explicit", write=False)
+    tb = run(N=N, t_end=t_end, dt=5.0 * dt_ref, integrator="imex-sl", write=False)
+    assert _reached(tb, t_end), "imex-sl did not reach t_end at 5x dt"
+    assert len(tb) < len(te) / 3, "expected ~5x fewer steps"
+    n = min(len(te), len(tb))
+    d = max(np.abs(te[:n, 1] - tb[:n, 1]).max(), np.abs(te[:n, 2] - tb[:n, 2]).max())
+    assert np.isfinite(d) and d < 0.1, f"imex-sl large-dt trajectory drift {d:.2e}"

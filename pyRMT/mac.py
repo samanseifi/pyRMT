@@ -369,6 +369,75 @@ def momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None,
     return ustar, vstar
 
 
+# ── Semi-Lagrangian momentum advection for the lid cavity (wall BCs) — 2c ─────
+
+def _interp_clamp(f, iq, jq):
+    """Cubic interpolation of f at fractional indices (iq,jq), clamping out-of-range
+    queries to the edge (mode='nearest'). f[j,i] at index (i,j)."""
+    from scipy.ndimage import map_coordinates
+    return map_coordinates(f, [jq, iq], order=3, mode="nearest")
+
+
+def momentum_predictor_lid_semilag(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None,
+                                   rho=1.0, cs2=0.0, rtol=1e-8):
+    """Unconditionally-stable lid-cavity predictor: semi-Lagrangian (cubic) advection
+    (no advection CFL) + implicit viscosity (+ optional trapezoidal elastic cs2), solved
+    by preconditioned CG. BCs are imposed through ghost-padded fields for interpolation;
+    wall (normal) faces are held at their boundary values. Returns u*, v*."""
+    Ny, Nxp1 = u.shape; Nx = Nxp1 - 1
+    up = _u_ghost_y(u, U_lid)                   # (Ny+2, Nx+1): rows at y=(r-0.5)dy
+    vp = _v_ghost_x(v)                          # (Ny+1, Nx+2): cols at x=(c-0.5)dx
+
+    # --- SL backtrace of interior u-faces (i=1..Nx-1) ---
+    Ii, Jj = np.meshgrid(np.arange(1, Nx), np.arange(Ny))     # (Ny, Nx-1)
+    xf = Ii * dx; yf = (Jj + 0.5) * dy
+    velx = u[:, 1:-1]; vely = _v_at_u(v)
+    xm = xf - 0.5 * dt * velx; ym = yf - 0.5 * dt * vely
+    vxm = _interp_clamp(u, xm / dx, ym / dy)                  # u grid: x=i dx, y=(j+.5)dy
+    vym = _interp_clamp(vp, xm / dx + 0.5, ym / dy - 0.0)     # v grid via padded cols
+    xd = xf - dt * vxm; yd = yf - dt * vym
+    u_adv = np.zeros_like(u)
+    u_adv[:, 1:-1] = _interp_clamp(up, xd / dx, yd / dy + 0.5)  # up rows at y=(r-.5)dy
+    u_adv[:, 0] = 0.0; u_adv[:, -1] = 0.0
+
+    # --- SL backtrace of interior v-faces (j=1..Ny-1) ---
+    Iv, Jv = np.meshgrid(np.arange(Nx), np.arange(1, Ny))     # (Ny-1, Nx)
+    xfv = (Iv + 0.5) * dx; yfv = Jv * dy
+    velxv = _u_at_v(u); velyv = v[1:-1, :]
+    xmv = xfv - 0.5 * dt * velxv; ymv = yfv - 0.5 * dt * velyv
+    vxmv = _interp_clamp(up, xmv / dx, ymv / dy + 0.5)
+    vymv = _interp_clamp(v, xmv / dx - 0.5, ymv / dy)          # v grid: x=(i+.5)dx, y=j dy
+    xdv = xfv - dt * vxmv; ydv = yfv - dt * vymv
+    v_adv = np.zeros_like(v)
+    v_adv[1:-1, :] = _interp_clamp(vp, xdv / dx + 0.5, ydv / dy)
+    v_adv[0, :] = 0.0; v_adv[-1, :] = 0.0
+
+    # --- implicit viscosity (+ elastic) on the advected field, via PCG ---
+    c_el = 0.25 * dt * dt * cs2
+    coef = dt * nu + c_el
+    uc = u_adv[:, 1:-1]
+    rhs_u = uc.copy()
+    if fu is not None:
+        rhs_u = rhs_u + dt * fu[:, 1:-1] / rho
+    if c_el > 0.0:
+        rhs_u = rhs_u + c_el * _lap_u_lid_hom(u, dx, dy)
+    rhs_u[-1, :] += coef * (2.0 * U_lid / dy**2)
+    embed_u = lambda x: np.pad(x, ((0, 0), (1, 1)))
+    sol_u = _pcg_helmholtz(rhs_u, lambda w: _lap_u_lid_hom(w, dx, dy), embed_u, coef, dx, dy, rtol)
+    ustar = u.copy(); ustar[:, 1:-1] = sol_u; ustar[:, 0] = 0.0; ustar[:, -1] = 0.0
+
+    vc = v_adv[1:-1, :]
+    rhs_v = vc.copy()
+    if fv is not None:
+        rhs_v = rhs_v + dt * fv[1:-1, :] / rho
+    if c_el > 0.0:
+        rhs_v = rhs_v + c_el * _lap_v_lid_hom(v, dx, dy)
+    embed_v = lambda x: np.pad(x, ((1, 1), (0, 0)))
+    sol_v = _pcg_helmholtz(rhs_v, lambda w: _lap_v_lid_hom(w, dx, dy), embed_v, coef, dx, dy, rtol)
+    vstar = v.copy(); vstar[1:-1, :] = sol_v; vstar[0, :] = 0.0; vstar[-1, :] = 0.0
+    return ustar, vstar
+
+
 # ── Periodic MAC (for Taylor-Green convergence) ──────────────────────────────
 # Periodic layout (Nx x Ny): u,v both (Ny,Nx); u at x-faces (i dx,(j+.5)dy),
 # v at y-faces ((i+.5)dx, j dy), p at centres. All operators use np.roll.
@@ -508,6 +577,47 @@ def momentum_predictor_periodic_imex_elastic(u, v, nu, dx, dy, dt, lap_eig, cs2,
     denom = 1.0 - coef * lap_eig
     ustar = np.real(np.fft.ifft2(np.fft.fft2(rhs_u) / denom))
     vstar = np.real(np.fft.ifft2(np.fft.fft2(rhs_v) / denom))
+    return ustar, vstar
+
+
+# ── Semi-Lagrangian momentum advection (periodic) — backlog #14.4, stage 2c ──
+# Lifts the LAST explicit CFL (advection). Backtracing along characteristics is
+# unconditionally stable for any dt, so combined with implicit viscosity + trapezoidal
+# elastic + exact relaxation the scheme has no explicit stability limit -- dt is set by
+# accuracy alone. RK2 (midpoint) backtrace with periodic bilinear interpolation.
+
+def _interp_per(f, iq, jq):
+    """Periodic CUBIC interpolation of f (Ny,Nx), f[j,i] at index (i,j), at the
+    fractional indices (iq,jq) (arrays). Cubic (order 3) keeps semi-Lagrangian
+    numerical diffusion low; bilinear leaves a large (~1e-2) accuracy floor."""
+    from scipy.ndimage import map_coordinates
+    return map_coordinates(f, [jq, iq], order=3, mode="grid-wrap")
+
+
+def _sl_advect_per(f, uf, vf, ox, oy, dx, dy, dt):
+    """Semi-Lagrangian (RK2) periodic advection of field f living at grid offset
+    (ox,oy) in cells, using the staggered velocity fields uf (offset (0,0.5)) and
+    vf (offset (0.5,0)). Returns the advected field at f's points."""
+    Ny, Nx = f.shape
+    I, J = np.meshgrid(np.arange(Nx), np.arange(Ny))
+    xf = (I + ox) * dx; yf = (J + oy) * dy                 # physical arrival positions
+    velx = _interp_per(uf, xf / dx, yf / dy - 0.5)         # velocity at f's points
+    vely = _interp_per(vf, xf / dx - 0.5, yf / dy)
+    xm = xf - 0.5 * dt * velx; ym = yf - 0.5 * dt * vely   # midpoint
+    vxm = _interp_per(uf, xm / dx, ym / dy - 0.5)
+    vym = _interp_per(vf, xm / dx - 0.5, ym / dy)
+    xd = xf - dt * vxm; yd = yf - dt * vym                 # departure point
+    return _interp_per(f, xd / dx - ox, yd / dy - oy)
+
+
+def momentum_predictor_periodic_semilag(u, v, nu, dx, dy, dt, lap_eig):
+    """Unconditionally-stable periodic predictor: semi-Lagrangian advection (no CFL)
+    + implicit (backward-Euler) viscosity via FFT. Returns u*, v*."""
+    u_adv = _sl_advect_per(u, u, v, 0.0, 0.5, dx, dy, dt)
+    v_adv = _sl_advect_per(v, u, v, 0.5, 0.0, dx, dy, dt)
+    coef = dt * nu
+    ustar = np.real(np.fft.ifft2(np.fft.fft2(u_adv) / (1.0 - coef * lap_eig)))
+    vstar = np.real(np.fft.ifft2(np.fft.fft2(v_adv) / (1.0 - coef * lap_eig)))
     return ustar, vstar
 
 

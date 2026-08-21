@@ -13,8 +13,8 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pyRMT.mac import (mac_grid, momentum_predictor, momentum_predictor_lid_imex,
-                       project, poisson_eigs_neumann, divergence, advect_xi_conservative,
-                       resolve_integrator)
+                       momentum_predictor_lid_semilag, project, poisson_eigs_neumann,
+                       divergence, advect_xi_conservative, resolve_integrator)
 from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
     rebuild_phi_from_reference_map, solid_cauchy_stress, smoothed_heaviside,
     grad_central_x_2nd, grad_central_y_2nd, reinitialize_phi_fmm)
@@ -53,11 +53,20 @@ def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0
     u = np.zeros((N, N + 1)); v = np.zeros((N + 1, N))
     eig = poisson_eigs_neumann(N, N, dx, dy)
     cs = np.sqrt(mu_s / rho)
-    name, use_imex, use_elastic = resolve_integrator(integrator, imex=imex,
-                                                     supports_elastic=True)
+    # "-sl" suffix adds semi-Lagrangian momentum advection (2c) on top of the base strategy
+    istr = str(integrator).lower().replace("_", "-") if integrator is not None else ""
+    use_semilag = istr.endswith("-sl")
+    base = (istr[:-3] or "imex") if use_semilag else integrator
+    name, use_imex, use_elastic = resolve_integrator(base, imex=imex, supports_elastic=True)
+    if use_semilag:
+        use_imex = True; name = name + "-sl"
     dt_adv = 0.3 * dx / U_lid; dt_visc = 0.2 * dx * dx / nu; dt_elastic = 0.3 * dx / (cs + 1e-9)
     if dt is None:
-        if use_elastic:                    # viscous + elastic-wave limits lifted
+        if use_semilag and use_elastic:    # every explicit CFL lifted -> accuracy-limited
+            dt = 2.0 * dt_adv
+        elif use_semilag:                  # advection + viscous lifted; elastic remains
+            dt = min(2.0 * dt_adv, dt_elastic)
+        elif use_elastic:                  # viscous + elastic-wave limits lifted
             dt = dt_adv
         elif use_imex:                     # viscous limit lifted (not the elastic wave)
             dt = min(dt_adv, dt_elastic)
@@ -101,11 +110,17 @@ def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0
         fv = np.zeros((N + 1, N)); fv[1:-1, :] = 0.5 * (divy[1:, :] + divy[:-1, :])
 
         u_old, v_old = u, v
-        if use_elastic:
+        cs2_arg = cs * cs if use_elastic else 0.0
+        if use_semilag:
+            # 2c: semi-Lagrangian advection (no advection CFL) + implicit viscosity
+            # (+ trapezoidal elastic when use_elastic).
+            ustar, vstar = momentum_predictor_lid_semilag(u, v, nu, dx, dy, dt, U_lid,
+                                                          fu=fu, fv=fv, rho=rho, cs2=cs2_arg)
+        elif use_elastic:
             # trapezoidal implicit-elastic (#14.4 stage 2b): elastic force inside the
             # implicit solve + the (dt^2/4)cs^2 wave stabilizer -> energy-conserving.
             ustar, vstar = momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid,
-                                                       fu=fu, fv=fv, rho=rho, cs2=cs * cs)
+                                                       fu=fu, fv=fv, rho=rho, cs2=cs2_arg)
         elif use_imex:
             ustar, vstar = momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid, fu=fu, fv=fv, rho=rho)
         else:

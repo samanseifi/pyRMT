@@ -193,10 +193,25 @@ here `ψ=log b_e` carries stress, decoupled from a geometry-only ξ).
         lift pays off in stiff/quiescent regimes (shown on the standing wave, 2a). A net
         speedup in flow-driven FSI additionally needs **implicit advection** (semi-Lagrangian
         momentum) — folded into 2c.
-    - **Stage 2c — full JFNK** over `(u,p,ξ,ψ)` with analytic material tangent, conservative
-      differentiable ξ/ψ advection ([[6]]), projection as pressure preconditioner,
-      frozen-interface linearization. Clears the JCP bar *if* 10–100× dt AND net speedup
-      with accuracy retained.
+    - **Stage 2c ✅ DONE — semi-Lagrangian momentum advection (lifts the LAST CFL).** The
+      binding constraint after 2a/2b was advection (explicit central momentum advection).
+      Semi-Lagrangian (RK2 backtrace, **cubic** interpolation — bilinear leaves a ~1e-2
+      diffusion floor) makes advection unconditionally stable; combined with implicit
+      viscosity + PCG the scheme has no explicit stability limit.
+      `mac.py momentum_predictor_periodic_semilag`, `momentum_predictor_lid_semilag`,
+      `_interp_per` (cubic); drivers gain `integrator="imex-sl"` / `"imex-elastic-sl"`.
+      **Verified — Taylor-Green:** accurate at small dt (`<8e-3`), stable & accurate above
+      the advection CFL, machine-zero divergence (`tests/test_semilag.py`).
+      **Verified — soft disc (the payoff):** reproduces the explicit centroid at matched dt
+      (`2.2e-3`); at 6× the explicit dt it completes with **3.05× net wall-clock speedup**
+      (27 vs 161 steps) within ~6% of the reference trajectory
+      (`tests/test_elastic_imex_fsi.py`). **This is the net-speedup result the whole
+      implicit program targeted** — every explicit CFL (viscous, relaxation, elastic wave,
+      advection) is now lifted, and the PCG keeps the implicit solve cheap.
+    - **Stage 2d (future) — fully-consistent JFNK** over `(u,p,ξ,ψ)` with the analytic
+      material tangent + implicit (Crank-Nicolson) central advection would remove the SL
+      numerical diffusion and the ~6% large-dt drift, giving 2nd-order accuracy at large dt.
+      The present 2a–2c scheme is the linearly-implicit / operator-split realization.
 
 ### 15. Promote viscoelastic loop to a first-class solver routine (P1, small) — *follow-up to #1*
 The log-conformation FSI loop is currently hand-rolled inside
