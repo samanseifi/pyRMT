@@ -275,16 +275,58 @@ def _cg_helmholtz(rhs_int, apply_lap_hom, embed, coef, rtol=1e-10, maxiter=500):
     return sol.reshape(shp)
 
 
+def _dst_helmholtz_eigs(shp, dx, dy):
+    """Eigenvalues of the homogeneous-Dirichlet Laplacian on `shp` cell-centred DOFs,
+    diagonalized by the DST-II. lambda_k = -2(1-cos(pi (k+1)/N))/h^2."""
+    Ny, Nx = shp
+    lx = -2.0 * (1.0 - np.cos(np.pi * (np.arange(Nx) + 1) / Nx)) / dx**2
+    ly = -2.0 * (1.0 - np.cos(np.pi * (np.arange(Ny) + 1) / Ny)) / dy**2
+    return ly[:, None] + lx[None, :]
+
+
+def _pcg_helmholtz(rhs_int, apply_lap_hom, embed, coef, dx, dy,
+                   rtol=1e-8, maxiter=500, count=None):
+    """Preconditioned CG for (I - coef*Lap_hom) x = rhs_int. The constant-coefficient
+    operator is ill-conditioned at high wavenumber for large `coef`; a DST spectral
+    preconditioner M^{-1} = (I - coef*Lap_Dirichlet)^{-1} collapses the spectrum, cutting
+    iterations from O(10-100) to a handful (the fix for the net-speedup problem). The
+    preconditioner need not be exact -- CG converges on the true wall operator regardless.
+    If `count` is a list, the iteration count is appended to it."""
+    from scipy.fft import dstn, idstn
+    shp = rhs_int.shape
+    lap_eig = _dst_helmholtz_eigs(shp, dx, dy)
+    denom = 1.0 - coef * lap_eig                       # >= 1, safe to divide
+
+    def matvec(xflat):
+        x = xflat.reshape(shp)
+        return (x - coef * apply_lap_hom(embed(x))).ravel()
+
+    def prec(rflat):
+        r = rflat.reshape(shp)
+        return idstn(dstn(r, type=2, norm='ortho') / denom, type=2, norm='ortho').ravel()
+
+    A = LinearOperator((rhs_int.size, rhs_int.size), matvec=matvec)
+    M = LinearOperator((rhs_int.size, rhs_int.size), matvec=prec)
+    its = [0]
+    cb = (lambda xk: its.__setitem__(0, its[0] + 1))
+    sol, info = cg(A, rhs_int.ravel(), x0=rhs_int.ravel(), rtol=rtol, atol=0.0,
+                   maxiter=maxiter, M=M, callback=cb)
+    if count is not None:
+        count.append(its[0])
+    return sol.reshape(shp)
+
+
 def momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None,
-                                rho=1.0, rtol=1e-10):
+                                rho=1.0, rtol=1e-8):
     """IMEX predictor for the lid-driven cavity: explicit central advection + face
-    forces, implicit (backward-Euler) viscous diffusion solved by CG. Same advection
-    and BCs as momentum_predictor, but the viscous CFL dt < dx^2/(4 nu) is removed.
-    Returns u*, v* with wall (normal) faces zeroed."""
+    forces, implicit (backward-Euler) viscous diffusion solved by preconditioned CG
+    (DST spectral preconditioner -> a handful of iterations, independent of N). Same
+    advection and BCs as momentum_predictor, but the viscous CFL dt < dx^2/(4 nu) is
+    removed. Returns u*, v* with wall (normal) faces zeroed."""
     Ny, Nxp1 = u.shape; Nx = Nxp1 - 1
     up = _u_ghost_y(u, U_lid); vp = _v_ghost_x(v)
 
-    # --- u: explicit advection + force -> rhs; implicit diffusion via CG ---
+    # --- u: explicit advection + force -> rhs; implicit diffusion via PCG ---
     uc = u[:, 1:-1]
     dudx = (u[:, 2:] - u[:, :-2]) / (2 * dx)
     dudy = (up[2:, 1:-1] - up[:-2, 1:-1]) / (2 * dy)
@@ -294,10 +336,11 @@ def momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None,
         rhs_u = rhs_u + dt * fu[:, 1:-1] / rho
     rhs_u[-1, :] += dt * nu * (2.0 * U_lid / dy**2)      # lid inhomogeneity -> RHS
     embed_u = lambda x: np.pad(x, ((0, 0), (1, 1)))       # walls (i=0,Nx) = 0
-    sol_u = _cg_helmholtz(rhs_u, lambda w: _lap_u_lid_hom(w, dx, dy), embed_u, dt * nu, rtol)
+    sol_u = _pcg_helmholtz(rhs_u, lambda w: _lap_u_lid_hom(w, dx, dy), embed_u,
+                           dt * nu, dx, dy, rtol)
     ustar = u.copy(); ustar[:, 1:-1] = sol_u; ustar[:, 0] = 0.0; ustar[:, -1] = 0.0
 
-    # --- v: explicit advection + force -> rhs; implicit diffusion via CG ---
+    # --- v: explicit advection + force -> rhs; implicit diffusion via PCG ---
     vc = v[1:-1, :]
     dvdy = (v[2:, :] - v[:-2, :]) / (2 * dy)
     dvdx = (vp[1:-1, 2:] - vp[1:-1, :-2]) / (2 * dx)
@@ -306,7 +349,8 @@ def momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None,
     if fv is not None:
         rhs_v = rhs_v + dt * fv[1:-1, :] / rho
     embed_v = lambda x: np.pad(x, ((1, 1), (0, 0)))       # walls (j=0,Ny) = 0
-    sol_v = _cg_helmholtz(rhs_v, lambda w: _lap_v_lid_hom(w, dx, dy), embed_v, dt * nu, rtol)
+    sol_v = _pcg_helmholtz(rhs_v, lambda w: _lap_v_lid_hom(w, dx, dy), embed_v,
+                           dt * nu, dx, dy, rtol)
     vstar = v.copy(); vstar[1:-1, :] = sol_v; vstar[0, :] = 0.0; vstar[-1, :] = 0.0
     return ustar, vstar
 
