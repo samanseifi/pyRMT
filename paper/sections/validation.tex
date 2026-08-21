@@ -58,11 +58,30 @@ this resolution.}
 \label{fig:ve-fsi}
 \end{figure}
 
-\subsection{Soft disc in a Taylor--Green vortex (energy)}
-The kinetic and strain energies exchange periodically while the total energy is
-conserved; the spatial convergence of the energies is second order, with velocity and
-pressure limited to first order by the diffuse interface. \TODO{energy-exchange figure
-and convergence table.}
+\subsection{Soft disc in a Taylor--Green vortex: FSI convergence}
+\label{sec:disc-tg}
+The pure-fluid Taylor--Green convergence of \cref{fig:tg-conv} is second order in every
+field, but it is a benign test---a single Fourier mode with curl-free advection and no
+interface. The \emph{coupled} disc-in-Taylor--Green case is the honest measure of the FSI
+discretization. Measuring the L2 error against the finest grid ($N{=}128$) over
+$N=32$--$128$ (\cref{fig:disc-tg-conv}) gives velocity $\approx1.8$, kinetic/total energy
+$\approx2$, but \emph{pressure only $\approx1$}: the diffuse interface caps the pressure
+(and, more mildly, the velocity) below the pure-fluid order, consistent with Jain
+\emph{et al.}\ \cite{Jain2019}. The reduced order is intrinsic to the smoothed one-fluid
+interface, not to the time integrator---the explicit, IMEX and monolithic schemes share the
+spatial discretization and coincide (as in \cref{fig:tg-conv}); a sharp-interface
+treatment \cite{Kolahdouz2023} is the route to higher field order and is a limitation of
+the present method.
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.62\linewidth]{figures/disc_tg_convergence.png}
+\caption{Soft disc in a Taylor--Green vortex: FSI spatial convergence of velocity,
+pressure and kinetic/total energy (L2 vs the finest grid). Velocity is near second order
+and the energy second order, but the pressure is limited to first order by the diffuse
+interface---the honest FSI counterpart to the pure-fluid second-order result of
+\cref{fig:tg-conv}.}
+\label{fig:disc-tg-conv}
+\end{figure}
 
 \subsection{Surface tension}
 The static Laplace jump $\Delta p=\gamma/R$ is captured to $0.4\%$ with bounded parasitic
