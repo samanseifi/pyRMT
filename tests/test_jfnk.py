@@ -56,3 +56,21 @@ def test_jfnk_newton_quadratic_ish_convergence_one_step():
     info = {}
     step(u, v, 0.05, dx, dx, 0.1, info=info)
     assert info["res"] < 1e-6 * info["res0"], "residual not reduced enough"
+
+
+def test_jfnk_elastic_coupled_newton_converges_one_step():
+    """Stage 2d-2 (WIP): the fully-coupled (u,v,p,xi1,xi2) neo-Hookean Newton solve
+    converges for a SINGLE step from rest. NOTE: sustained runs currently stall (Newton
+    stops reducing the residual) because the block-independent preconditioner is too weak
+    for the coupled elastic+xi system; a proper physics-based preconditioner (one
+    operator-split sweep) + line-search Newton is required. This test only guards the
+    single-step convergence, not sustained integration."""
+    from pyRMT.jfnk import step_elastic
+    N = 16; dx = L / N
+    xc = (np.arange(N) + 0.5) * dx; Xc, Yc = np.meshgrid(xc, xc)
+    x1 = Xc.copy(); x2 = Yc - 0.05 * np.sin(Xc)
+    u = np.zeros((N, N)); v = np.zeros((N, N))
+    info = {}
+    u, v, p, x1, x2 = step_elastic(u, v, x1, x2, 0.0, dx, dx, 0.05, mu_s=1.0, info=info)
+    assert info["res"] < 1e-6 * info["res0"], "coupled elastic Newton did not converge"
+    assert np.all(np.isfinite(u)) and np.all(np.isfinite(x1))
