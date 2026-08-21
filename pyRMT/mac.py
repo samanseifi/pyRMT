@@ -275,16 +275,68 @@ def _cg_helmholtz(rhs_int, apply_lap_hom, embed, coef, rtol=1e-10, maxiter=500):
     return sol.reshape(shp)
 
 
+def _dst_helmholtz_eigs(shp, dx, dy):
+    """Eigenvalues of the homogeneous-Dirichlet Laplacian on `shp` cell-centred DOFs,
+    diagonalized by the DST-II. lambda_k = -2(1-cos(pi (k+1)/N))/h^2."""
+    Ny, Nx = shp
+    lx = -2.0 * (1.0 - np.cos(np.pi * (np.arange(Nx) + 1) / Nx)) / dx**2
+    ly = -2.0 * (1.0 - np.cos(np.pi * (np.arange(Ny) + 1) / Ny)) / dy**2
+    return ly[:, None] + lx[None, :]
+
+
+def _pcg_helmholtz(rhs_int, apply_lap_hom, embed, coef, dx, dy,
+                   rtol=1e-8, maxiter=500, count=None):
+    """Preconditioned CG for (I - coef*Lap_hom) x = rhs_int. The constant-coefficient
+    operator is ill-conditioned at high wavenumber for large `coef`; a DST spectral
+    preconditioner M^{-1} = (I - coef*Lap_Dirichlet)^{-1} collapses the spectrum, cutting
+    iterations from O(10-100) to a handful (the fix for the net-speedup problem). The
+    preconditioner need not be exact -- CG converges on the true wall operator regardless.
+    If `count` is a list, the iteration count is appended to it."""
+    from scipy.fft import dstn, idstn
+    shp = rhs_int.shape
+    lap_eig = _dst_helmholtz_eigs(shp, dx, dy)
+    denom = 1.0 - coef * lap_eig                       # >= 1, safe to divide
+
+    def matvec(xflat):
+        x = xflat.reshape(shp)
+        return (x - coef * apply_lap_hom(embed(x))).ravel()
+
+    def prec(rflat):
+        r = rflat.reshape(shp)
+        return idstn(dstn(r, type=2, norm='ortho') / denom, type=2, norm='ortho').ravel()
+
+    A = LinearOperator((rhs_int.size, rhs_int.size), matvec=matvec)
+    M = LinearOperator((rhs_int.size, rhs_int.size), matvec=prec)
+    its = [0]
+    cb = (lambda xk: its.__setitem__(0, its[0] + 1))
+    sol, info = cg(A, rhs_int.ravel(), x0=rhs_int.ravel(), rtol=rtol, atol=0.0,
+                   maxiter=maxiter, M=M, callback=cb)
+    if count is not None:
+        count.append(its[0])
+    return sol.reshape(shp)
+
+
 def momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None,
-                                rho=1.0, rtol=1e-10):
+                                rho=1.0, rtol=1e-8, cs2=0.0):
     """IMEX predictor for the lid-driven cavity: explicit central advection + face
-    forces, implicit (backward-Euler) viscous diffusion solved by CG. Same advection
-    and BCs as momentum_predictor, but the viscous CFL dt < dx^2/(4 nu) is removed.
-    Returns u*, v* with wall (normal) faces zeroed."""
+    forces, implicit (backward-Euler) viscous diffusion solved by preconditioned CG
+    (DST spectral preconditioner -> a handful of iterations, independent of N). Same
+    advection and BCs as momentum_predictor, but the viscous CFL dt < dx^2/(4 nu) is
+    removed.
+
+    cs2 > 0 additionally activates the linearly-implicit TRAPEZOIDAL elastic-wave
+    stabilizer (#14.4 stage 2b): the implicit operator gains a constant
+    (dt^2/4) cs^2 Lap term and the RHS the matching (dt^2/4) cs^2 Lap(u^n) term, so the
+    elastic force (passed in fu/fv, already blended by the solid fraction) is advanced
+    by the energy-conserving implicit-midpoint rule rather than the dissipative stage-1
+    stabilizer. The constant-coefficient form keeps the fast PCG solve; the O(dt^2)
+    elastic term in the fluid is a harmless, consistent perturbation. Returns u*, v*."""
     Ny, Nxp1 = u.shape; Nx = Nxp1 - 1
     up = _u_ghost_y(u, U_lid); vp = _v_ghost_x(v)
+    c_el = 0.25 * dt * dt * cs2
+    coef = dt * nu + c_el
 
-    # --- u: explicit advection + force -> rhs; implicit diffusion via CG ---
+    # --- u: explicit advection + force (+ trapezoidal elastic RHS) -> PCG solve ---
     uc = u[:, 1:-1]
     dudx = (u[:, 2:] - u[:, :-2]) / (2 * dx)
     dudy = (up[2:, 1:-1] - up[:-2, 1:-1]) / (2 * dy)
@@ -292,12 +344,15 @@ def momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None,
     rhs_u = uc + dt * (-(uc * dudx + v_u * dudy))
     if fu is not None:
         rhs_u = rhs_u + dt * fu[:, 1:-1] / rho
-    rhs_u[-1, :] += dt * nu * (2.0 * U_lid / dy**2)      # lid inhomogeneity -> RHS
-    embed_u = lambda x: np.pad(x, ((0, 0), (1, 1)))       # walls (i=0,Nx) = 0
-    sol_u = _cg_helmholtz(rhs_u, lambda w: _lap_u_lid_hom(w, dx, dy), embed_u, dt * nu, rtol)
+    if c_el > 0.0:
+        rhs_u = rhs_u + c_el * _lap_u_lid_hom(u, dx, dy)   # trapezoidal term (u^n)
+    rhs_u[-1, :] += coef * (2.0 * U_lid / dy**2)           # lid inhomogeneity -> RHS
+    embed_u = lambda x: np.pad(x, ((0, 0), (1, 1)))        # walls (i=0,Nx) = 0
+    sol_u = _pcg_helmholtz(rhs_u, lambda w: _lap_u_lid_hom(w, dx, dy), embed_u,
+                           coef, dx, dy, rtol)
     ustar = u.copy(); ustar[:, 1:-1] = sol_u; ustar[:, 0] = 0.0; ustar[:, -1] = 0.0
 
-    # --- v: explicit advection + force -> rhs; implicit diffusion via CG ---
+    # --- v: explicit advection + force (+ trapezoidal elastic RHS) -> PCG solve ---
     vc = v[1:-1, :]
     dvdy = (v[2:, :] - v[:-2, :]) / (2 * dy)
     dvdx = (vp[1:-1, 2:] - vp[1:-1, :-2]) / (2 * dx)
@@ -305,8 +360,80 @@ def momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None,
     rhs_v = vc + dt * (-(u_v * dvdx + vc * dvdy))
     if fv is not None:
         rhs_v = rhs_v + dt * fv[1:-1, :] / rho
-    embed_v = lambda x: np.pad(x, ((1, 1), (0, 0)))       # walls (j=0,Ny) = 0
-    sol_v = _cg_helmholtz(rhs_v, lambda w: _lap_v_lid_hom(w, dx, dy), embed_v, dt * nu, rtol)
+    if c_el > 0.0:
+        rhs_v = rhs_v + c_el * _lap_v_lid_hom(v, dx, dy)
+    embed_v = lambda x: np.pad(x, ((1, 1), (0, 0)))        # walls (j=0,Ny) = 0
+    sol_v = _pcg_helmholtz(rhs_v, lambda w: _lap_v_lid_hom(w, dx, dy), embed_v,
+                           coef, dx, dy, rtol)
+    vstar = v.copy(); vstar[1:-1, :] = sol_v; vstar[0, :] = 0.0; vstar[-1, :] = 0.0
+    return ustar, vstar
+
+
+# ── Semi-Lagrangian momentum advection for the lid cavity (wall BCs) — 2c ─────
+
+def _interp_clamp(f, iq, jq):
+    """Cubic interpolation of f at fractional indices (iq,jq), clamping out-of-range
+    queries to the edge (mode='nearest'). f[j,i] at index (i,j)."""
+    from scipy.ndimage import map_coordinates
+    return map_coordinates(f, [jq, iq], order=3, mode="nearest")
+
+
+def momentum_predictor_lid_semilag(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None,
+                                   rho=1.0, cs2=0.0, rtol=1e-8):
+    """Unconditionally-stable lid-cavity predictor: semi-Lagrangian (cubic) advection
+    (no advection CFL) + implicit viscosity (+ optional trapezoidal elastic cs2), solved
+    by preconditioned CG. BCs are imposed through ghost-padded fields for interpolation;
+    wall (normal) faces are held at their boundary values. Returns u*, v*."""
+    Ny, Nxp1 = u.shape; Nx = Nxp1 - 1
+    up = _u_ghost_y(u, U_lid)                   # (Ny+2, Nx+1): rows at y=(r-0.5)dy
+    vp = _v_ghost_x(v)                          # (Ny+1, Nx+2): cols at x=(c-0.5)dx
+
+    # --- SL backtrace of interior u-faces (i=1..Nx-1) ---
+    Ii, Jj = np.meshgrid(np.arange(1, Nx), np.arange(Ny))     # (Ny, Nx-1)
+    xf = Ii * dx; yf = (Jj + 0.5) * dy
+    velx = u[:, 1:-1]; vely = _v_at_u(v)
+    xm = xf - 0.5 * dt * velx; ym = yf - 0.5 * dt * vely
+    vxm = _interp_clamp(u, xm / dx, ym / dy)                  # u grid: x=i dx, y=(j+.5)dy
+    vym = _interp_clamp(vp, xm / dx + 0.5, ym / dy - 0.0)     # v grid via padded cols
+    xd = xf - dt * vxm; yd = yf - dt * vym
+    u_adv = np.zeros_like(u)
+    u_adv[:, 1:-1] = _interp_clamp(up, xd / dx, yd / dy + 0.5)  # up rows at y=(r-.5)dy
+    u_adv[:, 0] = 0.0; u_adv[:, -1] = 0.0
+
+    # --- SL backtrace of interior v-faces (j=1..Ny-1) ---
+    Iv, Jv = np.meshgrid(np.arange(Nx), np.arange(1, Ny))     # (Ny-1, Nx)
+    xfv = (Iv + 0.5) * dx; yfv = Jv * dy
+    velxv = _u_at_v(u); velyv = v[1:-1, :]
+    xmv = xfv - 0.5 * dt * velxv; ymv = yfv - 0.5 * dt * velyv
+    vxmv = _interp_clamp(up, xmv / dx, ymv / dy + 0.5)
+    vymv = _interp_clamp(v, xmv / dx - 0.5, ymv / dy)          # v grid: x=(i+.5)dx, y=j dy
+    xdv = xfv - dt * vxmv; ydv = yfv - dt * vymv
+    v_adv = np.zeros_like(v)
+    v_adv[1:-1, :] = _interp_clamp(vp, xdv / dx + 0.5, ydv / dy)
+    v_adv[0, :] = 0.0; v_adv[-1, :] = 0.0
+
+    # --- implicit viscosity (+ elastic) on the advected field, via PCG ---
+    c_el = 0.25 * dt * dt * cs2
+    coef = dt * nu + c_el
+    uc = u_adv[:, 1:-1]
+    rhs_u = uc.copy()
+    if fu is not None:
+        rhs_u = rhs_u + dt * fu[:, 1:-1] / rho
+    if c_el > 0.0:
+        rhs_u = rhs_u + c_el * _lap_u_lid_hom(u, dx, dy)
+    rhs_u[-1, :] += coef * (2.0 * U_lid / dy**2)
+    embed_u = lambda x: np.pad(x, ((0, 0), (1, 1)))
+    sol_u = _pcg_helmholtz(rhs_u, lambda w: _lap_u_lid_hom(w, dx, dy), embed_u, coef, dx, dy, rtol)
+    ustar = u.copy(); ustar[:, 1:-1] = sol_u; ustar[:, 0] = 0.0; ustar[:, -1] = 0.0
+
+    vc = v_adv[1:-1, :]
+    rhs_v = vc.copy()
+    if fv is not None:
+        rhs_v = rhs_v + dt * fv[1:-1, :] / rho
+    if c_el > 0.0:
+        rhs_v = rhs_v + c_el * _lap_v_lid_hom(v, dx, dy)
+    embed_v = lambda x: np.pad(x, ((1, 1), (0, 0)))
+    sol_v = _pcg_helmholtz(rhs_v, lambda w: _lap_v_lid_hom(w, dx, dy), embed_v, coef, dx, dy, rtol)
     vstar = v.copy(); vstar[1:-1, :] = sol_v; vstar[0, :] = 0.0; vstar[-1, :] = 0.0
     return ustar, vstar
 
@@ -450,6 +577,47 @@ def momentum_predictor_periodic_imex_elastic(u, v, nu, dx, dy, dt, lap_eig, cs2,
     denom = 1.0 - coef * lap_eig
     ustar = np.real(np.fft.ifft2(np.fft.fft2(rhs_u) / denom))
     vstar = np.real(np.fft.ifft2(np.fft.fft2(rhs_v) / denom))
+    return ustar, vstar
+
+
+# ── Semi-Lagrangian momentum advection (periodic) — backlog #14.4, stage 2c ──
+# Lifts the LAST explicit CFL (advection). Backtracing along characteristics is
+# unconditionally stable for any dt, so combined with implicit viscosity + trapezoidal
+# elastic + exact relaxation the scheme has no explicit stability limit -- dt is set by
+# accuracy alone. RK2 (midpoint) backtrace with periodic bilinear interpolation.
+
+def _interp_per(f, iq, jq):
+    """Periodic CUBIC interpolation of f (Ny,Nx), f[j,i] at index (i,j), at the
+    fractional indices (iq,jq) (arrays). Cubic (order 3) keeps semi-Lagrangian
+    numerical diffusion low; bilinear leaves a large (~1e-2) accuracy floor."""
+    from scipy.ndimage import map_coordinates
+    return map_coordinates(f, [jq, iq], order=3, mode="grid-wrap")
+
+
+def _sl_advect_per(f, uf, vf, ox, oy, dx, dy, dt):
+    """Semi-Lagrangian (RK2) periodic advection of field f living at grid offset
+    (ox,oy) in cells, using the staggered velocity fields uf (offset (0,0.5)) and
+    vf (offset (0.5,0)). Returns the advected field at f's points."""
+    Ny, Nx = f.shape
+    I, J = np.meshgrid(np.arange(Nx), np.arange(Ny))
+    xf = (I + ox) * dx; yf = (J + oy) * dy                 # physical arrival positions
+    velx = _interp_per(uf, xf / dx, yf / dy - 0.5)         # velocity at f's points
+    vely = _interp_per(vf, xf / dx - 0.5, yf / dy)
+    xm = xf - 0.5 * dt * velx; ym = yf - 0.5 * dt * vely   # midpoint
+    vxm = _interp_per(uf, xm / dx, ym / dy - 0.5)
+    vym = _interp_per(vf, xm / dx - 0.5, ym / dy)
+    xd = xf - dt * vxm; yd = yf - dt * vym                 # departure point
+    return _interp_per(f, xd / dx - ox, yd / dy - oy)
+
+
+def momentum_predictor_periodic_semilag(u, v, nu, dx, dy, dt, lap_eig):
+    """Unconditionally-stable periodic predictor: semi-Lagrangian advection (no CFL)
+    + implicit (backward-Euler) viscosity via FFT. Returns u*, v*."""
+    u_adv = _sl_advect_per(u, u, v, 0.0, 0.5, dx, dy, dt)
+    v_adv = _sl_advect_per(v, u, v, 0.5, 0.0, dx, dy, dt)
+    coef = dt * nu
+    ustar = np.real(np.fft.ifft2(np.fft.fft2(u_adv) / (1.0 - coef * lap_eig)))
+    vstar = np.real(np.fft.ifft2(np.fft.fft2(v_adv) / (1.0 - coef * lap_eig)))
     return ustar, vstar
 
 

@@ -169,12 +169,49 @@ here `ψ=log b_e` carries stress, decoupled from a geometry-only ξ).
     *Caveat (honest):* the isotropic-Laplacian stabilizer adds numerical damping, so at
     large dt it is stable but over-damped (4%→17% drift over 1×→8× the elastic CFL) —
     accuracy-at-large-dt needs the consistent tangent (stage 2).
-  - **Stage 2 — fully-consistent JFNK (remaining, the JCP-class part).** Newton/JFNK over
-    `(u,p,ξ,ψ)` with the analytic material tangent `∂σ_el/∂ξ,∂σ_el/∂ψ` (removes the stage-1
-    damping); conservative (differentiable) ξ/ψ advection ([[6]]); projection as the
-    pressure preconditioner; frozen-interface linearization for the non-smooth geometry
-    ops; extend the wall CG-Helmholtz (#14.3 follow-on) to the coupled elastic block.
-    Clears the JCP bar *if* 10–100× dt AND net speedup with accuracy retained.
+  - **Stage 2 — energy-conserving implicit elastic kernel (the JCP-class part). ⏳ IN PROGRESS.**
+    - **Stage 2a ✅ DONE — core numerics de-risked.** The stage-1 damping comes from an
+      explicit force + O(dt²) stabilizer; the fix is a **trapezoidal (implicit-midpoint)
+      coupling** of velocity and displacement, one Helmholtz solve per step, `|λ|=1`
+      (energy-conserving) instead of stage-1's `1/√(1+a)`. Verified on the linear elastic
+      standing shear wave (`benchmarks/implicit_elastic_wave.py`,
+      `tests/test_implicit_elastic.py`): at 2× the explicit CFL stage-2 energy drift
+      `5.5e-5`–`1.8e-3` while stage-1 damps the wave away (drift →1.0); stable at 5× CFL
+      where explicit diverges; accurate (`err<5e-2`) to ~1–2× CFL, phase error only beyond.
+    - **Stage 2b ✅ DONE — trapezoidal elastic coupling in the FSI + preconditioned solve.**
+      (i) **Preconditioned CG** (`_pcg_helmholtz`, DST spectral preconditioner) fixes the
+      net-speedup bottleneck the N=128 crossover exposed: iterations `17→5` (N=128 viscous),
+      `27→7` (elastic), staying ~5–7 as N grows (vs CG's O(N)). (ii) **Trapezoidal
+      implicit-elastic** in the soft-disc loop (`integrator="imex-elastic"`, `cs2` in
+      `momentum_predictor_lid_imex`): elastic force inside the implicit solve + the
+      `(dt²/4)cs²∇²` stabilizer, reference map advanced with the **implicit-midpoint
+      velocity** (required — explicit-displacement gives det>1, unstable). Verified:
+      reproduces the explicit centroid to `2e-3` (regression), runs a stiff disc stably.
+      Tests: `tests/test_imex_wall.py` (PCG), `tests/test_elastic_imex_fsi.py`.
+      - **Honest finding:** the lid-driven case is *advection*-limited (lid flow U=1, momentum
+        advection explicit), so lifting the elastic CFL gives no speedup here — the elastic
+        lift pays off in stiff/quiescent regimes (shown on the standing wave, 2a). A net
+        speedup in flow-driven FSI additionally needs **implicit advection** (semi-Lagrangian
+        momentum) — folded into 2c.
+    - **Stage 2c ✅ DONE — semi-Lagrangian momentum advection (lifts the LAST CFL).** The
+      binding constraint after 2a/2b was advection (explicit central momentum advection).
+      Semi-Lagrangian (RK2 backtrace, **cubic** interpolation — bilinear leaves a ~1e-2
+      diffusion floor) makes advection unconditionally stable; combined with implicit
+      viscosity + PCG the scheme has no explicit stability limit.
+      `mac.py momentum_predictor_periodic_semilag`, `momentum_predictor_lid_semilag`,
+      `_interp_per` (cubic); drivers gain `integrator="imex-sl"` / `"imex-elastic-sl"`.
+      **Verified — Taylor-Green:** accurate at small dt (`<8e-3`), stable & accurate above
+      the advection CFL, machine-zero divergence (`tests/test_semilag.py`).
+      **Verified — soft disc (the payoff):** reproduces the explicit centroid at matched dt
+      (`2.2e-3`); at 6× the explicit dt it completes with **3.05× net wall-clock speedup**
+      (27 vs 161 steps) within ~6% of the reference trajectory
+      (`tests/test_elastic_imex_fsi.py`). **This is the net-speedup result the whole
+      implicit program targeted** — every explicit CFL (viscous, relaxation, elastic wave,
+      advection) is now lifted, and the PCG keeps the implicit solve cheap.
+    - **Stage 2d (future) — fully-consistent JFNK** over `(u,p,ξ,ψ)` with the analytic
+      material tangent + implicit (Crank-Nicolson) central advection would remove the SL
+      numerical diffusion and the ~6% large-dt drift, giving 2nd-order accuracy at large dt.
+      The present 2a–2c scheme is the linearly-implicit / operator-split realization.
 
 ### 15. Promote viscoelastic loop to a first-class solver routine (P1, small) — *follow-up to #1*
 The log-conformation FSI loop is currently hand-rolled inside
