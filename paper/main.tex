@@ -65,27 +65,34 @@ viscoelastic fluid--structure interaction}
 \begin{abstract}
 We present a fully Eulerian, one-fluid Reference Map Technique (RMT) for
 incompressible fluid--structure interaction (FSI) that couples a finite-strain
-viscoelastic solid to a Newtonian fluid on a single collocated velocity field and a
-single pressure solve. Two contributions distinguish the method from the explicit,
-compressible, or fluid-only formulations in the literature. First, the stress-carrying
-strain is transported as a log-conformation tensor $\psib=\log\be$ (Fattal--Kupferman),
-which is positive-definite by construction and decouples the relaxing elastic stress
-from the folding-prone reference map. Second, the time discretization is made
-\emph{implicit and monolithic}: the stiff viscous, relaxation and elastic-wave terms
-are advanced without the explicit CFL restrictions through an implicit--explicit (IMEX)
-stack that reuses the pressure transform/Krylov solvers, culminating in a semi-Lagrangian, preconditioned, implicit scheme that removes
-\emph{every} explicit CFL restriction (viscous, relaxation, elastic-wave and advective)
-on the coupled velocity--pressure--reference-map--conformation system. The staggered
-(MAC) discretization makes the projection exact (machine-zero divergence). We verify the
-constitutive update against analytic viscometric limits to machine precision, confirm the
-exact projection and spatial order on manufactured and Taylor--Green problems, and
+\emph{viscoelastic} solid to a Newtonian fluid on a single staggered (MAC) grid with one
+pressure solve. The method differs from existing Eulerian FSI in two ways. First, the
+stress-carrying strain is transported as a log-conformation tensor $\psib=\log\be$
+(Fattal--Kupferman; Hulsen \emph{et al.}), which is positive-definite by construction and
+decouples the relaxing elastic stress from the folding-prone reference map; monolithic,
+implicit Eulerian FSI has been demonstrated for hyperelastic solids
+\cite{Richter2013,Dunne2006} but not, to our knowledge, for a finite-strain viscoelastic
+solid. Second, we develop the time integration as a stack that lifts the stiff time-step
+limits: an implicit--explicit (IMEX) scheme---backward-Euler viscosity via the pressure
+transforms, exact exponential relaxation, an energy-conserving trapezoidal elastic
+coupling, and adaptive semi-Lagrangian advection---removes the viscous, relaxation,
+elastic-wave and advective CFL restrictions in a fractional-step setting; and a
+Jacobian-free Newton--Krylov (JFNK) formulation solves the coupled
+$(\uv,p,\xiv,\psib)$ system \emph{monolithically}, with the reference map a coupled unknown
+(the step \cite{Richter2013} lags), preconditioned by the split IMEX solver and the exact
+projection. The staggered discretization makes the projection exact (machine-zero
+divergence). We verify the constitutive update against analytic viscometric limits to
+machine precision, confirm the exact projection and spatial order on manufactured and
+Taylor--Green problems, and
 validate the coupled solver against the Ghia lid-driven cavity and the Sugiyama soft-disc
-benchmark. The implicit elastic coupling is energy-conserving (no numerical damping), and
-a DST-preconditioned solve keeps the per-step cost at a few iterations independent of
-resolution, so the lifted time step becomes a wall-clock gain: on the soft-disc benchmark
-the scheme reaches $6\times$ the explicit time step for a $3\times$ net speedup while
-reproducing the trajectory, and it reaches high-Weissenberg regimes inaccessible to
-explicit RMT.
+benchmark. The trapezoidal elastic coupling is energy-conserving on a standing elastic
+wave, and a DST-preconditioned solve keeps the wall-bounded Helmholtz at a few iterations
+independent of resolution. On the soft-disc benchmark the semi-Lagrangian IMEX scheme runs
+stably at several times the explicit step (e.g.\ $6\times$ in $\sim\!4\times$ fewer steps),
+at a modest, controllable accuracy cost that the monolithic JFNK solve removes by treating
+advection and the elastic coupling implicitly and consistently. We report a work--precision
+comparison across the explicit, IMEX and monolithic integrators and delineate the regimes
+(stiff solids, high Weissenberg) where implicit integration pays off.
 \end{abstract}
 
 \begin{keyword}

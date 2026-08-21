@@ -25,15 +25,25 @@ plagues conformation-tensor transport.
 is throttled by the elastic-wave speed $c_s=\sqrt{\mu_s/\rho}$, the viscous diffusion
 $\dx^2/\nu$, and---for a viscoelastic solid---the relaxation time $\tau$. Stiff solids
 and high-Weissenberg regimes are effectively out of reach.
-\item \textbf{Unified Eulerian alternatives are compressible.} The Godunov--Peshkov--%
-Romenski (GPR) model unifies viscous fluids and elastoplastic/viscoelastic solids in a
-single first-order hyperbolic system \cite{Peshkov2016,Dumbser2016}, but it is
-compressible and advanced with explicit or semi-implicit high-order schemes; an
-\emph{implicit, monolithic, incompressible} treatment remains an open gap.
+\item \textbf{Existing implicit Eulerian FSI is hyperelastic or partitioned.} Implicit,
+monolithic, incompressible Eulerian FSI already exists for \emph{hyperelastic} solids:
+Dunne \cite{Dunne2006} and Richter \cite{Richter2013} solve a coupled Newton system for
+velocity, pressure and a solid deformation field on a fixed grid, tracking the interface
+with an ``Initial Point Set'' that is itself a reference-map-like field. Richter, however,
+advances the deformation/interface through a \emph{separate extension step outside the
+Jacobian} and explicitly notes that a \emph{fully} implicit treatment (including the
+domain-movement derivatives) remains to be done. Sharp-interface implicit FSI for
+large-deformation solids has also been developed by Kolahdouz \emph{et al.}\
+\cite{Kolahdouz2023}, but through a \emph{partitioned} Dirichlet--Neumann coupling on a
+separate Lagrangian solid mesh, not a monolithic Eulerian solve. Full-Eulerian
+interface-capturing FSI (Sugiyama \cite{Sugiyama2011}, Ii \emph{et al.}\ \cite{Ii2012})
+and the compressible GPR unified model \cite{Peshkov2016,Dumbser2016} are advanced with
+pressure-correction or explicit/semi-implicit schemes. In none of these is a finite-strain
+\emph{viscoelastic} solid coupled monolithically and fully implicitly.
 \end{enumerate}
 
-\paragraph{Contributions.} We address all three within one collocated-velocity,
-one-pressure RMT:
+\paragraph{Contributions.} Relative to the above, we contribute, within one
+finite-difference, staggered-grid RMT:
 \begin{enumerate}[label=(\arabic*),nosep]
 \item A finite-strain viscoelastic solid whose stress-carrying strain is transported as
 the \emph{log-conformation} tensor $\psib=\log\be$ \cite{Fattal2004}, guaranteeing
@@ -42,12 +52,20 @@ reference map. The standard-linear-solid form retains an equilibrium hyperelasti
 branch so the body still returns to shape; $\tau\to\infty$ recovers neo-Hookean RMT.
 \item An implicit--explicit (IMEX) time-integration \emph{stack} that lifts the stiff
 CFL limits one term at a time---backward-Euler viscosity through the pressure
-transform/Krylov solvers, exact exponential relaxation, and a linearly-implicit
-elastic-wave stabilizer---culminating in
-\item a fully-implicit, monolithic Newton--Krylov solve of the coupled
-$(\uv,p,\xiv,\psib)$ system that lifts the elastic-wave CFL while retaining accuracy,
-reusing the exact pressure projection as the saddle-point preconditioner.
+transform/Krylov solvers, exact exponential relaxation, an energy-conserving trapezoidal
+elastic coupling, and semi-Lagrangian advection---each verified to reproduce the explicit
+result and to lift its target limit.
+\item A fully-implicit, monolithic Newton--Krylov (JFNK) formulation of the coupled
+$(\uv,p,\xiv,\psib)$ system in which the reference map is a coupled unknown (not the lagged
+extension step of \cite{Richter2013}), preconditioned by one step of the split IMEX solver
+and by the exact projection as the pressure Schur complement. This is the \emph{fully}
+implicit, \emph{viscoelastic} case left open by \cite{Richter2013,Kolahdouz2023}.
 \end{enumerate}
+The IMEX stack (contribution~2) is fully implemented and validated. The monolithic solver
+(contribution~3) is realized here for the fluid and (in progress) the neo-Hookean coupling;
+its extension to the coupled $\psib$ block and a work--precision comparison against the IMEX
+stack are the remaining steps. \emph{We report each capability at its true status and do not
+claim results the solver does not yet produce.}
 The staggered (MAC) discretization renders the projection exact
 (machine-zero divergence), removing the checkerboard/Rhie--Chow workarounds of the
 collocated formulation. \Cref{sec:governing,sec:rmt,sec:constitutive} set out the
