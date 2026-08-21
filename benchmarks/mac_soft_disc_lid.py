@@ -18,11 +18,12 @@ from pyRMT.mac import (mac_grid, momentum_predictor, momentum_predictor_lid_imex
 from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
     rebuild_phi_from_reference_map, solid_cauchy_stress, smoothed_heaviside,
     grad_central_x_2nd, grad_central_y_2nd, reinitialize_phi_fmm)
+from pyRMT.viscoelastic import logconf_local_step_strang, sym_exp
 
 
 def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0,
         reinit=False, isochoric=False, out_root="outputs", imex=False, dt=None, write=True,
-        integrator=None, mu_s=0.1):
+        integrator=None, mu_s=0.1, viscoelastic=False, G_ve=None, tau=np.inf):
     dx, dy = mac_grid(N, N)
     xc = (np.arange(N) + 0.5) * dx
     Xc, Yc = np.meshgrid(xc, xc)
@@ -49,6 +50,9 @@ def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0
             detg_clamp = 5.0
         print(f"[MAC FSI] scheme=conservative (Jain Eq.26): w_cut=0 + FMM reinit + detg_clamp={detg_clamp}")
     X1, X2 = extrapolate_reference_map(Xc * sm, Yc * sm, phi, dx, dy, nl)
+    if viscoelastic:                     # psi = log(b_e), b_e = I initially (unstressed)
+        G_ve = mu_s if G_ve is None else G_ve
+        p11 = np.zeros((N, N)); p12 = np.zeros((N, N)); p22 = np.zeros((N, N))
 
     u = np.zeros((N, N + 1)); v = np.zeros((N + 1, N))
     eig = poisson_eigs_neumann(N, N, dx, dy)
@@ -102,6 +106,20 @@ def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0
 
         sxx, sxy, syy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s, kappa, phi,
                                                detg_clamp=detg_clamp, isochoric=isochoric)
+        if viscoelastic:
+            # transport psi=log(b_e), stretch + relax, then use sigma = G dev(b_e).
+            # tau->inf recovers the neo-Hookean stress (b_e -> F F^T); finite tau relaxes.
+            p11 = advect_reference_map(p11, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
+            p12 = advect_reference_map(p12, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
+            p22 = advect_reference_map(p22, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
+            p11, p12 = extrapolate_reference_map(p11, p12, phi, dx, dy, nl)
+            p22, _ = extrapolate_reference_map(p22, np.zeros((N, N)), phi, dx, dy, nl)
+            L11 = grad_central_x_2nd(u_c, dx); L12 = grad_central_y_2nd(u_c, dy)
+            L21 = grad_central_x_2nd(v_c, dx); L22 = grad_central_y_2nd(v_c, dy)
+            p11, p12, p22 = logconf_local_step_strang(p11, p12, p22, L11, L12, L21, L22, tau, dt)
+            be11, be12, be22 = sym_exp(p11, p12, p22)
+            trbe = 0.5 * (be11 + be22)
+            sxx = G_ve * (be11 - trbe); sxy = G_ve * be12; syy = G_ve * (be22 - trbe)
         H = smoothed_heaviside(phi, w_t)
         Sxx = (1 - H) * sxx; Sxy = (1 - H) * sxy; Syy = (1 - H) * syy
         divx = grad_central_x_2nd(Sxx, dx) + grad_central_y_2nd(Sxy, dy)   # centres
