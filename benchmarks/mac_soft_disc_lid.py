@@ -13,14 +13,16 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pyRMT.mac import (mac_grid, momentum_predictor, momentum_predictor_lid_imex,
-                       project, poisson_eigs_neumann, divergence, advect_xi_conservative)
+                       project, poisson_eigs_neumann, divergence, advect_xi_conservative,
+                       resolve_integrator)
 from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
     rebuild_phi_from_reference_map, solid_cauchy_stress, smoothed_heaviside,
     grad_central_x_2nd, grad_central_y_2nd, reinitialize_phi_fmm)
 
 
 def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0,
-        reinit=False, isochoric=False, out_root="outputs", imex=False, dt=None, write=True):
+        reinit=False, isochoric=False, out_root="outputs", imex=False, dt=None, write=True,
+        integrator=None):
     dx, dy = mac_grid(N, N)
     xc = (np.arange(N) + 0.5) * dx
     Xc, Yc = np.meshgrid(xc, xc)
@@ -51,12 +53,12 @@ def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0
     u = np.zeros((N, N + 1)); v = np.zeros((N + 1, N))
     eig = poisson_eigs_neumann(N, N, dx, dy)
     cs = np.sqrt(mu_s / rho)
+    name, use_imex, _ = resolve_integrator(integrator, imex=imex, supports_elastic=False)
     dt_adv = 0.3 * dx / U_lid; dt_visc = 0.2 * dx * dx / nu; dt_elastic = 0.3 * dx / (cs + 1e-9)
     if dt is None:                         # IMEX lifts the viscous limit (not the elastic wave)
-        dt = min(dt_adv, dt_elastic) if imex else min(dt_adv, dt_visc, dt_elastic)
+        dt = min(dt_adv, dt_elastic) if use_imex else min(dt_adv, dt_visc, dt_elastic)
     out_dir = os.path.join(out_root, f"mac_soft_disc_N{N}"); os.makedirs(out_dir, exist_ok=True)
-    print(f"[MAC FSI] N={N} mu_s={mu_s} mu_f={mu_f} dt={dt:.2e} t_end={t_end} "
-          f"integrator={'IMEX' if imex else 'explicit'}")
+    print(f"[MAC FSI] N={N} mu_s={mu_s} mu_f={mu_f} dt={dt:.2e} t_end={t_end} integrator={name}")
 
     t = 0.0; step = 0; traj = []
     while t < t_end:
@@ -90,7 +92,7 @@ def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0
         fu = np.zeros((N, N + 1)); fu[:, 1:-1] = 0.5 * (divx[:, 1:] + divx[:, :-1])
         fv = np.zeros((N + 1, N)); fv[1:-1, :] = 0.5 * (divy[1:, :] + divy[:-1, :])
 
-        if imex:
+        if use_imex:
             ustar, vstar = momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid, fu=fu, fv=fv, rho=rho)
         else:
             ustar, vstar = momentum_predictor(u, v, nu, dx, dy, dt, U_lid, fu=fu, fv=fv, rho=rho)

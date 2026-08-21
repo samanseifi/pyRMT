@@ -26,7 +26,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pyRMT.mac import (mac_grid, momentum_predictor_periodic,
                        momentum_predictor_periodic_imex,
                        momentum_predictor_periodic_imex_elastic, lap_eigs_periodic,
-                       project_per, poisson_eigs_periodic, divergence_per)
+                       project_per, poisson_eigs_periodic, divergence_per,
+                       resolve_integrator)
 from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
     rebuild_phi_from_reference_map, smoothed_heaviside, grad_central_x_2nd, grad_central_y_2nd)
 from pyRMT.viscoelastic import logconf_local_step, logconf_local_step_strang, sym_exp
@@ -39,7 +40,7 @@ def _lam_max(b11, b12, b22):
 
 def run(N=128, t_end=12.0, tau=0.5, eps_rate=0.5, G=0.3, mu_f=0.05, rho=1.0,
         R=0.13, frame_dt=0.15, save_frames=True, out_root="outputs",
-        imex=False, elastic_imex=False, dt=None, write=True):
+        imex=False, elastic_imex=False, dt=None, write=True, integrator=None):
     """Four-roll-mill extensional stretch of a viscoelastic blob.
 
     imex=True uses the IMEX time integration (backward-Euler viscosity #14.1 +
@@ -65,7 +66,9 @@ def run(N=128, t_end=12.0, tau=0.5, eps_rate=0.5, G=0.3, mu_f=0.05, rho=1.0,
     X1, X2 = extrapolate_reference_map(Xc * m, Yc * m, phi, dx, dy, 3)
     p11 = np.zeros((N, N)); p12 = np.zeros((N, N)); p22 = np.zeros((N, N))   # psi = log b_e = 0
 
-    imex = imex or elastic_imex          # elastic-IMEX implies the viscous/relaxation IMEX
+    name, imex, elastic_imex = resolve_integrator(integrator, imex=imex,
+                                                  elastic_imex=elastic_imex,
+                                                  supports_elastic=True)
     u = np.zeros((N, N)); v = np.zeros((N, N))
     eig = poisson_eigs_periodic(N, N, dx, dy)
     lap_eig = lap_eigs_periodic(N, N, dx, dy) if imex else None
@@ -86,7 +89,7 @@ def run(N=128, t_end=12.0, tau=0.5, eps_rate=0.5, G=0.3, mu_f=0.05, rho=1.0,
     tag = "elastic" if tau == np.inf else f"tau{tau:g}"
     bxx_analytic = np.inf if (tau == np.inf or Wi >= 0.5) else 1.0 / (1.0 - 2.0 * Wi)
     print(f"[ve-extension] N={N} eps={eps_rate} tau={tau} Wi={Wi:.3f} G={G} "
-          f"integrator={'IMEX' if imex else 'explicit'} "
+          f"integrator={name} "
           f"-> analytic b_xx_steady={bxx_analytic:.3f}  dt={dt:.2e}"
           f"{'' if imex else ' (visc-limited: %.2e)' % dt_visc}")
 
