@@ -95,9 +95,11 @@ extension), the fluid and neo-Hookean-solid FSI against the lid-driven cavity an
 disc-in-vortex convergence study, and---the point of the title---a two-way-coupled
 \emph{viscoelastic} disc in a Taylor--Green vortex, where $\tau\to\infty$ recovers the
 elastic dynamics, finite $\tau$ dissipates stored elastic energy, and $\be$ stays
-positive-definite. A work--precision comparison shows the implicit stack paying off in the
-viscous- and elasticity-limited regimes where the explicit step is smallest. Each
-capability is reported at its true status.
+positive-definite. A work--precision study delineates where the implicit stack pays off: the
+semi-Lagrangian scheme reaches a target accuracy at lower wall-clock by taking several-fold
+larger steps, while the benefit of the implicit viscous/elastic solves is set by how far the
+step can grow relative to the per-step solve cost. Each capability is reported at its true
+status.
 \end{abstract}
 
 \begin{keyword}

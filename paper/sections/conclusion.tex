@@ -11,8 +11,10 @@ removes the viscous, relaxation and elastic-wave step-size limits in turn---reus
 pressure transform/Krylov solvers, with a trapezoidal elastic coupling that conserves the
 discrete energy to round-off---and a semi-monolithic Newton--Krylov scheme that advances
 the velocity--pressure system implicitly with the reference map and conformation lagged.
-A work--precision comparison shows the implicit stack paying off where the explicit step
-is smallest (the viscous- and elasticity-limited regimes). We demonstrated the coupled
+A work--precision comparison delineates where this pays off: the semi-Lagrangian step lowers
+cost at controlled accuracy broadly, while the implicit viscous/elastic solves win once the
+lifted step exceeds their per-step cost (low Reynolds number, stiff solids, or fine grids).
+We demonstrated the coupled
 viscoelastic response on a disc in a Taylor--Green vortex: $\tau\to\infty$ recovers the
 elastic dynamics, finite $\tau$ dissipates stored elastic energy, and the elastic Finger
 tensor remains positive-definite throughout.
