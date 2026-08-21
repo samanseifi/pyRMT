@@ -22,7 +22,7 @@ from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
 
 def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0,
         reinit=False, isochoric=False, out_root="outputs", imex=False, dt=None, write=True,
-        integrator=None):
+        integrator=None, mu_s=0.1):
     dx, dy = mac_grid(N, N)
     xc = (np.arange(N) + 0.5) * dx
     Xc, Yc = np.meshgrid(xc, xc)
@@ -33,7 +33,7 @@ def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0
     phi_init = lambda X, Y: np.sqrt((X - x0)**2 + (Y - y0)**2) - R
     phi = phi_init(Xc, Yc); sm = (phi <= 0).astype(float)
 
-    mu_s, kappa, rho = 0.1, 0.0, 1.0
+    kappa, rho = 0.0, 1.0             # mu_s from the argument (default 0.1 = Sugiyama case)
     mu_f = 0.01; nu = mu_f / rho; w_t = 2.0 * dx; U_lid = 1.0
     nl = 3
     # central2/weno5 advect the band, so their stencils need a buffer of
@@ -53,10 +53,16 @@ def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0
     u = np.zeros((N, N + 1)); v = np.zeros((N + 1, N))
     eig = poisson_eigs_neumann(N, N, dx, dy)
     cs = np.sqrt(mu_s / rho)
-    name, use_imex, _ = resolve_integrator(integrator, imex=imex, supports_elastic=False)
+    name, use_imex, use_elastic = resolve_integrator(integrator, imex=imex,
+                                                     supports_elastic=True)
     dt_adv = 0.3 * dx / U_lid; dt_visc = 0.2 * dx * dx / nu; dt_elastic = 0.3 * dx / (cs + 1e-9)
-    if dt is None:                         # IMEX lifts the viscous limit (not the elastic wave)
-        dt = min(dt_adv, dt_elastic) if use_imex else min(dt_adv, dt_visc, dt_elastic)
+    if dt is None:
+        if use_elastic:                    # viscous + elastic-wave limits lifted
+            dt = dt_adv
+        elif use_imex:                     # viscous limit lifted (not the elastic wave)
+            dt = min(dt_adv, dt_elastic)
+        else:
+            dt = min(dt_adv, dt_visc, dt_elastic)
     out_dir = os.path.join(out_root, f"mac_soft_disc_N{N}"); os.makedirs(out_dir, exist_ok=True)
     print(f"[MAC FSI] N={N} mu_s={mu_s} mu_f={mu_f} dt={dt:.2e} t_end={t_end} integrator={name}")
 
@@ -71,17 +77,19 @@ def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0
             phi = reinitialize_phi_fmm(phi, dx, dy)   # clean signed-distance band
         sm = (phi <= 0).astype(float)
         wc = w_cut_fac * dx
-        if scheme == "conservative":
-            # Jain Eq.26 with the divergence-free MAC face velocity (u,v)
-            X1 = advect_xi_conservative(X1, u, v, dx, dy, dt, phi, wc) * sm
-            X2 = advect_xi_conservative(X2, u, v, dx, dy, dt, phi, wc) * sm
-        else:
-            X1 = advect_reference_map(X1, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
-            X2 = advect_reference_map(X2, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
-        X1, X2 = extrapolate_reference_map(X1, X2, phi, dx, dy, nl)
-        phi = rebuild_phi_from_reference_map(X1, X2, phi_init)
-        if reinit:
-            phi = reinitialize_phi_fmm(phi, dx, dy)
+        if not use_elastic:
+            # explicit / imex: advect the reference map with the current velocity first
+            if scheme == "conservative":
+                # Jain Eq.26 with the divergence-free MAC face velocity (u,v)
+                X1 = advect_xi_conservative(X1, u, v, dx, dy, dt, phi, wc) * sm
+                X2 = advect_xi_conservative(X2, u, v, dx, dy, dt, phi, wc) * sm
+            else:
+                X1 = advect_reference_map(X1, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
+                X2 = advect_reference_map(X2, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
+            X1, X2 = extrapolate_reference_map(X1, X2, phi, dx, dy, nl)
+            phi = rebuild_phi_from_reference_map(X1, X2, phi_init)
+            if reinit:
+                phi = reinitialize_phi_fmm(phi, dx, dy)
 
         sxx, sxy, syy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s, kappa, phi,
                                                detg_clamp=detg_clamp, isochoric=isochoric)
@@ -92,11 +100,26 @@ def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0
         fu = np.zeros((N, N + 1)); fu[:, 1:-1] = 0.5 * (divx[:, 1:] + divx[:, :-1])
         fv = np.zeros((N + 1, N)); fv[1:-1, :] = 0.5 * (divy[1:, :] + divy[:-1, :])
 
-        if use_imex:
+        u_old, v_old = u, v
+        if use_elastic:
+            # trapezoidal implicit-elastic (#14.4 stage 2b): elastic force inside the
+            # implicit solve + the (dt^2/4)cs^2 wave stabilizer -> energy-conserving.
+            ustar, vstar = momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid,
+                                                       fu=fu, fv=fv, rho=rho, cs2=cs * cs)
+        elif use_imex:
             ustar, vstar = momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid, fu=fu, fv=fv, rho=rho)
         else:
             ustar, vstar = momentum_predictor(u, v, nu, dx, dy, dt, U_lid, fu=fu, fv=fv, rho=rho)
         u, v, p = project(ustar, vstar, dx, dy, dt, rho, eig)
+
+        if use_elastic:
+            # advance the reference map with the IMPLICIT-MIDPOINT velocity (required for
+            # the trapezoidal coupling to be stable and undamped -- see the wave analysis)
+            um = 0.5 * (u_old + u); vm = 0.5 * (v_old + v)
+            umc = 0.5 * (um[:, :-1] + um[:, 1:]); vmc = 0.5 * (vm[:-1, :] + vm[1:, :])
+            X1 = advect_reference_map(X1, umc, vmc, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
+            X2 = advect_reference_map(X2, umc, vmc, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
+            X1, X2 = extrapolate_reference_map(X1, X2, phi, dx, dy, nl)
 
         msk = phi <= 0
         # honest divergence detection. The masking/reinit guards (and the J^{-2}

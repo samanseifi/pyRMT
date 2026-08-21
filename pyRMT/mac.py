@@ -317,16 +317,26 @@ def _pcg_helmholtz(rhs_int, apply_lap_hom, embed, coef, dx, dy,
 
 
 def momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None,
-                                rho=1.0, rtol=1e-8):
+                                rho=1.0, rtol=1e-8, cs2=0.0):
     """IMEX predictor for the lid-driven cavity: explicit central advection + face
     forces, implicit (backward-Euler) viscous diffusion solved by preconditioned CG
     (DST spectral preconditioner -> a handful of iterations, independent of N). Same
     advection and BCs as momentum_predictor, but the viscous CFL dt < dx^2/(4 nu) is
-    removed. Returns u*, v* with wall (normal) faces zeroed."""
+    removed.
+
+    cs2 > 0 additionally activates the linearly-implicit TRAPEZOIDAL elastic-wave
+    stabilizer (#14.4 stage 2b): the implicit operator gains a constant
+    (dt^2/4) cs^2 Lap term and the RHS the matching (dt^2/4) cs^2 Lap(u^n) term, so the
+    elastic force (passed in fu/fv, already blended by the solid fraction) is advanced
+    by the energy-conserving implicit-midpoint rule rather than the dissipative stage-1
+    stabilizer. The constant-coefficient form keeps the fast PCG solve; the O(dt^2)
+    elastic term in the fluid is a harmless, consistent perturbation. Returns u*, v*."""
     Ny, Nxp1 = u.shape; Nx = Nxp1 - 1
     up = _u_ghost_y(u, U_lid); vp = _v_ghost_x(v)
+    c_el = 0.25 * dt * dt * cs2
+    coef = dt * nu + c_el
 
-    # --- u: explicit advection + force -> rhs; implicit diffusion via PCG ---
+    # --- u: explicit advection + force (+ trapezoidal elastic RHS) -> PCG solve ---
     uc = u[:, 1:-1]
     dudx = (u[:, 2:] - u[:, :-2]) / (2 * dx)
     dudy = (up[2:, 1:-1] - up[:-2, 1:-1]) / (2 * dy)
@@ -334,13 +344,15 @@ def momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None,
     rhs_u = uc + dt * (-(uc * dudx + v_u * dudy))
     if fu is not None:
         rhs_u = rhs_u + dt * fu[:, 1:-1] / rho
-    rhs_u[-1, :] += dt * nu * (2.0 * U_lid / dy**2)      # lid inhomogeneity -> RHS
-    embed_u = lambda x: np.pad(x, ((0, 0), (1, 1)))       # walls (i=0,Nx) = 0
+    if c_el > 0.0:
+        rhs_u = rhs_u + c_el * _lap_u_lid_hom(u, dx, dy)   # trapezoidal term (u^n)
+    rhs_u[-1, :] += coef * (2.0 * U_lid / dy**2)           # lid inhomogeneity -> RHS
+    embed_u = lambda x: np.pad(x, ((0, 0), (1, 1)))        # walls (i=0,Nx) = 0
     sol_u = _pcg_helmholtz(rhs_u, lambda w: _lap_u_lid_hom(w, dx, dy), embed_u,
-                           dt * nu, dx, dy, rtol)
+                           coef, dx, dy, rtol)
     ustar = u.copy(); ustar[:, 1:-1] = sol_u; ustar[:, 0] = 0.0; ustar[:, -1] = 0.0
 
-    # --- v: explicit advection + force -> rhs; implicit diffusion via PCG ---
+    # --- v: explicit advection + force (+ trapezoidal elastic RHS) -> PCG solve ---
     vc = v[1:-1, :]
     dvdy = (v[2:, :] - v[:-2, :]) / (2 * dy)
     dvdx = (vp[1:-1, 2:] - vp[1:-1, :-2]) / (2 * dx)
@@ -348,9 +360,11 @@ def momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None,
     rhs_v = vc + dt * (-(u_v * dvdx + vc * dvdy))
     if fv is not None:
         rhs_v = rhs_v + dt * fv[1:-1, :] / rho
-    embed_v = lambda x: np.pad(x, ((1, 1), (0, 0)))       # walls (j=0,Ny) = 0
+    if c_el > 0.0:
+        rhs_v = rhs_v + c_el * _lap_v_lid_hom(v, dx, dy)
+    embed_v = lambda x: np.pad(x, ((1, 1), (0, 0)))        # walls (j=0,Ny) = 0
     sol_v = _pcg_helmholtz(rhs_v, lambda w: _lap_v_lid_hom(w, dx, dy), embed_v,
-                           dt * nu, dx, dy, rtol)
+                           coef, dx, dy, rtol)
     vstar = v.copy(); vstar[1:-1, :] = sol_v; vstar[0, :] = 0.0; vstar[-1, :] = 0.0
     return ustar, vstar
 

@@ -178,9 +178,21 @@ here `ψ=log b_e` carries stress, decoupled from a geometry-only ξ).
       `tests/test_implicit_elastic.py`): at 2× the explicit CFL stage-2 energy drift
       `5.5e-5`–`1.8e-3` while stage-1 damps the wave away (drift →1.0); stable at 5× CFL
       where explicit diverges; accurate (`err<5e-2`) to ~1–2× CFL, phase error only beyond.
-    - **Stage 2b — wire trapezoidal elastic coupling into the nonlinear FSI loop** (advance
-      ξ/ψ with the midpoint velocity, elastic force with the midpoint stress; Helmholtz/CG
-      solve). Neo-Hookean soft disc first, then viscoelastic.
+    - **Stage 2b ✅ DONE — trapezoidal elastic coupling in the FSI + preconditioned solve.**
+      (i) **Preconditioned CG** (`_pcg_helmholtz`, DST spectral preconditioner) fixes the
+      net-speedup bottleneck the N=128 crossover exposed: iterations `17→5` (N=128 viscous),
+      `27→7` (elastic), staying ~5–7 as N grows (vs CG's O(N)). (ii) **Trapezoidal
+      implicit-elastic** in the soft-disc loop (`integrator="imex-elastic"`, `cs2` in
+      `momentum_predictor_lid_imex`): elastic force inside the implicit solve + the
+      `(dt²/4)cs²∇²` stabilizer, reference map advanced with the **implicit-midpoint
+      velocity** (required — explicit-displacement gives det>1, unstable). Verified:
+      reproduces the explicit centroid to `2e-3` (regression), runs a stiff disc stably.
+      Tests: `tests/test_imex_wall.py` (PCG), `tests/test_elastic_imex_fsi.py`.
+      - **Honest finding:** the lid-driven case is *advection*-limited (lid flow U=1, momentum
+        advection explicit), so lifting the elastic CFL gives no speedup here — the elastic
+        lift pays off in stiff/quiescent regimes (shown on the standing wave, 2a). A net
+        speedup in flow-driven FSI additionally needs **implicit advection** (semi-Lagrangian
+        momentum) — folded into 2c.
     - **Stage 2c — full JFNK** over `(u,p,ξ,ψ)` with analytic material tangent, conservative
       differentiable ξ/ψ advection ([[6]]), projection as pressure preconditioner,
       frozen-interface linearization. Clears the JCP bar *if* 10–100× dt AND net speedup
