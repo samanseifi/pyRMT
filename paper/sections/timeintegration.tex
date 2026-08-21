@@ -1,0 +1,122 @@
+\section{Time integration: from explicit to implicit--monolithic}
+\label{sec:time}
+
+\subsection{Explicit baseline and its CFL restrictions}
+One step of the explicit scheme advects $(\xiv,\psib)$ with the cell-centred velocity,
+extrapolates into the band, assembles the blended stress \cref{eq:sls} and forces, takes
+a forward-Euler momentum predictor, and projects \cref{eq:project}. Stability requires
+\begin{equation}
+\dt \le \min\!\Big(
+\underbrace{C\,\dx/U}_{\text{advection}},\;
+\underbrace{C_\nu\,\dx^2/\nu}_{\text{viscous}},\;
+\underbrace{C\,\dx/c_s}_{\text{elastic wave}}\Big),
+\qquad \text{and}\quad \dt\lesssim\tau,
+\label{eq:cfl}
+\end{equation}
+with $c_s=\sqrt{\mu_s/\rho}$. The viscous, relaxation and elastic-wave limits are
+progressively removed below; advection is retained explicitly because the
+semi-Lagrangian backtrace is already unconditionally stable.
+
+\subsection{IMEX stack}
+The strategies form a stack, each making one more stiff term of \cref{eq:cfl} implicit,
+selected by a single keyword (\texttt{explicit} $\subset$ \texttt{imex} $\subset$
+\texttt{imex-elastic}).
+
+\paragraph{(i) Implicit viscosity.} The viscous term is advanced by backward Euler,
+yielding a Helmholtz solve for the predictor,
+\begin{equation}
+\left(\It-\dt\,\nu\nabla^2\right)\uv^{*}
+   = \uv^{n} - \dt\,(\uv\!\cdot\!\grad)\uv^{n} + \dt\,\bm f/\rho .
+\label{eq:helmholtz}
+\end{equation}
+On periodic and Neumann directions the Helmholtz operator is diagonalized by the
+\emph{same} transform (FFT/DCT) as the pressure Poisson solve of
+\cref{sec:discretization}: in spectral space each mode is divided by
+$1-\dt\,\nu\,\lambda_k>0$, so \cref{eq:helmholtz} is unconditionally stable and costs one
+extra transform per component. For Dirichlet (no-slip $+$ moving lid) walls, where the
+DCT does not diagonalize the operator, \cref{eq:helmholtz} is solved matrix-free by
+conjugate gradients on the same ghost-cell viscous stencil (symmetric positive-definite,
+hence CG-convergent), with the moving lid entering as a right-hand-side inhomogeneity;
+this route also accommodates the variable one-fluid viscosity.
+
+\paragraph{(ii) Exact relaxation.} The stiff relaxation of \cref{eq:ucm} is removed by
+the analytic Strang substep \cref{eq:relax-exact}, which is $A$-stable in $\tau$ and
+positive-definite-preserving (\cref{sec:exact-relax}).
+
+\paragraph{(iii) Linearly-implicit elastic-wave stabilizer.}
+\label{sec:elastic-stab}
+The nonlinear elastic force $\dive\sig_{\!s}$ is kept explicit (physics), while an
+$O(\dt^2)$ wave operator is added implicitly to \cref{eq:helmholtz},
+\begin{equation}
+\left(\It-\dt\,\nu\nabla^2-\dt^2 c_s^2\,\chi\,\nabla^2\right)\uv^{*}
+   = \uv^{n}-\dt\,(\uv\!\cdot\!\grad)\uv^{n}+\dt\,\bm f/\rho,
+\label{eq:elastic-stab}
+\end{equation}
+with $\chi=1-H$ the solid indicator. A frozen-coefficient split (constant $c_s^2$
+treated implicitly everywhere, removed from the fluid by an explicit defect) keeps a
+single transform solve. Crucially the elastic force must sit \emph{inside} the implicit
+right-hand side, as the following stability analysis shows.
+
+\begin{proposition}[Unconditional stability of the elastic stabilizer]
+\label{prop:vn}
+Consider the linearized elastic wave $\uv_t=c_s^2 d_{xx},\ d_t=\uv$ ($d$ the
+displacement), discretized as
+$\uv^{n+1}=\uv^{n}+\dt\,c_s^2 d^{n}_{xx}+\dt^2 c_s^2\,\uv^{n+1}_{xx}$,
+$d^{n+1}=d^{n}+\dt\,\uv^{n+1}$. For a Fourier mode $k$ with $a\equiv\dt^2 c_s^2 k^2\ge0$
+the amplification matrix has spectral radius $|\lambda|=1/\sqrt{1+a}\le1$; the scheme is
+unconditionally stable, with mild damping that vanishes as $\dt\to0$.
+\end{proposition}
+\begin{proof}
+With $\partial_{xx}\to-k^2$ the update is
+$(1+a)\uv^{n+1}=\uv^n-\dt c_s^2 k^2 d^n$, $d^{n+1}=d^n+\dt\,\uv^{n+1}$. Eliminating
+gives the map $\bm M=\tfrac{1}{1+a}\begin{psmallmatrix}1 & -\dt c_s^2 k^2\\ \dt & 1\end{psmallmatrix}$
+with $\det\bm M=1/(1+a)$ and $\operatorname{tr}\bm M=2/(1+a)$. The eigenvalues solve
+$\lambda^2-\tfrac{2}{1+a}\lambda+\tfrac1{1+a}=0$, i.e.\
+$\lambda=(1\pm i\sqrt a)/(1+a)$, so $|\lambda|^2=(1+a)/(1+a)^2=1/(1+a)\le1$. If instead
+the force is applied \emph{after} the implicit solve, the analogous map has
+$\det=1/(1+a)$ but $\operatorname{tr}=1/(1+a)+1-a$, whose eigenvalues exceed unity for
+$a>1$ (unstable). \hfill
+\end{proof}
+This is a linearly-implicit \emph{stage-1} scheme: the isotropic-Laplacian stabilizer
+adds numerical damping that grows with $\dt$, trading accuracy for unconditional
+stability. The fully-consistent tangent that removes the damping is the monolithic
+solver of \cref{sec:monolithic}.
+
+\subsection{Fully-implicit monolithic solver}
+\label{sec:monolithic}
+To lift the elastic-wave CFL \emph{without} the stage-1 damping we solve the coupled
+system implicitly for the state $\bm X=(\uv,p,\xiv,\psib)^{n+1}$. The backward-Euler
+residual is
+\begin{subequations}\label{eq:residual}
+\begin{align}
+\bm R_{\!\uv} &= \rho\,\frac{\uv-\tilde{\uv}}{\dt} + \grad p
+   - \dive\!\left(2\mu_f\bm D(\uv)\right) - \dive\sig_{\!s}(\xiv,\psib) - \bm f = \bm 0,\\
+R_{p} &= \dive\uv = 0,\\
+\bm R_{\xiv} &= \frac{\xiv-\tilde{\xiv}}{\dt} + (\uv\!\cdot\!\grad)\xiv = \bm 0,\\
+\bm R_{\psib} &= \frac{\psib-\tilde{\psib}}{\dt} - \bm g(\grad\uv,\psib;\tau) = \bm 0,
+\end{align}
+\end{subequations}
+where $\tilde{(\cdot)}$ denotes the semi-Lagrangian departure-point value and $\bm g$ is
+the local log-conformation RHS \cref{eq:logconf-rhs} (with the relaxation handled by the
+exact substep). \Cref{eq:residual} is solved by an inexact Newton--Krylov iteration
+\cite{Knoll2004}; the Jacobian action uses the analytic material tangents
+$\partial\sig_{\!s}/\partial\xiv$ and $\partial\sig_{\!s}/\partial\psib$ (the latter via
+$\partial\exp\psib/\partial\psib$, closed-form in 2-D). The velocity--pressure block is a
+saddle point preconditioned by the exact projection of \cref{sec:discretization} (the
+DCT/FFT Poisson solve approximates the pressure Schur complement); the elastic block
+adds a symmetric-positive stiffness to the velocity operator, improving conditioning.
+
+\paragraph{Non-smooth operators.} A clean Newton linearization requires differentiable
+$\bm R_{\xiv},\bm R_{\psib}$; the default semi-Lagrangian interpolation,
+band extrapolation and level-set rebuild are only piecewise smooth. We (i) switch
+$\xiv/\psib$ transport to the conservative flux form (differentiable Jacobian
+$\partial\bm R_{\xiv}/\partial\uv$) and (ii) freeze the interface geometry
+($\phi$, band, $H$, departure points) at the start of the step, updating it in an outer
+fixed-point iteration---an ``implicit elastic kernel with lagged interface.''
+
+\paragraph{Success criteria.} The monolithic solver is a genuine contribution only if it
+demonstrates (a) stable $\dt$ of $10$--$100\times$ the explicit elastic limit,
+(b) a \emph{net} wall-clock speedup over explicit and over the stage-1 IMEX at matched
+accuracy, and (c) recovery of the explicit solution in the small-$\dt$ limit. These are
+reported in \cref{sec:results}. \TODO{stage-2 monolithic implementation and its results;
+this subsection is the design used by the implementation.}

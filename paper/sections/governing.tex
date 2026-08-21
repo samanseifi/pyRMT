@@ -1,0 +1,35 @@
+\section{Governing equations}
+\label{sec:governing}
+
+We consider an incompressible medium on a fixed domain $\Omega\subset\mathbb{R}^2$
+occupied by a Newtonian fluid and one or more finite-strain solid bodies. A single
+velocity field $\uv(\xv,t)$ and pressure $p(\xv,t)$ are shared by both phases. Momentum
+and incompressibility read
+\begin{align}
+\rho\left(\partial_t\uv + (\uv\!\cdot\!\grad)\uv\right)
+   &= -\grad p + \dive\sig_{\mathrm{d}} + \bm f_{\Gamma} + \bm f_{c},
+   \label{eq:mom}\\
+\dive\uv &= 0,
+   \label{eq:incomp}
+\end{align}
+where $\rho$ is the (piecewise-constant) density, $\bm f_\Gamma$ is the surface-tension
+force and $\bm f_c$ the contact force. The deviatoric stress $\sig_{\mathrm d}$ is
+blended between fluid and solid through a smoothed indicator (one-fluid model),
+\begin{equation}
+\sig_{\mathrm d} = 2\mu_f\,\bm D
+   + (1-H)\,\sig_{\!s},
+   \qquad
+\bm D=\tfrac12\!\left(\grad\uv+\grad\uv^{\!\top}\right),
+   \label{eq:blend}
+\end{equation}
+with $\mu_f$ the fluid viscosity, $\bm D$ the rate-of-strain, $\sig_{\!s}$ the solid
+Cauchy stress (\cref{sec:rmt,sec:constitutive}), and $H\in[0,1]$ a smoothed Heaviside
+of the level set $\phi$ ($H\to1$ in the fluid, $H\to0$ in the solid). The trace of
+$\sig_{\!s}$ is carried by the pressure, so only its deviatoric part enters
+\cref{eq:mom} up to a redefinition of $p$.
+
+The material occupied by the solid is tracked by the reference map (\cref{sec:rmt}),
+from which the level set $\phi$ and the deformation are reconstructed. Boundary
+conditions are problem-dependent (no-slip walls with an optional moving lid, free-slip
+impermeable walls, or periodic); the pressure boundary condition is chosen consistently
+with the velocity boundary condition (\cref{sec:discretization}).

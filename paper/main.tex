@@ -1,0 +1,110 @@
+%% pyRMT method paper -- Elsevier (elsarticle) format.
+%% Primary target: Journal of Computational Physics. Fallback: Computers & Fluids.
+%% Build:  pdflatex main ; bibtex main ; pdflatex main ; pdflatex main
+\documentclass[review,3p,11pt]{elsarticle}
+
+\usepackage{amsmath,amssymb,bm}
+\usepackage{amsthm}
+\usepackage{mathtools}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{cleveref}
+\usepackage{xcolor}
+
+\newtheorem{proposition}{Proposition}
+
+% placeholder figure box (draft only): \phfig{label}{caption}
+\newcommand{\phfig}[2]{%
+  \begin{figure}[t]\centering
+  \fbox{\parbox[c][0.28\textheight][c]{0.72\textwidth}{\centering
+    \color{blue}\texttt{[figure placeholder: #1]}}}
+  \caption{#2}\label{#1}
+  \end{figure}}
+
+% ---- draft placeholder macro (remove for submission) ----
+\newcommand{\TODO}[1]{{\color{red}\textbf{[TODO: #1]}}}
+\newcommand{\PLACE}[1]{{\color{blue}\texttt{<#1>}}}
+
+% ---- notation ----
+\newcommand{\uv}{\bm{u}}                 % velocity
+\newcommand{\xv}{\bm{x}}                 % Eulerian position
+\newcommand{\Xv}{\bm{X}}                 % reference position
+\newcommand{\xiv}{\bm{\xi}}              % reference map
+\newcommand{\Ften}{\bm{F}}              % deformation gradient
+\newcommand{\bt}{\bm{b}}                 % left Cauchy-Green / Finger
+\newcommand{\be}{\bm{b}_e}              % elastic Finger tensor
+\newcommand{\Lt}{\bm{L}}                % velocity gradient
+\newcommand{\It}{\bm{I}}                % identity
+\newcommand{\sig}{\bm{\sigma}}          % Cauchy stress
+\newcommand{\psib}{\bm{\psi}}           % log-conformation psi = log b_e
+\newcommand{\grad}{\nabla}
+\newcommand{\dive}{\grad\!\cdot\!}
+\newcommand{\dt}{\Delta t}
+\newcommand{\dx}{\Delta x}
+\newcommand{\Dt}[1]{\tfrac{D #1}{D t}}
+\newcommand{\tr}{\operatorname{tr}}
+\newcommand{\dev}{\operatorname{dev}}
+
+\journal{Journal of Computational Physics}
+
+\begin{document}
+
+\begin{frontmatter}
+
+\title{An implicit, monolithic, incompressible Reference Map Technique for
+viscoelastic fluid--structure interaction}
+
+\author[a]{Saman Seifi\corref{cor}}
+\cortext[cor]{Corresponding author}
+\affiliation[a]{organization={Affiliation TODO}, country={Country TODO}}
+
+\begin{abstract}
+We present a fully Eulerian, one-fluid Reference Map Technique (RMT) for
+incompressible fluid--structure interaction (FSI) that couples a finite-strain
+viscoelastic solid to a Newtonian fluid on a single collocated velocity field and a
+single pressure solve. Two contributions distinguish the method from the explicit,
+compressible, or fluid-only formulations in the literature. First, the stress-carrying
+strain is transported as a log-conformation tensor $\psib=\log\be$ (Fattal--Kupferman),
+which is positive-definite by construction and decouples the relaxing elastic stress
+from the folding-prone reference map. Second, the time discretization is made
+\emph{implicit and monolithic}: the stiff viscous, relaxation and elastic-wave terms
+are advanced without the explicit CFL restrictions through an implicit--explicit (IMEX)
+stack that reuses the pressure transform/Krylov solvers, culminating in a
+Newton--Krylov solve for the coupled velocity--pressure--reference-map--conformation
+system. The staggered (MAC) discretization makes the projection exact
+(machine-zero divergence). We verify the constitutive update against analytic
+viscometric limits to machine precision, confirm the exact projection and spatial
+order on manufactured and Taylor--Green problems, and validate the coupled solver
+against the Ghia lid-driven cavity and the Sugiyama soft-disc benchmark. We then
+demonstrate stable time steps \PLACE{X}$\times$ the explicit limit with a net wall-clock
+speedup of \PLACE{Y}$\times$, reaching high-Weissenberg and stiff-solid regimes that
+are inaccessible to explicit RMT.
+\end{abstract}
+
+\begin{keyword}
+reference map technique \sep fluid--structure interaction \sep viscoelasticity \sep
+log-conformation \sep implicit time integration \sep Eulerian solid mechanics
+\end{keyword}
+
+\end{frontmatter}
+
+\input{sections/intro}
+\input{sections/governing}
+\input{sections/rmt}
+\input{sections/constitutive}
+\input{sections/discretization}
+\input{sections/timeintegration}
+\input{sections/verification}
+\input{sections/validation}
+\input{sections/results}
+\input{sections/conclusion}
+
+\section*{Acknowledgements}
+\TODO{funding and acknowledgements}
+
+\bibliographystyle{elsarticle-num}
+\bibliography{refs}
+
+\end{document}

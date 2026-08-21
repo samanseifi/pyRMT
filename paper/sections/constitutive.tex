@@ -1,0 +1,79 @@
+\section{Finite-strain viscoelasticity via log-conformation}
+\label{sec:constitutive}
+
+\subsection{Standard-linear-solid model}
+The solid stress is split into a non-relaxing (equilibrium) neo-Hookean branch
+\cref{eq:neohookean} and a relaxing Maxwell branch carried by an elastic Finger tensor
+$\be$,
+\begin{equation}
+\sig_{\!s} = \mu_s\,\dev\!\left(\Ften\Ften^{\!\top}\right)
+   + G\,\dev(\be),
+\label{eq:sls}
+\end{equation}
+where $G$ is the viscoelastic modulus. The elastic Finger tensor evolves by the
+upper-convected Maxwell (UCM) equation with relaxation time $\tau$,
+\begin{equation}
+\Dt{\be} - \Lt\be - \be\Lt^{\!\top} = -\frac1\tau\left(\be-\It\right),
+\qquad \Lt=\grad\uv,
+\label{eq:ucm}
+\end{equation}
+with $\tfrac{D}{Dt}=\partial_t+(\uv\!\cdot\!\grad)$. Dropping the equilibrium branch
+($\mu_s=0$) gives a Maxwell fluid; $\tau\to\infty$ gives a purely elastic solid for
+which \cref{eq:ucm} reduces to $\Dt{\be}=\Lt\be+\be\Lt^{\!\top}$, i.e.\ $\be$ tracks
+$\Ften\Ften^{\!\top}$ and \cref{eq:sls} returns the neo-Hookean stress. The model
+therefore spans, under one framework, elastic solid $\leftrightarrow$ viscoelastic
+solid $\leftrightarrow$ viscoelastic fluid.
+
+\paragraph{Viscometric limits (used for verification).} For homogeneous simple shear
+$\Lt=\dot\gamma\,\bm e_x\!\otimes\!\bm e_y$ the steady solution of \cref{eq:ucm} is
+$b_e^{xy}=\tau\dot\gamma$, $b_e^{xx}=1+2\tau^2\dot\gamma^2$, $b_e^{yy}=1$, giving
+$\sigma_{xy}=G\tau\dot\gamma$ and first normal-stress difference
+$N_1=2G\tau^2\dot\gamma^2$. For a step shear strain $\gamma$ held from $t=0$,
+$b_e^{xy}(t)=\gamma\,e^{-t/\tau}$; for uniform planar extension at rate $\varepsilon$
+with $\mathrm{Wi}=\varepsilon\tau<\tfrac12$, $b_e^{xx}\to1/(1-2\mathrm{Wi})$.
+
+\subsection{Log-conformation transport}
+Direct transport of $\be$ is either over-diffusive or, if non-dissipative, loses
+positive-definiteness and blows up at high Weissenberg number. Following
+Fattal--Kupferman \cite{Fattal2004} we evolve
+\begin{equation}
+\psib=\log\be, \qquad \be=\exp\psib\succ0\ \text{by construction.}
+\label{eq:psi}
+\end{equation}
+Advection of $\psib$ is passive as in \cref{eq:xi-advect}; the local (homogeneous) part
+of \cref{eq:ucm} is transformed to $\psib$ as follows. In the eigenframe of $\psib$
+(equivalently of $\be$), with eigenvalues $\lambda_i=e^{\ell_i}$ of $\be$ and
+$\bm M=\bm R^{\!\top}\Lt\bm R$ the velocity gradient rotated into that frame, the local
+evolution of $\psib$ is
+\begin{equation}
+\dot{\psib}\big|_{\mathrm{eig}}
+   = \begin{bmatrix} 2M_{11} + \tfrac1\tau(e^{-\ell_1}-1) & \Omega_{12}\\[2pt]
+       \Omega_{12} & 2M_{22} + \tfrac1\tau(e^{-\ell_2}-1)\end{bmatrix},
+\quad
+\Omega_{12}=\frac{\ell_2-\ell_1}{\lambda_2-\lambda_1}\left(\lambda_2 M_{12}+\lambda_1 M_{21}\right),
+\label{eq:logconf-rhs}
+\end{equation}
+rotated back by $\bm R(\cdot)\bm R^{\!\top}$; the diagonal carries stretching and
+relaxation, the off-diagonal the eigenvector rotation. The degenerate limit
+$\ell_1\!\to\!\ell_2$ of $\Omega_{12}$ is $e^{-\ell_1}(M_{12}+M_{21})$, recovering
+$\dot{\psib}=2\,\mathrm{sym}(\Lt)$ at $\be=\It$, so \cref{eq:logconf-rhs} is smooth.
+In two dimensions the eigendecomposition of the symmetric $2\times2$ field is available
+in closed form, so \cref{eq:logconf-rhs} is evaluated without iterative diagonalization.
+
+\subsection{Exact relaxation for stiff \texorpdfstring{$\tau$}{tau}}
+\label{sec:exact-relax}
+The relaxation term $-\tfrac1\tau(\be-\It)$ is stiff for small $\tau$ (high
+Weissenberg), forcing $\dt\lesssim\tau$ under explicit integration. We remove this by
+Strang-splitting the local update into
+$\text{relax}(\dt/2)\!\to\!\text{stretch}(\dt)\!\to\!\text{relax}(\dt/2)$ and
+integrating the relaxation substep \emph{analytically}. The relaxation-only equation
+$\dot{\be}=-\tfrac1\tau(\be-\It)$ has the exact solution
+\begin{equation}
+\be \leftarrow \It + (\be-\It)\,e^{-\dt/\tau},
+\label{eq:relax-exact}
+\end{equation}
+which is unconditionally stable for any $\tau$ and positive-definite-preserving, since
+\cref{eq:relax-exact} is the convex combination $(1-e^{-\dt/\tau})\It+e^{-\dt/\tau}\be$
+of two SPD tensors. The stretch substep uses \cref{eq:logconf-rhs} with $\tau\to\infty$
+(explicit, non-stiff, bounded by the velocity-gradient magnitude). For a step strain
+this scheme is exact at any $\dt$; the property is verified in \cref{sec:verification}.

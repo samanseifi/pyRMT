@@ -1,0 +1,41 @@
+\section{Verification}
+\label{sec:verification}
+
+\subsection{Constitutive update}
+The log-conformation update is verified against the analytic viscometric limits of
+\cref{sec:constitutive}. Step-strain relaxation, steady simple shear (including the
+first normal-stress difference $N_1$), and the elastic limit $\tau\to\infty$ are all
+reproduced to machine precision:
+\begin{center}\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+test & analytic target & error \\
+\midrule
+step-strain relaxation & $\sigma_{xy}=G\gamma e^{-t/\tau}$ & $\sim10^{-10}$ \\
+steady shear & $\sigma_{xy}=G\tau\dot\gamma,\ N_1=2G\tau^2\dot\gamma^2$ & $\sim10^{-12}$ \\
+elastic limit & $\be=\Ften\Ften^{\!\top}$ & $\sim10^{-13}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+With the exact relaxation substep \cref{eq:relax-exact} the step-strain response is
+reproduced to machine precision at \emph{any} $\dt$, whereas the explicit update errs by
+$0.29$ at $\dt/\tau=2$ and diverges by $\dt/\tau=5$. Positive-definiteness of $\be$ is
+retained under extreme shear.
+
+\subsection{Operators and projection}
+The MAC divergence is exact on linear fields and second-order on smooth fields; the
+identity $\mathrm{div}\circ\mathrm{grad}\equiv\mathrm{Lap}$ holds to $10^{-9}$; the
+Poisson round-trip recovers the field to $10^{-10}$; and projecting an arbitrary
+wall-boundary velocity yields divergence below $10^{-11}$ (machine-zero, the property the
+collocated solver cannot reach). The FFT Helmholtz solve of \cref{eq:helmholtz} passes
+the same round-trip to $10^{-10}$.
+
+\subsection{Spatial and temporal order}
+On the periodic Taylor--Green decaying vortex the MAC solver is second-order in space
+for velocity. The implicit-viscosity scheme retains this order at small $\dt$ and is
+stable and accurate up to $\dt=50\times$ the explicit viscous limit
+$\dx^2/(4\nu)$, where the explicit scheme diverges (\cref{fig:tg-imex}).
+\phfig{fig:tg-imex}{Taylor--Green: spatial convergence (2nd order) and stability of the
+implicit-viscosity scheme up to $50\times$ the explicit viscous CFL.}
+\TODO{temporal-order study of the IMEX and monolithic schemes (expected 1st order
+backward-Euler; 2nd with the CN/Strang variants).}

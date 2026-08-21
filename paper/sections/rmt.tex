@@ -1,0 +1,44 @@
+\section{The reference map and the elastic solid}
+\label{sec:rmt}
+
+\subsection{Reference map and deformation gradient}
+Let $\bm\chi(\Xv,t)$ be the motion carrying a material label $\Xv$ to its current
+position $\xv$. The \emph{reference map} is the inverse,
+$\xiv(\xv,t)=\bm\chi^{-1}(\xv,t)$, so $\xiv(\xv,0)=\xv$ in the solid. Because $\xiv$
+labels material, it is advected passively,
+\begin{equation}
+\partial_t\xiv + (\uv\!\cdot\!\grad)\xiv = \bm 0 .
+\label{eq:xi-advect}
+\end{equation}
+The deformation gradient $\Ften=\partial\xv/\partial\Xv$ is recovered in the Eulerian
+frame from the spatial gradient of the reference map,
+\begin{equation}
+\Ften = (\grad\xiv)^{-1},
+\qquad J=\det\Ften ,
+\label{eq:F}
+\end{equation}
+and the left Cauchy--Green (Finger) tensor is $\bt=\Ften\Ften^{\!\top}$. For an
+incompressible motion $J\equiv1$; the discrete $J$ is monitored as a folding/quality
+diagnostic.
+
+\subsection{Neo-Hookean solid}
+The equilibrium (non-relaxing) branch of the solid is an incompressible neo-Hookean
+material,
+\begin{equation}
+\sig_{\!s}^{\infty} = \mu_s\,\dev\!\left(\Ften\Ften^{\!\top}\right)
+   = \mu_s\!\left(\bt - \tfrac12\tr(\bt)\,\It\right)\quad(\text{2-D}),
+\label{eq:neohookean}
+\end{equation}
+with shear modulus $\mu_s$ and elastic wave speed $c_s=\sqrt{\mu_s/\rho}$. In the purely
+hyperelastic limit ($\tau\to\infty$, \cref{sec:constitutive}) this is the entire solid
+stress; the general viscoelastic solid adds a relaxing branch.
+
+\subsection{Level set, extrapolation, reinitialization}
+The solid occupies $\{\phi\le0\}$. The level set is reconstructed from the reference map
+each step (the material boundary is the image of the initial boundary under $\xiv$), and
+the reference map is extrapolated into a narrow band outside the solid so that the
+gradient in \cref{eq:F} and the interfacial forces have valid stencils. Optional
+level-set reinitialization (PDE or fast-marching) restores a signed-distance band. The
+advection of \cref{eq:xi-advect} is discretized by a switchable scheme (semi-Lagrangian
+RK4 backtrace by default; central/WENO or a conservative flux form for
+differentiability, \cref{sec:time}).

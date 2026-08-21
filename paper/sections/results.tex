@@ -1,0 +1,75 @@
+\section{Results: stiff regimes and speedup}
+\label{sec:results}
+
+\subsection{Lifted time-step limits}
+Each level of the IMEX stack is verified to reproduce the explicit result at a matched
+step before its lifted step is exercised (\cref{tab:cfl-lift}). Implicit viscosity is
+stable to $50\times$ the explicit viscous CFL on Taylor--Green; the combined IMEX
+reproduces the four-roll extensional blob $b_e^{xx}$ to $0.55\%$ at matched $\dt$ and
+completes within ${\sim}2\%$ at $2$--$4\times$ the explicit viscous CFL where the
+explicit scheme diverges; the linearly-implicit elastic stabilizer is consistent
+($0.44\%$ vs.\ explicit at $0.1\times$ the elastic CFL) and remains stable at
+$8\times$ the elastic CFL, where the explicit elastic force diverges.
+
+\begin{table}[t]\centering\small
+\caption{Time-step limits lifted by each strategy (measured). ``reproduces'' is the
+relative error against the explicit reference at matched $\dt$.}
+\label{tab:cfl-lift}
+\begin{tabular}{@{}llll@{}}
+\toprule
+strategy & lifts & max stable $\dt$ (vs explicit) & reproduces \\
+\midrule
+implicit viscosity & $\dx^2/\nu$ & $50\times$ (Taylor--Green) & 2nd-order retained \\
+exact relaxation & $\dt\lesssim\tau$ & $\infty$ (step-strain exact) & machine precision \\
+IMEX combined & both & $2$--$4\times$ (four-roll) & $0.55\%$ \\
+elastic stabilizer & $\dx/c_s$ & $8\times$ (four-roll) & $0.44\%$ at $0.1\times$ \\
+monolithic (\cref{sec:monolithic}) & $\dx/c_s$ & \PLACE{10--100$\times$} & \PLACE{$<$1\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Soft disc: integrator comparison}
+\Cref{tab:disc-integrators} compares integrators on the soft-disc-in-lid case. At
+$N=64$ the case is advection-limited, so IMEX reproduces the trajectory
+($\Delta$centroid $2\times10^{-3}$) but does not reduce $\dt$; the viscous limit only
+dominates at finer grids ($\dt_\nu\propto\dx^2$ vs.\ $\dt_{\mathrm{adv}}\propto\dx$),
+where IMEX yields a net speedup.
+
+\begin{table}[t]\centering\small
+\caption{Soft disc in lid-driven cavity, integrator comparison. Speedup is
+explicit/IMEX wall-clock ($>1$ favours IMEX).}
+\label{tab:disc-integrators}
+\begin{tabular}{@{}llllll@{}}
+\toprule
+$N$ & limiter & $\dt$ ratio (IMEX/expl) & $\Delta$centroid & speedup \\
+\midrule
+64  & advection & $1.0$   & $2.4\times10^{-3}$ & $0.97\times$ \\
+128 & viscous   & \PLACE{1.9} & \PLACE{$\sim$1e-3} & \PLACE{Y} \\
+256 & viscous   & \PLACE{$\sim$4} & \PLACE{$\sim$1e-3} & \PLACE{Y} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Monolithic solver: the headline speedup}
+\TODO{The central quantitative result. Report (a) stable $\dt$ vs.\ integrator on a
+stiff-solid case where the explicit elastic-wave CFL is prohibitive; (b) net wall-clock
+speedup of the monolithic solver over explicit and over stage-1 IMEX at matched
+accuracy; (c) Newton/Krylov iteration counts and preconditioner effectiveness; (d)
+small-$\dt$ recovery of the explicit solution.}
+
+\subsection{High-Weissenberg and stiff-solid regimes}
+\TODO{A regime diagram in $(\mathrm{Wi},\ \text{resolution})$ or
+$(c_s\dt/\dx,\ \text{accuracy})$ showing configurations reachable by the implicit stack
+but inaccessible to explicit RMT (explicit diverges / folds).}
+
+\subsection{Viscoelastic extensional stretch}
+Under uniform planar extension the solver reproduces the analytic plateau
+$b_e^{xx}\to1/(1-2\mathrm{Wi})$ to four digits and is resolution-independent, while the
+elastic case diverges as $e^{2\varepsilon t}$---the demonstration a tumbling
+lid-driven disc cannot give. \TODO{final money figure: elastic vs.\ viscoelastic blob
+under the four-roll mill (fig.\ \texttt{viscoelastic\_extension\_money}).}
+
+\subsection{Fold cure (reinit vs.\ relaxation)}
+\TODO{Quantitative case where hyperelastic RMT folds/diverges at a given resolution
+while the viscoelastic solver completes and matches a reference---establishing
+relaxation as the principled cure and reinit as the symptomatic one.}

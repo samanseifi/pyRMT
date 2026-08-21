@@ -1,0 +1,44 @@
+\section{Spatial discretization and exact projection}
+\label{sec:discretization}
+
+\subsection{Staggered (MAC) grid}
+The domain $[0,L_x]\times[0,L_y]$ is divided into $N_x\times N_y$ cells of size
+$\dx\times\Delta y$. Pressure and the reference map live at cell centres,
+$x$-velocity $u$ on the $x$-faces, and $y$-velocity $v$ on the $y$-faces
+(Marker-and-Cell layout \cite{Harlow1965}). The discrete divergence (to centres),
+pressure gradient (to faces) and Laplacian ($\dive\grad$) are then \emph{consistent by
+construction}, $\mathrm{div}=-\mathrm{grad}^{\!\top}$ and
+$\mathrm{Lap}=\mathrm{div}\circ\mathrm{grad}$, so the projection is exact.
+
+\subsection{Fractional-step projection}
+Momentum is advanced by a predictor--projector (Chorin) split \cite{Chorin1968}. Given a
+predictor velocity $\uv^{*}$, the projection solves a pressure-Poisson problem and
+corrects to a divergence-free field,
+\begin{equation}
+\nabla^2\phi = \frac{\rho}{\dt}\,\dive\uv^{*},
+\qquad
+\uv^{n+1}=\uv^{*}-\frac{\dt}{\rho}\,\grad\phi,
+\qquad
+\dive\uv^{n+1}=0\ \text{(to machine precision).}
+\label{eq:project}
+\end{equation}
+On the staggered grid the correction is exact: the projected velocity is
+divergence-free to round-off, without the checkerboard mode or Rhie--Chow interpolation
+required by a collocated arrangement.
+
+\subsection{Direct Poisson solvers}
+The pressure boundary condition is chosen consistently with the velocity boundary
+condition. For no-slip/free-slip walls the homogeneous-Neumann Laplacian is diagonalized
+by the discrete cosine transform (DCT), with eigenvalues
+$\lambda_{k}=-2\!\left(1-\cos(\pi k/N)\right)/\dx^2$; for periodic problems the FFT is
+used, $\lambda_{k}=-4\sin^2(\pi k/N)/\dx^2$. Each solve is $O(N\log N)$. These
+transforms are reused verbatim by the implicit viscous solve of \cref{sec:time}.
+
+\subsection{Blended forcing}
+The solid stress \cref{eq:sls} is blended by $(1-H)$, and its divergence is added to the
+face momentum. Surface tension is a balanced-force continuum-surface-force model
+$\bm f_\Gamma=-\gamma\kappa\,\grad H$ with $\kappa=\dive(\grad\phi/|\grad\phi|)$, in
+which $\grad H$ uses the same compact face gradient as the pressure, so a constant-%
+curvature interface is discretely balanceable by pressure (small parasitic currents)
+\cite{Brackbill1992}. Contact between solids is applied as a trace-free stress whose
+divergence survives the projection \cite{Rycroft2020}.

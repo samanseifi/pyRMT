@@ -1,0 +1,31 @@
+\section{Conclusions and outlook}
+\label{sec:conclusion}
+
+We have presented an incompressible, one-fluid Reference Map Technique for
+viscoelastic fluid--structure interaction that is monolithic in space (one velocity,
+one pressure) and---through an implicit--explicit stack culminating in a Newton--Krylov
+solve---monolithic in time. The stress-carrying strain is transported as a
+log-conformation tensor, guaranteeing positive-definiteness and decoupling the relaxing
+stress from the folding-prone reference map; the staggered discretization makes the
+projection exact. The implicit stack removes the viscous, relaxation and elastic-wave
+CFL restrictions in turn, reusing the pressure transform/Krylov solvers, and reaches
+high-Weissenberg and stiff-solid regimes inaccessible to explicit RMT while reproducing
+the validated explicit results at matched accuracy.
+
+Relative to the closest prior work, the method differs from explicit hyperelastic RMT
+\cite{Kamrin2012,Rycroft2020,Jain2019} in both the viscoelastic constitutive transport
+and the implicit time integration, from conformation-tensor viscoelasticity in that the
+carrier is a \emph{solid} with an equilibrium branch inside an FSI solver, and from the
+GPR unified model \cite{Peshkov2016,Dumbser2016} in being incompressible and implicit
+rather than compressible and explicit/semi-implicit.
+
+\paragraph{Limitations.} The formulation is two-dimensional; density contrast is limited
+to the variable-coefficient projection path; the diffuse-interface FSI fields converge
+below second order; and near-contact resolution is penalty-based. The linearly-implicit
+elastic stabilizer (stage~1) adds numerical damping at large $\dt$, which the monolithic
+solver (\cref{sec:monolithic}) removes.
+
+\paragraph{Outlook.} Natural extensions are three dimensions, variable density and true
+sedimentation, lubrication-corrected contact \cite{Fai2018}, and multi-mode/nonlinear
+(Giesekus, FENE-P) constitutive laws, all of which fit within the present monolithic
+framework.

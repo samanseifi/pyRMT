@@ -1,0 +1,56 @@
+\section{Introduction}
+\label{sec:intro}
+
+Fully Eulerian formulations of fluid--structure interaction (FSI) discretize the
+solid and the fluid on a single fixed grid, sharing one velocity field and one
+pressure solve. This removes the mesh-conforming remeshing and the partitioned
+added-mass instabilities of arbitrary Lagrangian--Eulerian and immersed-boundary
+approaches, at the price of representing the finite-strain solid response in the
+laboratory frame. The \emph{reference map technique} (RMT) does so by transporting
+the inverse motion---the reference map $\xiv(\xv,t)$ mapping a current point back to
+its material label---from which the deformation gradient and hence the elastic stress
+are reconstructed \cite{Kamrin2012,Valkov2015}. The RMT has been developed into a
+robust incompressible FSI method \cite{Rycroft2020} and a conservative, non-dissipative
+finite-difference formulation \cite{Jain2019}.
+
+Three limitations of the existing RMT literature motivate this work.
+\begin{enumerate}[label=(\roman*),nosep]
+\item \textbf{The solid is hyperelastic.} A purely hyperelastic solid sheared without
+bound stores unbounded energy; the reference map then folds, and reinitialization
+treats the symptom rather than the cause. A relaxing (viscoelastic) stress is the
+principled remedy, but it must not reintroduce the loss of positive-definiteness that
+plagues conformation-tensor transport.
+\item \textbf{The time integration is explicit.} The dominant RMT formulations
+\cite{Kamrin2012,Rycroft2020,Jain2019} advance momentum explicitly, so the time step
+is throttled by the elastic-wave speed $c_s=\sqrt{\mu_s/\rho}$, the viscous diffusion
+$\dx^2/\nu$, and---for a viscoelastic solid---the relaxation time $\tau$. Stiff solids
+and high-Weissenberg regimes are effectively out of reach.
+\item \textbf{Unified Eulerian alternatives are compressible.} The Godunov--Peshkov--%
+Romenski (GPR) model unifies viscous fluids and elastoplastic/viscoelastic solids in a
+single first-order hyperbolic system \cite{Peshkov2016,Dumbser2016}, but it is
+compressible and advanced with explicit or semi-implicit high-order schemes; an
+\emph{implicit, monolithic, incompressible} treatment remains an open gap.
+\end{enumerate}
+
+\paragraph{Contributions.} We address all three within one collocated-velocity,
+one-pressure RMT:
+\begin{enumerate}[label=(\arabic*),nosep]
+\item A finite-strain viscoelastic solid whose stress-carrying strain is transported as
+the \emph{log-conformation} tensor $\psib=\log\be$ \cite{Fattal2004}, guaranteeing
+$\be\succ0$ by construction and decoupling the relaxing stress from the folding-prone
+reference map. The standard-linear-solid form retains an equilibrium hyperelastic
+branch so the body still returns to shape; $\tau\to\infty$ recovers neo-Hookean RMT.
+\item An implicit--explicit (IMEX) time-integration \emph{stack} that lifts the stiff
+CFL limits one term at a time---backward-Euler viscosity through the pressure
+transform/Krylov solvers, exact exponential relaxation, and a linearly-implicit
+elastic-wave stabilizer---culminating in
+\item a fully-implicit, monolithic Newton--Krylov solve of the coupled
+$(\uv,p,\xiv,\psib)$ system that lifts the elastic-wave CFL while retaining accuracy,
+reusing the exact pressure projection as the saddle-point preconditioner.
+\end{enumerate}
+The staggered (MAC) discretization renders the projection exact
+(machine-zero divergence), removing the checkerboard/Rhie--Chow workarounds of the
+collocated formulation. \Cref{sec:governing,sec:rmt,sec:constitutive} set out the
+continuous model, \cref{sec:discretization,sec:time} the discretization and the
+IMEX/monolithic time integration, and \cref{sec:verification,sec:validation,sec:results}
+the verification, validation, and performance results.
