@@ -78,7 +78,7 @@ def taylor_green_overlay():
 # ---------------- soft disc centroid trajectory ----------------
 def soft_disc_overlay():
     from benchmarks.mac_soft_disc_lid import run
-    N, t_end = 64, 8.0
+    N, t_end = 64, 20.0
     dx = 1.0 / N
     dt_ref = min(0.3 * dx, 0.2 * dx * dx / 0.01)
     runs = {

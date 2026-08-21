@@ -379,11 +379,15 @@ def _interp_clamp(f, iq, jq):
 
 
 def momentum_predictor_lid_semilag(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None,
-                                   rho=1.0, cs2=0.0, rtol=1e-8):
-    """Unconditionally-stable lid-cavity predictor: semi-Lagrangian (cubic) advection
-    (no advection CFL) + implicit viscosity (+ optional trapezoidal elastic cs2), solved
-    by preconditioned CG. BCs are imposed through ghost-padded fields for interpolation;
-    wall (normal) faces are held at their boundary values. Returns u*, v*."""
+                                   rho=1.0, cs2=0.0, rtol=1e-8, cfl_switch=0.9):
+    """Unconditionally-stable lid-cavity predictor with implicit viscosity (+ optional
+    trapezoidal elastic cs2), solved by preconditioned CG. Advection is ADAPTIVE: central
+    differencing while the advective CFL is satisfied (accurate), semi-Lagrangian (cubic)
+    backtrace beyond it (unconditionally stable, mildly diffusive). Returns u*, v*."""
+    cfl = dt * max(np.max(np.abs(u)) / dx, np.max(np.abs(v)) / dy)
+    if cfl <= cfl_switch:
+        return momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid, fu=fu, fv=fv,
+                                           rho=rho, rtol=rtol, cs2=cs2)
     Ny, Nxp1 = u.shape; Nx = Nxp1 - 1
     up = _u_ghost_y(u, U_lid)                   # (Ny+2, Nx+1): rows at y=(r-0.5)dy
     vp = _v_ghost_x(v)                          # (Ny+1, Nx+2): cols at x=(c-0.5)dx
@@ -610,9 +614,17 @@ def _sl_advect_per(f, uf, vf, ox, oy, dx, dy, dt):
     return _interp_per(f, xd / dx - ox, yd / dy - oy)
 
 
-def momentum_predictor_periodic_semilag(u, v, nu, dx, dy, dt, lap_eig):
-    """Unconditionally-stable periodic predictor: semi-Lagrangian advection (no CFL)
-    + implicit (backward-Euler) viscosity via FFT. Returns u*, v*."""
+def momentum_predictor_periodic_semilag(u, v, nu, dx, dy, dt, lap_eig, cfl_switch=0.9):
+    """Unconditionally-stable periodic predictor with implicit (backward-Euler)
+    viscosity. Advection is ADAPTIVE: while the advective CFL is satisfied it uses
+    accurate central differencing (2nd-order, and---for curl-free advection such as
+    Taylor-Green---annihilated cleanly by the projection); only when the CFL is exceeded
+    does it switch to the unconditionally-stable but mildly diffusive semi-Lagrangian
+    backtrace. This keeps the scheme as accurate as the explicit IMEX where advection is
+    non-stiff, and stable where it is. Returns u*, v*."""
+    cfl = dt * max(np.max(np.abs(u)) / dx, np.max(np.abs(v)) / dy)
+    if cfl <= cfl_switch:
+        return momentum_predictor_periodic_imex(u, v, nu, dx, dy, dt, lap_eig)
     u_adv = _sl_advect_per(u, u, v, 0.0, 0.5, dx, dy, dt)
     v_adv = _sl_advect_per(v, u, v, 0.5, 0.0, dx, dy, dt)
     coef = dt * nu
