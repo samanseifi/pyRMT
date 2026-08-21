@@ -24,6 +24,19 @@ $\Ften\Ften^{\!\top}$ and \cref{eq:sls} returns the neo-Hookean stress. The mode
 therefore spans, under one framework, elastic solid $\leftrightarrow$ viscoelastic
 solid $\leftrightarrow$ viscoelastic fluid.
 
+The model derives from the free energy
+$\Psi=\tfrac{\mu_s}{2}\!\left(\tr\Ften\Ften^{\!\top}-2\right)
+      +\tfrac{G}{2}\!\left(\tr\be-2-\ln\det\be\right)$,
+with the relaxation term giving a non-negative dissipation $\tfrac{G}{2\tau}\,
+\tr(\be+\be^{-1}-2\It)\ge0$; \cref{eq:sls} is its (deviatoric) Cauchy stress.
+Two honest caveats. \emph{(i) Folding.} Only the relaxing branch is bounded by
+relaxation; the equilibrium branch $\mu_s\dev(\Ften\Ften^{\!\top})$ is still built from
+$\Ften=(\grad\xiv)^{-1}$ and can fold under unbounded shear, so relaxation eliminates the
+folding sensitivity only in the Maxwell-fluid limit and mitigates it otherwise.
+\emph{(ii) Incompressibility of $\be$.} The relaxation toward $\It$ does not preserve
+$\det\be=1$ (as in Oldroyd-B); the trace is carried by the pressure, and $\det\be$ is
+monitored as a diagnostic.
+
 \paragraph{Viscometric limits (used for verification).} For homogeneous simple shear
 $\Lt=\dot\gamma\,\bm e_x\!\otimes\!\bm e_y$ the steady solution of \cref{eq:ucm} is
 $b_e^{xy}=\tau\dot\gamma$, $b_e^{xx}=1+2\tau^2\dot\gamma^2$, $b_e^{yy}=1$, giving
@@ -41,7 +54,9 @@ Fattal--Kupferman \cite{Fattal2004} we evolve
 \label{eq:psi}
 \end{equation}
 Advection of $\psib$ is passive as in \cref{eq:xi-advect}; the local (homogeneous) part
-of \cref{eq:ucm} is transformed to $\psib$ as follows. In the eigenframe of $\psib$
+of \cref{eq:ucm} is transformed to $\psib$ as follows, in the eigenframe form of Hulsen
+\emph{et al.}\ \cite{Hulsen2005} (equivalent to, but distinct from, the
+$\bm\Omega+\bm B+\bm N$ decomposition of \cite{Fattal2004}). In the eigenframe of $\psib$
 (equivalently of $\be$), with eigenvalues $\lambda_i=e^{\ell_i}$ of $\be$ and
 $\bm M=\bm R^{\!\top}\Lt\bm R$ the velocity gradient rotated into that frame, the local
 evolution of $\psib$ is

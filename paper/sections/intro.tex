@@ -16,10 +16,17 @@ finite-difference formulation \cite{Jain2019}.
 Three limitations of the existing RMT literature motivate this work.
 \begin{enumerate}[label=(\roman*),nosep]
 \item \textbf{The solid is hyperelastic.} A purely hyperelastic solid sheared without
-bound stores unbounded energy; the reference map then folds, and reinitialization
-treats the symptom rather than the cause. A relaxing (viscoelastic) stress is the
-principled remedy, but it must not reintroduce the loss of positive-definiteness that
-plagues conformation-tensor transport.
+bound stores unbounded energy; the stress-carrying strain grows without limit and its
+Eulerian representation (the reference map, or the elastic strain) folds, with
+reinitialization treating the symptom rather than the cause. A relaxing (viscoelastic)
+stress bounds the stored elastic strain and is the principled remedy---\emph{for the
+relaxing branch}. We are careful not to overstate this: in a standard-linear-solid the
+non-relaxing equilibrium branch is still computed from $\Ften=(\grad\xiv)^{-1}$ and can
+still fold under unbounded shear, so relaxation removes the folding sensitivity fully only
+in the Maxwell-fluid limit ($G_\infty\!\to\!0$) and mitigates rather than eliminates it
+otherwise (\cref{sec:constitutive}). Independently, the transport must preserve
+positive-definiteness of the elastic strain, which the log-conformation representation
+guarantees.
 \item \textbf{The time integration is explicit.} The dominant RMT formulations
 \cite{Kamrin2012,Rycroft2020,Jain2019} advance momentum explicitly, so the time step
 is throttled by the elastic-wave speed $c_s=\sqrt{\mu_s/\rho}$, the viscous diffusion
