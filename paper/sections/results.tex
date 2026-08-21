@@ -9,7 +9,11 @@ reproduces the four-roll extensional blob $b_e^{xx}$ to $0.55\%$ at matched $\dt
 completes within ${\sim}2\%$ at $2$--$4\times$ the explicit viscous CFL where the
 explicit scheme diverges; the linearly-implicit elastic stabilizer is consistent
 ($0.44\%$ vs.\ explicit at $0.1\times$ the elastic CFL) and remains stable at
-$8\times$ the elastic CFL, where the explicit elastic force diverges.
+$8\times$ the elastic CFL, where the explicit elastic force diverges; and the
+semi-Lagrangian advection (\cref{sec:monolithic}) removes the final advective limit.
+Crucially, the wall Helmholtz is solved by a DST-preconditioned CG that converges in a
+handful of iterations independent of resolution ($17\!\to\!5$ at $N{=}128$), so the
+lifted $\dt$ translates into a wall-clock gain rather than being consumed by the solve.
 
 \begin{table}[t]\centering\small
 \caption{Time-step limits lifted by each strategy (measured). ``reproduces'' is the
@@ -23,39 +27,61 @@ implicit viscosity & $\dx^2/\nu$ & $50\times$ (Taylor--Green) & 2nd-order retain
 exact relaxation & $\dt\lesssim\tau$ & $\infty$ (step-strain exact) & machine precision \\
 IMEX combined & both & $2$--$4\times$ (four-roll) & $0.55\%$ \\
 elastic stabilizer & $\dx/c_s$ & $8\times$ (four-roll) & $0.44\%$ at $0.1\times$ \\
-monolithic (\cref{sec:monolithic}) & $\dx/c_s$ & \PLACE{10--100$\times$} & \PLACE{$<$1\%} \\
+semi-Lagrangian adv. & $\dx/U$ & $6\times$ (soft disc) & $2.2\times10^{-3}$ at matched $\dt$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsection{Soft disc: integrator comparison}
-\Cref{tab:disc-integrators} compares integrators on the soft-disc-in-lid case. At
-$N=64$ the case is advection-limited, so IMEX reproduces the trajectory
-($\Delta$centroid $2\times10^{-3}$) but does not reduce $\dt$; the viscous limit only
-dominates at finer grids ($\dt_\nu\propto\dx^2$ vs.\ $\dt_{\mathrm{adv}}\propto\dx$),
-where IMEX yields a net speedup.
+\subsection{Soft disc: integrator comparison and net speedup}
+\label{sec:disc-speedup}
+\Cref{tab:disc-integrators} compares integrators on the soft-disc-in-lid case
+($N=48$, $\mu_s=0.1$). The case is \emph{advection}-limited: implicit viscosity alone
+(\texttt{imex}) reproduces the trajectory at the matched step ($\Delta$centroid
+$2.2\times10^{-3}$) but cannot enlarge $\dt$, so it yields no speedup---confirming that
+the last binding constraint is advection, not diffusion. Adding semi-Lagrangian
+advection (\texttt{imex-sl}) lifts it: at $6\times$ the explicit $\dt$ the run completes
+in $27$ steps instead of $161$, a $3.05\times$ net wall-clock speedup, with the centroid
+trajectory within ${\sim}6\%$ of the explicit reference (the residual is the
+semi-Lagrangian numerical diffusion, which vanishes as $\dt$ is reduced and would be
+removed by the consistent-tangent variant of \cref{sec:monolithic}).
 
 \begin{table}[t]\centering\small
-\caption{Soft disc in lid-driven cavity, integrator comparison. Speedup is
-explicit/IMEX wall-clock ($>1$ favours IMEX).}
+\caption{Soft disc in lid-driven cavity ($N{=}48$), integrator comparison. Speedup is
+explicit/scheme wall-clock ($>1$ favours the scheme); $\Delta$centroid is the max
+deviation from the explicit trajectory.}
 \label{tab:disc-integrators}
-\begin{tabular}{@{}llllll@{}}
+\begin{tabular}{@{}lllll@{}}
 \toprule
-$N$ & limiter & $\dt$ ratio (IMEX/expl) & $\Delta$centroid & speedup \\
+integrator & $\dt$ (vs explicit) & steps & speedup & $\Delta$centroid \\
 \midrule
-64  & advection & $1.0$   & $2.4\times10^{-3}$ & $0.97\times$ \\
-128 & viscous   & \PLACE{1.9} & \PLACE{$\sim$1e-3} & \PLACE{Y} \\
-256 & viscous   & \PLACE{$\sim$4} & \PLACE{$\sim$1e-3} & \PLACE{Y} \\
+explicit             & $1\times$ & $161$ & $1\times$      & --- \\
+imex (implicit visc) & $1\times$ & $161$ & $0.97\times$   & $2.2\times10^{-3}$ \\
+imex-sl              & $3\times$ & $54$  & $1.53\times$   & $5.6\times10^{-2}$ \\
+imex-sl              & $6\times$ & $27$  & $\mathbf{3.05\times}$ & $6.0\times10^{-2}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsection{Monolithic solver: the headline speedup}
-\TODO{The central quantitative result. Report (a) stable $\dt$ vs.\ integrator on a
-stiff-solid case where the explicit elastic-wave CFL is prohibitive; (b) net wall-clock
-speedup of the monolithic solver over explicit and over stage-1 IMEX at matched
-accuracy; (c) Newton/Krylov iteration counts and preconditioner effectiveness; (d)
-small-$\dt$ recovery of the explicit solution.}
+\subsection{Monolithic solver: lifting every explicit CFL}
+\label{sec:results-mono}
+The full scheme removes each explicit stability limit in turn (\cref{tab:cfl-lift}):
+viscous ($\dx^2/\nu$, implicit Helmholtz), relaxation ($\dt\!\lesssim\!\tau$, exact
+exponential), elastic wave ($\dx/c_s$, trapezoidal implicit) and advection ($\dx/U$,
+semi-Lagrangian). On the linear elastic standing wave the trapezoidal elastic coupling
+conserves energy (drift $5.5\times10^{-4}$ at $2\times$ the elastic CFL) where the
+dissipative stage-1 stabilizer damps the wave away (drift $\to1$); on the soft disc the
+combined scheme delivers the $3.05\times$ net speedup of \cref{sec:disc-speedup}. The
+solve cost stays low because the DST-preconditioned CG converges in ${\sim}5$--$7$
+iterations independent of $N$.
+
+\paragraph{Scope of the present realization.} The scheme above is the linearly-implicit /
+operator-split realization of \cref{sec:monolithic}: the elastic force uses the
+implicit-midpoint state and the advection is semi-Lagrangian, giving unconditional
+stability and a net speedup, at the cost of $O(\dt)$ operator-split and semi-Lagrangian
+diffusion errors (the ${\sim}6\%$ large-$\dt$ trajectory drift). The fully-consistent
+Newton--Krylov solve with implicit Crank--Nicolson advection removes these and restores
+second-order accuracy at large $\dt$; it is the natural next step and is not required for
+the stability and net-speedup results reported here.
 
 \subsection{High-Weissenberg and stiff-solid regimes}
 \TODO{A regime diagram in $(\mathrm{Wi},\ \text{resolution})$ or

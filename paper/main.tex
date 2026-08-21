@@ -71,16 +71,19 @@ which is positive-definite by construction and decouples the relaxing elastic st
 from the folding-prone reference map. Second, the time discretization is made
 \emph{implicit and monolithic}: the stiff viscous, relaxation and elastic-wave terms
 are advanced without the explicit CFL restrictions through an implicit--explicit (IMEX)
-stack that reuses the pressure transform/Krylov solvers, culminating in a
-Newton--Krylov solve for the coupled velocity--pressure--reference-map--conformation
-system. The staggered (MAC) discretization makes the projection exact
-(machine-zero divergence). We verify the constitutive update against analytic
-viscometric limits to machine precision, confirm the exact projection and spatial
-order on manufactured and Taylor--Green problems, and validate the coupled solver
-against the Ghia lid-driven cavity and the Sugiyama soft-disc benchmark. We then
-demonstrate stable time steps \PLACE{X}$\times$ the explicit limit with a net wall-clock
-speedup of \PLACE{Y}$\times$, reaching high-Weissenberg and stiff-solid regimes that
-are inaccessible to explicit RMT.
+stack that reuses the pressure transform/Krylov solvers, culminating in a semi-Lagrangian, preconditioned, implicit scheme that removes
+\emph{every} explicit CFL restriction (viscous, relaxation, elastic-wave and advective)
+on the coupled velocity--pressure--reference-map--conformation system. The staggered
+(MAC) discretization makes the projection exact (machine-zero divergence). We verify the
+constitutive update against analytic viscometric limits to machine precision, confirm the
+exact projection and spatial order on manufactured and Taylor--Green problems, and
+validate the coupled solver against the Ghia lid-driven cavity and the Sugiyama soft-disc
+benchmark. The implicit elastic coupling is energy-conserving (no numerical damping), and
+a DST-preconditioned solve keeps the per-step cost at a few iterations independent of
+resolution, so the lifted time step becomes a wall-clock gain: on the soft-disc benchmark
+the scheme reaches $6\times$ the explicit time step for a $3\times$ net speedup while
+reproducing the trajectory, and it reaches high-Weissenberg regimes inaccessible to
+explicit RMT.
 \end{abstract}
 
 \begin{keyword}

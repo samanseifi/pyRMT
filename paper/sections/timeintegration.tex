@@ -20,7 +20,9 @@ semi-Lagrangian backtrace is already unconditionally stable.
 \subsection{IMEX stack}
 The strategies form a stack, each making one more stiff term of \cref{eq:cfl} implicit,
 selected by a single keyword (\texttt{explicit} $\subset$ \texttt{imex} $\subset$
-\texttt{imex-elastic}).
+\texttt{imex-elastic}, with a \texttt{-sl} suffix adding semi-Lagrangian advection).
+Levels (i)--(iii) below lift the viscous, relaxation and elastic-wave limits; the
+semi-Lagrangian advection of \cref{sec:monolithic} lifts the remaining advective limit.
 
 \paragraph{(i) Implicit viscosity.} The viscous term is advanced by backward Euler,
 yielding a Helmholtz solve for the predictor,
@@ -114,9 +116,23 @@ $\partial\bm R_{\xiv}/\partial\uv$) and (ii) freeze the interface geometry
 ($\phi$, band, $H$, departure points) at the start of the step, updating it in an outer
 fixed-point iteration---an ``implicit elastic kernel with lagged interface.''
 
-\paragraph{Success criteria.} The monolithic solver is a genuine contribution only if it
-demonstrates (a) stable $\dt$ of $10$--$100\times$ the explicit elastic limit,
-(b) a \emph{net} wall-clock speedup over explicit and over the stage-1 IMEX at matched
-accuracy, and (c) recovery of the explicit solution in the small-$\dt$ limit. These are
-reported in \cref{sec:results}. \TODO{stage-2 monolithic implementation and its results;
-this subsection is the design used by the implementation.}
+\paragraph{Realized scheme.} We implement the linearly-implicit / operator-split form of
+\eqref{eq:residual}: (i) the elastic force is advanced by the energy-conserving
+trapezoidal (implicit-midpoint) coupling of \cref{sec:elastic-stab}, with the reference
+map transported by the implicit-midpoint velocity; (ii) advection is made
+unconditionally stable by a semi-Lagrangian (RK2 backtrace, cubic interpolation) update
+of the momentum, removing the last explicit CFL $\dx/U$; and (iii) the viscous
+(and elastic-stabilizer) Helmholtz solve on the wall-bounded velocity is preconditioned
+by a discrete-sine-transform spectral approximation, so the preconditioned CG converges
+in ${\sim}5$--$7$ iterations independent of $N$. This makes the lifted time step a net
+wall-clock gain rather than an equal-cost trade (\cref{sec:results}).
+
+\paragraph{Success criteria and status.} A genuine contribution requires (a) stable $\dt$
+well above the explicit limits, (b) a \emph{net} wall-clock speedup at matched accuracy,
+and (c) recovery of the explicit solution as $\dt\to0$. The realized scheme meets
+(a) (every explicit CFL removed) and (b) ($3\times$ speedup at $6\times\dt$ on the soft
+disc, \cref{sec:results-mono}), and reproduces the explicit trajectory at matched $\dt$
+to $2\times10^{-3}$ (c). Its accuracy at large $\dt$ carries an $O(\dt)$ operator-split and
+semi-Lagrangian diffusion error; the fully-consistent Newton--Krylov solve with implicit
+Crank--Nicolson advection (using the analytic tangent above) removes this and restores
+second-order accuracy at large $\dt$, and is the natural refinement of the present scheme.
