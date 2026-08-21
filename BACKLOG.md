@@ -208,10 +208,24 @@ here `ψ=log b_e` carries stress, decoupled from a geometry-only ξ).
       (`tests/test_elastic_imex_fsi.py`). **This is the net-speedup result the whole
       implicit program targeted** — every explicit CFL (viscous, relaxation, elastic wave,
       advection) is now lifted, and the PCG keeps the implicit solve cheap.
-    - **Stage 2d (future) — fully-consistent JFNK** over `(u,p,ξ,ψ)` with the analytic
-      material tangent + implicit (Crank-Nicolson) central advection would remove the SL
-      numerical diffusion and the ~6% large-dt drift, giving 2nd-order accuracy at large dt.
-      The present 2a–2c scheme is the linearly-implicit / operator-split realization.
+    - **Stage 2d — fully-monolithic JFNK. ⏳ IN PROGRESS (route proven).** Jacobian-free
+      Newton-Krylov over the coupled backward-Euler system, with the existing operator-split
+      IMEX solver as a PHYSICS-BASED preconditioner (Knoll-Keyes) and the exact projection as
+      the pressure Schur preconditioner. Removes the SL diffusion / operator-split error →
+      accurate AND unconditionally stable.
+      - **Stage 2d-1 ✅ (fluid, `pyRMT/jfnk.py`):** backward-Euler incompressible NS solved
+        monolithically. On Taylor-Green: matches analytic (1.5e-4), and at **5× the
+        advection CFL err=1.1e-3** (clean O(dt)), vs the semi-Lagrangian monolithic's ~2.7e-2
+        diffusion floor — ~25× more accurate at large dt. Newton ~3 iters/step; GMRES 52→239
+        as dt grows (preconditioner degrades under advection-dominance — improve by adding
+        advection to the preconditioner). Tests: `tests/test_jfnk.py`.
+      - **Stage 2d-2 (next):** add the neo-Hookean ξ block (hyperelastic monolithic — the
+        "Richter check"); **2d-3:** add the log-conformation ψ block (viscoelastic — the novel
+        contribution vs Richter 2013, who is hyperelastic-only).
+      - **Novelty framing:** Richter (2013, JCP) and Dunne-Rannacher (2006) already did
+        monolithic implicit *hyperelastic* Eulerian FSI, so the defensible delta is the
+        monolithic implicit **viscoelastic** (log-conformation) coupling + high-Weissenberg
+        reach; cite them precisely and verify Ii/Sugiyama did not do viscoelastic-monolithic.
 
 ### 15. Promote viscoelastic loop to a first-class solver routine (P1, small) — *follow-up to #1*
 The log-conformation FSI loop is currently hand-rolled inside
