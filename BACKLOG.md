@@ -154,10 +154,27 @@ here `ψ=log b_e` carries stress, decoupled from a geometry-only ξ).
     (identical minJ). Tests: `tests/test_imex_wall.py`; `mac_lid_driven.py`/`mac_soft_disc_lid.py`
     gain `imex=True`. Full suite green.
 - **#14.4 — Fully-implicit elastic kernel.** (`feat/implicit-elastic-kernel`)
-  Newton/JFNK over `(u,p,ξ,ψ)`; implicit `∇·σ_el(ξ,ψ)`; conservative (differentiable)
-  ξ/ψ advection ([[6]]); projection as pressure preconditioner; frozen-interface
-  linearization for the non-smooth geometry ops. Lifts the elastic-wave CFL → JCP-class
-  *if* the 10–100× + net-speedup bar is cleared.
+  Lifts the elastic-wave CFL `dt < dx/cs` that remains after the IMEX viscous+relaxation
+  lift. Staged:
+  - **Stage 1 ✅ DONE — linearly-implicit elastic stabilizer.** The nonlinear elastic
+    force stays explicit (physics), but an O(dt²) wave operator `dt²·cs²·χ·∇²` (χ=solid
+    indicator) is added implicitly, with the force moved INSIDE the implicit RHS. A 1D
+    von-Neumann analysis (`u_t=cs²d_xx, d_t=u`) gives amplification `|λ|=1/√(1+dt²cs²k²)≤1`
+    → unconditionally stable (adding the force *after* the solve is unstable — verified
+    by analysis). FFT frozen-coefficient split keeps it one transform solve.
+    `mac.py momentum_predictor_periodic_imex_elastic`, `_lap_per`; driver
+    `run(elastic_imex=True)`. **Verified:** consistent (0.44% vs explicit at 0.1× the
+    elastic CFL) and lifts the CFL — at **8× the elastic CFL plain IMEX diverges while
+    elastic-IMEX completes**. Tests: `tests/test_elastic_imex.py`. Full suite 60 passed.
+    *Caveat (honest):* the isotropic-Laplacian stabilizer adds numerical damping, so at
+    large dt it is stable but over-damped (4%→17% drift over 1×→8× the elastic CFL) —
+    accuracy-at-large-dt needs the consistent tangent (stage 2).
+  - **Stage 2 — fully-consistent JFNK (remaining, the JCP-class part).** Newton/JFNK over
+    `(u,p,ξ,ψ)` with the analytic material tangent `∂σ_el/∂ξ,∂σ_el/∂ψ` (removes the stage-1
+    damping); conservative (differentiable) ξ/ψ advection ([[6]]); projection as the
+    pressure preconditioner; frozen-interface linearization for the non-smooth geometry
+    ops; extend the wall CG-Helmholtz (#14.3 follow-on) to the coupled elastic block.
+    Clears the JCP bar *if* 10–100× dt AND net speedup with accuracy retained.
 
 ### 15. Promote viscoelastic loop to a first-class solver routine (P1, small) — *follow-up to #1*
 The log-conformation FSI loop is currently hand-rolled inside

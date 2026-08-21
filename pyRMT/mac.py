@@ -354,6 +354,50 @@ def momentum_predictor_periodic_imex(u, v, nu, dx, dy, dt, lap_eig):
     return ustar, vstar
 
 
+# ── Linearly-implicit elastic stabilizer (periodic) — backlog #14.4, stage 1 ──
+# Lifts the elastic-wave CFL dt < dx/cs (cs = sqrt(mu_s/rho)) that survives the IMEX
+# viscous+relaxation lift. The nonlinear elastic force f = div(sigma_el) is kept
+# EXPLICIT (physics), but a linearly-implicit O(dt^2) wave operator dt^2 cs^2 chi Lap
+# is added implicitly (chi = solid indicator). A 1D von-Neumann analysis of the
+# linear elastic wave (u_t = cs^2 d_xx, d_t = u) gives amplification |lambda| =
+# 1/sqrt(1+a), a = dt^2 cs^2 k^2 -> UNCONDITIONALLY STABLE (mildly damped) PROVIDED
+# the force enters the implicit RHS (adding it after the solve is unstable at large dt).
+# Frozen-coefficient FFT split: a constant c_el = dt^2 cs^2 is treated implicitly
+# everywhere and removed from the fluid by an explicit defect, so the solve stays one
+# FFT divide (same transform as pressure/viscosity).
+
+def _lap_per(q, dx, dy):
+    return ((np.roll(q, -1, 1) - 2 * q + np.roll(q, 1, 1)) / dx**2
+            + (np.roll(q, -1, 0) - 2 * q + np.roll(q, 1, 0)) / dy**2)
+
+
+def momentum_predictor_periodic_imex_elastic(u, v, nu, dx, dy, dt, lap_eig, cs2,
+                                             chi_c, fu, fv, rho=1.0):
+    """IMEX predictor (periodic) with implicit viscosity AND a linearly-implicit
+    elastic-wave stabilizer. The elastic (and any other) face force fu/fv enters the
+    implicit RHS -- required for stability. chi_c is the cell-centred solid indicator
+    (1 in solid); cs2 = mu_s/rho (or G/rho). Returns u*, v*."""
+    dudx = (np.roll(u, -1, 1) - np.roll(u, 1, 1)) / (2 * dx)
+    dudy = (np.roll(u, -1, 0) - np.roll(u, 1, 0)) / (2 * dy)
+    adv_u = u * dudx + _v_at_u_per(v) * dudy
+    dvdx = (np.roll(v, -1, 1) - np.roll(v, 1, 1)) / (2 * dx)
+    dvdy = (np.roll(v, -1, 0) - np.roll(v, 1, 0)) / (2 * dy)
+    adv_v = _u_at_v_per(u) * dvdx + v * dvdy
+
+    c_el = dt * dt * cs2
+    chi_u = 0.5 * (chi_c + np.roll(chi_c, 1, 1))       # solid indicator on u-faces
+    chi_v = 0.5 * (chi_c + np.roll(chi_c, 1, 0))       # ... on v-faces
+    # RHS: advection + explicit force (INSIDE the solve) + defect that removes the
+    # constant elastic stabilizer from the fluid (where chi=0 -> (1-chi)=1).
+    rhs_u = u - dt * adv_u + dt * fu / rho + c_el * (1.0 - chi_u) * _lap_per(u, dx, dy)
+    rhs_v = v - dt * adv_v + dt * fv / rho + c_el * (1.0 - chi_v) * _lap_per(v, dx, dy)
+    coef = dt * nu + c_el
+    denom = 1.0 - coef * lap_eig
+    ustar = np.real(np.fft.ifft2(np.fft.fft2(rhs_u) / denom))
+    vstar = np.real(np.fft.ifft2(np.fft.fft2(rhs_v) / denom))
+    return ustar, vstar
+
+
 def momentum_predictor_periodic(u, v, nu, dx, dy, dt):
     """Forward-Euler predictor (central advection + diffusion) on the periodic
     staggered grid. Returns u*, v*."""
