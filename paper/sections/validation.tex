@@ -16,9 +16,19 @@ The centroid trajectory matches the reference and the deformed interface is
 grid-converged ($N=64\approx N=128$). The IMEX integrator reproduces the explicit
 (validated) centroid trajectory to $2\times10^{-3}$ with identical minimum Jacobian,
 confirming that the implicit viscosity does not perturb the validated FSI result
-(\cref{fig:disc-centroid}, \cref{tab:disc-integrators}).
-\phfig{fig:disc-centroid}{Soft disc in lid-driven cavity: centroid trajectory vs.\
-Sugiyama \cite{Sugiyama2011}; explicit and IMEX overlap.}
+(\cref{fig:disc-centroid}, \cref{tab:disc-integrators}). Over the full inward spiral the
+explicit, IMEX and monolithic integrators trace the same centroid path---with the
+monolithic completing it in a quarter of the steps (\cref{sec:disc-speedup}).
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.62\linewidth]{figures/soft_disc_overlay.png}
+\caption{Soft disc in a lid-driven cavity ($N{=}64$): centroid trajectory over the full
+inward spiral for the explicit, IMEX and monolithic integrators, compared with Sugiyama
+\emph{et al.}\ \cite{Sugiyama2011}. Explicit and IMEX are indistinguishable; the
+monolithic (semi-Lagrangian, $4\times\dt$) traces the same spiral in ${\sim}4\times$ fewer
+steps, with a small phase drift on the innermost turns.}
+\label{fig:disc-centroid}
+\end{figure}
 
 \subsection{Soft disc in a Taylor--Green vortex (energy)}
 The kinetic and strain energies exchange periodically while the total energy is

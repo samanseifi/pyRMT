@@ -30,12 +30,28 @@ wall-boundary velocity yields divergence below $10^{-11}$ (machine-zero, the pro
 collocated solver cannot reach). The FFT Helmholtz solve of \cref{eq:helmholtz} passes
 the same round-trip to $10^{-10}$.
 
-\subsection{Spatial and temporal order}
-On the periodic Taylor--Green decaying vortex the MAC solver is second-order in space
-for velocity. The implicit-viscosity scheme retains this order at small $\dt$ and is
-stable and accurate up to $\dt=50\times$ the explicit viscous limit
-$\dx^2/(4\nu)$, where the explicit scheme diverges (\cref{fig:tg-imex}).
-\phfig{fig:tg-imex}{Taylor--Green: spatial convergence (2nd order) and stability of the
-implicit-viscosity scheme up to $50\times$ the explicit viscous CFL.}
-\TODO{temporal-order study of the IMEX and monolithic schemes (expected 1st order
-backward-Euler; 2nd with the CN/Strang variants).}
+\subsection{Spatial order (all integrators)}
+On the periodic Taylor--Green decaying vortex the solver is second order in space for
+velocity, pressure and kinetic energy, and---crucially---the explicit, IMEX and
+monolithic integrators produce \emph{identical} spatial errors at matched $\dt$
+(\cref{fig:tg-conv}): the implicit and semi-Lagrangian machinery does not degrade spatial
+accuracy. (For non-stiff advection the adaptive monolithic reduces to the central-%
+difference IMEX, \cref{sec:monolithic}, so the three curves coincide.) The
+implicit-viscosity scheme is additionally stable and accurate up to $\dt=50\times$ the
+explicit viscous limit $\dx^2/(4\nu)$, where the explicit scheme diverges.
+
+\begin{figure}[t]\centering
+\includegraphics[width=\linewidth]{figures/tg_convergence_methods.png}
+\caption{Taylor--Green spatial convergence of velocity, pressure and kinetic energy for
+the explicit, IMEX and monolithic integrators (matched $\dt$). All three coincide on the
+second-order reference line.}
+\label{fig:tg-conv}
+\end{figure}
+
+\subsection{Energy conservation of the elastic coupling}
+On the linear elastic standing shear wave the trapezoidal elastic coupling
+(Proposition~\ref{prop:trap}) conserves the discrete energy: at $2\times$ the explicit
+elastic CFL the relative energy drift is $5.5\times10^{-4}$ over five periods, whereas the
+dissipative stage-1 stabilizer (Proposition~\ref{prop:vn}) damps the wave away
+(drift $\to1$), and the explicit scheme diverges above the CFL. \TODO{optional temporal
+order-of-accuracy table (backward-Euler 1st order; trapezoidal/Strang 2nd).}

@@ -32,6 +32,15 @@ semi-Lagrangian adv. & $\dx/U$ & $6\times$ (soft disc) & $2.2\times10^{-3}$ at m
 \end{tabular}
 \end{table}
 
+\begin{figure}[t]\centering
+\includegraphics[width=0.66\linewidth]{figures/taylor_green_overlay.png}
+\caption{Taylor--Green kinetic-energy decay: explicit, IMEX and monolithic all track the
+analytic $e^{-4\nu t}$ (here the adaptive monolithic uses central advection, so it
+coincides with IMEX). The semi-Lagrangian branch is engaged only when the advective CFL
+is exceeded.}
+\label{fig:tg-energy}
+\end{figure}
+
 \subsection{Soft disc: integrator comparison and net speedup}
 \label{sec:disc-speedup}
 \Cref{tab:disc-integrators} compares integrators on the soft-disc-in-lid case

@@ -79,10 +79,56 @@ the force is applied \emph{after} the implicit solve, the analogous map has
 $\det=1/(1+a)$ but $\operatorname{tr}=1/(1+a)+1-a$, whose eigenvalues exceed unity for
 $a>1$ (unstable). \hfill
 \end{proof}
-This is a linearly-implicit \emph{stage-1} scheme: the isotropic-Laplacian stabilizer
-adds numerical damping that grows with $\dt$, trading accuracy for unconditional
-stability. The fully-consistent tangent that removes the damping is the monolithic
-solver of \cref{sec:monolithic}.
+\begin{remark}[Interpretation and the role of the ``inside'' force]
+\label{rem:vn}
+The amplification $|\lambda|^2=1/(1+a)$ with $a=\dt^2 c_s^2 k^2$ shows the scheme is
+non-oscillatory and stable for \emph{every} $\dt$ and wavenumber $k$: one step multiplies
+the modal energy by $1/(1+a)$. For resolved long waves ($a\ll1$) the loss per step is
+$1-|\lambda|^2 = a/(1+a)\approx \dt^2 c_s^2 k^2$, i.e.\ $O(\dt^2)$ and vanishing under
+refinement; for grid-scale waves ($a\gg1$) it is strong, supplying the dissipation that
+unconditional stability of an explicit force requires. That the elastic force must enter
+the implicit right-hand side is not a technicality: with the force applied \emph{after}
+the solve, $\det\bm M=1/(1+a)$ is unchanged but $\operatorname{tr}\bm M=1/(1+a)+1-a$, so
+the eigenvalue product stays below one while their sum grows, forcing a single
+$|\lambda|>1$ once $a>1$---an absolute instability. Only the ``inside'' form advances
+displacement and velocity with the \emph{same} implicit force, which is what preserves
+the discrete wave structure.
+\end{remark}
+
+The stage-1 damping is the joint price of the isotropic-Laplacian stabilizer and a
+one-sided (backward-Euler-type) coupling; symmetrizing the time coupling removes it
+completely, which is the scheme actually used for the elastic branch.
+
+\begin{proposition}[Energy-conserving trapezoidal coupling]
+\label{prop:trap}
+Advance the same linear elastic wave by the trapezoidal (implicit-midpoint) rule,
+\begin{equation*}
+\uv^{n+1}=\uv^{n}+\tfrac{\dt}{2}\,c_s^2\,(d^n+d^{n+1})_{xx},\qquad
+d^{n+1}=d^{n}+\tfrac{\dt}{2}\,(\uv^{n}+\uv^{n+1}).
+\end{equation*}
+Then $|\lambda|=1$ for every Fourier mode and every $\dt$: the scheme is unconditionally
+stable and \emph{lossless}, exactly conserving the discrete energy
+$\tfrac12(\uv^2+c_s^2 d_x^2)$.
+\end{proposition}
+\begin{proof}
+Writing $\bm w=(\uv,d)$, the semi-discrete wave is $\dot{\bm w}=\bm A\bm w$ with
+$\bm A=\begin{psmallmatrix}0 & -c_s^2 k^2\\ 1 & 0\end{psmallmatrix}$ (using
+$\partial_{xx}\to-k^2$), whose eigenvalues $\pm i c_s k$ are purely imaginary. The
+trapezoidal rule is the Cayley transform
+$\bm w^{n+1}=(\bm I-\tfrac{\dt}{2}\bm A)^{-1}(\bm I+\tfrac{\dt}{2}\bm A)\,\bm w^{n}$,
+whose eigenvalues $(1+\tfrac{\dt}{2}(\pm i c_s k))/(1-\tfrac{\dt}{2}(\pm i c_s k))$ have
+unit modulus; the Cayley transform of a Hamiltonian matrix is symplectic, so the discrete
+energy is conserved. \hfill
+\end{proof}
+
+\begin{remark}[Stage-1 vs.\ trapezoidal]
+Proposition~\ref{prop:vn} gives a dissipative, extremely robust integrator (useful as a
+stabilizer or for strongly stiff transients); Proposition~\ref{prop:trap} gives a
+neutrally-stable, energy-conserving one. The solver uses the trapezoidal form for the
+elastic branch so that a persistently oscillating solid neither grows nor decays
+numerically; \cref{sec:verification} verifies the predicted energy conservation on a
+standing elastic shear wave.
+\end{remark}
 
 \subsection{Fully-implicit monolithic solver}
 \label{sec:monolithic}
@@ -119,9 +165,11 @@ fixed-point iteration---an ``implicit elastic kernel with lagged interface.''
 \paragraph{Realized scheme.} We implement the linearly-implicit / operator-split form of
 \eqref{eq:residual}: (i) the elastic force is advanced by the energy-conserving
 trapezoidal (implicit-midpoint) coupling of \cref{sec:elastic-stab}, with the reference
-map transported by the implicit-midpoint velocity; (ii) advection is made
-unconditionally stable by a semi-Lagrangian (RK2 backtrace, cubic interpolation) update
-of the momentum, removing the last explicit CFL $\dx/U$; and (iii) the viscous
+map transported by the implicit-midpoint velocity; (ii) advection is treated
+\emph{adaptively}---accurate central differencing while the advective CFL is satisfied,
+switching to a semi-Lagrangian (RK2 backtrace, cubic interpolation) update of the momentum
+only when it is exceeded, which removes the last explicit CFL $\dx/U$ without paying the
+semi-Lagrangian numerical diffusion where advection is non-stiff; and (iii) the viscous
 (and elastic-stabilizer) Helmholtz solve on the wall-bounded velocity is preconditioned
 by a discrete-sine-transform spectral approximation, so the preconditioned CG converges
 in ${\sim}5$--$7$ iterations independent of $N$. This makes the lifted time step a net
