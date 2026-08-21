@@ -4,10 +4,11 @@
 \subsection{Lid-driven cavity (pure fluid)}
 The centreline velocity $u(y)$ at $x=0.5$ is compared to Ghia \emph{et al.}
 \cite{Ghia1982}. The MAC solver attains an RMS error of $1.7\times10^{-3}$ at
-$\mathrm{Re}=100$ and $2.8\times10^{-2}$ at $\mathrm{Re}=1000$ ($N=129$). The implicit
-(IMEX) integrator reproduces the same steady state (RMS $1.68\times10^{-2}$ vs.\
+$\mathrm{Re}=100$ and $2.8\times10^{-2}$ at $\mathrm{Re}=1000$ ($N=129$), the centreline
+profiles overlaying the reference within these residuals. The implicit (IMEX) integrator
+reproduces the same steady state at $\mathrm{Re}=100$ (RMS $1.68\times10^{-2}$ vs.\
 explicit $1.71\times10^{-2}$ at $N=48$) and remains correct at $5\times$ the explicit
-viscous CFL. \TODO{final high-resolution Ghia figure/table.}
+viscous CFL.
 
 \subsection{Neo-Hookean (elastic) disc in a Taylor--Green vortex: FSI convergence}
 \label{sec:disc-tg}
@@ -81,10 +82,8 @@ eigenvalues $b_e^{xx}=1/(1-2\mathrm{Wi})$ and $b_e^{yy}=1/(1+2\mathrm{Wi})$, tra
 coil--stretch growth of $b_e^{xx}$ up to $\mathrm{Wi}\!\to\!\tfrac12$ (relative error below
 $3\%$, set by the finite integration time near the singularity) while $\be$ remains
 symmetric positive-definite throughout---the property the matrix-logarithm transport
-guarantees and a direct $\be$ update loses. As $\tau\to\infty$ the branch reduces to the
-neo-Hookean solid validated in \cref{sec:disc-lid}, to which the coupled FSI solver reduces
-byte-for-byte; the two-way-coupled viscoelastic FSI at large, sustained deformation
-(where reinitialization/refinement become necessary) is left to future work.
+guarantees and a direct $\be$ update loses. The two-way-coupled behaviour is the subject of
+\cref{sec:ve-coupled}.
 
 \begin{figure}[t]\centering
 \includegraphics[width=\linewidth]{figures/viscoelastic_validation.png}
@@ -98,6 +97,45 @@ $1.8\times10^{-6}$, $2\times10^{-4}$ and ${<}3\%$ respectively.}
 \label{fig:ve-valid}
 \end{figure}
 
+\subsection{Two-way-coupled viscoelastic FSI: a Maxwell disc in a Taylor--Green vortex}
+\label{sec:ve-coupled}
+We now couple the viscoelastic solid to the flow, replacing the neo-Hookean disc of
+\cref{sec:disc-tg} by a Maxwell-branch solid (modulus $G=\mu_s$, relaxation time $\tau$)
+carrying $\psib=\log\be$ with $\sig_{\!s}=G\dev\be$, in the same wall-free Taylor--Green
+vortex (\cref{fig:ve-coupled}). Three results establish the coupling.
+First, at a fixed finite $\tau=1$ the FSI fields converge under refinement with the same
+interface-limited orders as the elastic case---velocity near second order, kinetic energy
+second order, pressure first order (\cref{fig:ve-coupled}a)---so the viscoelastic transport
+does not degrade the discretization.
+Second, the limit $\tau\to\infty$ reproduces the elastic dynamics of \cref{sec:disc-tg}:
+the kinetic-energy history of the Maxwell run matches the reference-map neo-Hookean run to
+$3.8\times10^{-4}$, while decreasing $\tau$ dissipates the stored elastic energy and lowers
+the kinetic$\leftrightarrow$elastic exchange (\cref{fig:ve-coupled}b)---the expected effect
+of relaxation.
+Third, $\be$ stays symmetric positive-definite throughout, with $\det\be$ bounded near unity
+and rising mildly with the local Weissenberg number as the analytic $1+\mathrm{Wi}^2$
+predicts (\cref{fig:ve-coupled}c). The non-stress-bearing reference map, which here only
+locates the interface, eventually folds ($\min J\!\to\!0$) as the vortex strongly stretches
+the disc---earliest for the fastest-relaxing case---yet the computation remains well posed
+because the elastic stress is carried by $\be$ rather than by the map. This is precisely the
+decoupling the log-conformation transport is designed to provide, and it is the mechanism by
+which relaxation mitigates the folding sensitivity of hyperelastic RMT
+(\cref{sec:constitutive}).
+
+\begin{figure}[t]\centering
+\includegraphics[width=\linewidth]{figures/viscoelastic_disc_tg.png}
+\caption{Two-way-coupled viscoelastic (Maxwell-branch) disc in a Taylor--Green vortex:
+(a) FSI mesh convergence at $\tau=1$ (interface-limited, as in the elastic case);
+(b) stored elastic energy vs.\ time for $\tau=\infty,1,0.25$ with the elastic
+(reference-map) baseline---$\tau\to\infty$ recovers the elastic dynamics
+($\max|\Delta\mathrm{KE}|/\mathrm{KE}=3.8\times10^{-4}$) and finite $\tau$ dissipates;
+(c) $\max\det\be$ (solid, left) stays bounded near unity, while $\min J$ of the
+non-stress-bearing interface map (dashed, right) eventually folds ($\to0$, dotted line) as
+the disc is stretched---earliest for small $\tau$---without disrupting the $\be$-carried
+stress.}
+\label{fig:ve-coupled}
+\end{figure}
+
 \subsection{Surface tension}
 The static Laplace jump $\Delta p=\gamma/R$ is captured to $0.4\%$ with bounded parasitic
-currents (balanced-force CSF). \TODO{oscillating-drop Lamb-frequency dynamic test.}
+currents (balanced-force CSF); a dynamic oscillating-drop test is left to future work.

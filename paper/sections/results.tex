@@ -70,17 +70,17 @@ imex-sl              & $6\times$ & $27$  & $\mathbf{3.05\times}$ & $6.0\times10^
 \end{tabular}
 \end{table}
 
-\subsection{Monolithic solver: lifting every explicit CFL}
+\subsection{Semi-monolithic solver: accuracy and speedup}
 \label{sec:results-mono}
-The full scheme removes each explicit stability limit in turn (\cref{tab:cfl-lift}):
-viscous ($\dx^2/\nu$, implicit Helmholtz), relaxation ($\dt\!\lesssim\!\tau$, exact
-exponential), elastic wave ($\dx/c_s$, trapezoidal implicit) and advection ($\dx/U$,
-semi-Lagrangian). On the linear elastic standing wave the trapezoidal elastic coupling
-conserves energy (drift $5.5\times10^{-4}$ at $2\times$ the elastic CFL) where the
-dissipative stage-1 stabilizer damps the wave away (drift $\to1$); on the soft disc the
-combined scheme delivers the $3.05\times$ net speedup of \cref{sec:disc-speedup}. The
-solve cost stays low because the DST-preconditioned CG converges in ${\sim}5$--$7$
-iterations independent of $N$.
+The semi-monolithic scheme removes each explicit stability limit in turn
+(\cref{tab:cfl-lift}): viscous ($\dx^2/\nu$, implicit Helmholtz), relaxation
+($\dt\!\lesssim\!\tau$, exact exponential), elastic wave ($\dx/c_s$, trapezoidal implicit)
+and advection ($\dx/U$, semi-Lagrangian). The trapezoidal elastic coupling is lossless on
+the standing wave (\cref{sec:verification}: consistent-energy drift at round-off for every
+$\dt$) where the stage-1 stabilizer damps the wave away; on the soft disc the combined
+scheme delivers the $3.05\times$ net speedup of \cref{sec:disc-speedup}, the solve cost
+staying low because the DST-preconditioned CG converges in ${\sim}5$--$7$ iterations
+independent of $N$.
 
 \paragraph{Semi-monolithic velocity--pressure (Newton--Krylov).} Making advection
 implicit \emph{and consistent}---rather than semi-Lagrangian---removes the split/SL error
@@ -93,22 +93,3 @@ semi-Lagrangian scheme at the same step---an order of magnitude more accurate at
 $\dt$, with Newton converging in ${\sim}3$ iterations per step. This is the accuracy
 advantage of the monolithic route; extending it to the fully-coupled solid
 (\cref{sec:monolithic}) is future work.
-
-\paragraph{Scope of the present realization.} The scheme above is the linearly-implicit /
-operator-split realization of \cref{sec:monolithic}: the elastic force uses the
-implicit-midpoint state and the advection is semi-Lagrangian, giving unconditional
-stability and a net speedup, at the cost of $O(\dt)$ operator-split and semi-Lagrangian
-diffusion errors (the ${\sim}6\%$ large-$\dt$ trajectory drift). The fully-consistent
-Newton--Krylov solve with implicit Crank--Nicolson advection removes these and restores
-second-order accuracy at large $\dt$; it is the natural next step and is not required for
-the stability and net-speedup results reported here.
-
-\subsection{High-Weissenberg and stiff-solid regimes}
-\TODO{A regime diagram in $(\mathrm{Wi},\ \text{resolution})$ or
-$(c_s\dt/\dx,\ \text{accuracy})$ showing configurations reachable by the implicit stack
-but inaccessible to explicit RMT (explicit diverges / folds).}
-
-\subsection{Fold cure (reinit vs.\ relaxation)}
-\TODO{Quantitative case where hyperelastic RMT folds/diverges at a given resolution
-while the viscoelastic solver completes and matches a reference---establishing
-relaxation as the principled cure and reinit as the symptomatic one.}

@@ -81,18 +81,13 @@ $a>1$ (unstable). \hfill
 \end{proof}
 \begin{remark}[Interpretation and the role of the ``inside'' force]
 \label{rem:vn}
-The amplification $|\lambda|^2=1/(1+a)$ with $a=\dt^2 c_s^2 k^2$ shows the scheme is
-non-oscillatory and stable for \emph{every} $\dt$ and wavenumber $k$: one step multiplies
-the modal energy by $1/(1+a)$. For resolved long waves ($a\ll1$) the loss per step is
-$1-|\lambda|^2 = a/(1+a)\approx \dt^2 c_s^2 k^2$, i.e.\ $O(\dt^2)$ and vanishing under
-refinement; for grid-scale waves ($a\gg1$) it is strong, supplying the dissipation that
-unconditional stability of an explicit force requires. That the elastic force must enter
-the implicit right-hand side is not a technicality: with the force applied \emph{after}
-the solve, $\det\bm M=1/(1+a)$ is unchanged but $\operatorname{tr}\bm M=1/(1+a)+1-a$, so
-the eigenvalue product stays below one while their sum grows, forcing a single
-$|\lambda|>1$ once $a>1$---an absolute instability. Only the ``inside'' form advances
-displacement and velocity with the \emph{same} implicit force, which is what preserves
-the discrete wave structure.
+The scheme is non-oscillatory and stable for every $\dt$ and wavenumber $k$: resolved long
+waves ($a\ll1$) lose only $O(\dt^2)$ energy per step, vanishing under refinement, while
+grid-scale waves ($a\gg1$) are strongly damped, supplying the dissipation that lets an
+explicit force be stabilized. The proof also shows why the force must sit \emph{inside} the
+implicit solve: applying it afterwards leaves the eigenvalue product unchanged but raises
+their sum, forcing $|\lambda|>1$ once $a>1$---an absolute instability that only the
+``inside'' form, advancing displacement and velocity with the same implicit force, avoids.
 \end{remark}
 
 The stage-1 damping is the joint price of the isotropic-Laplacian stabilizer and a
@@ -162,28 +157,21 @@ $\partial\bm R_{\xiv}/\partial\uv$) and (ii) freeze the interface geometry
 ($\phi$, band, $H$, departure points) at the start of the step, updating it in an outer
 fixed-point iteration---an ``implicit elastic kernel with lagged interface.''
 
-\paragraph{Realized scheme.} We implement the linearly-implicit / operator-split form of
-\eqref{eq:residual}: (i) the elastic force is advanced by the energy-conserving
-trapezoidal (implicit-midpoint) coupling of \cref{sec:elastic-stab}, with the reference
-map transported by the implicit-midpoint velocity; (ii) advection is treated
-\emph{adaptively}---accurate central differencing while the advective CFL is satisfied,
-switching to a semi-Lagrangian (RK2 backtrace, cubic interpolation) update of the momentum
-only when it is exceeded, which removes the last explicit CFL $\dx/U$ without paying the
-semi-Lagrangian numerical diffusion where advection is non-stiff; and (iii) the viscous
-(and elastic-stabilizer) Helmholtz solve on the wall-bounded velocity is preconditioned
-by a discrete-sine-transform spectral approximation, so the preconditioned CG converges
-in ${\sim}5$--$7$ iterations independent of $N$. This makes the lifted time step a net
-wall-clock gain rather than an equal-cost trade (\cref{sec:results}).
-
-\paragraph{Success criteria and status.} A genuine contribution requires (a) stable $\dt$
-well above the explicit limits, (b) a \emph{net} wall-clock speedup at matched accuracy,
-and (c) recovery of the explicit solution as $\dt\to0$. The realized scheme meets
-(a) (every explicit CFL removed) and (b) ($3\times$ speedup at $6\times\dt$ on the soft
-disc, \cref{sec:results-mono}), and reproduces the explicit trajectory at matched $\dt$
-to $2\times10^{-3}$ (c). Its accuracy at large $\dt$ carries an $O(\dt)$ operator-split and
-semi-Lagrangian diffusion error; the fully-consistent Newton--Krylov solve with implicit
-Crank--Nicolson advection (using the analytic tangent above) removes this and restores
-second-order accuracy at large $\dt$, and is the natural refinement of the present scheme.
+\paragraph{What is realized here.} \Cref{eq:residual} is the target; Algorithm~\ref{alg:mono}
+implements its velocity--pressure block by JFNK with $(\xiv,\psib)$ lagged in the outer
+fixed-point iteration---the linearly-implicit, operator-split realization of the full
+system. Concretely the elastic force is advanced by the energy-conserving trapezoidal
+coupling of \cref{sec:elastic-stab} (reference map transported by the implicit-midpoint
+velocity), advection is treated adaptively (central differencing while the advective CFL
+holds, semi-Lagrangian beyond), and the wall-bounded Helmholtz solve is preconditioned by
+a discrete-sine-transform spectral approximation so that the CG converges in ${\sim}5$--$7$
+iterations independent of $N$. This lifts every explicit CFL and turns the larger step
+into a net wall-clock gain (\cref{sec:results}), at the cost of an $O(\dt)$ operator-split
+and semi-Lagrangian error at large $\dt$. Closing the outer iteration to a fully-consistent
+Newton over the coupled $(\uv,p,\xiv,\psib)$---which \eqref{eq:residual} defines and the
+analytic tangent above supports---is the natural next step and is left to future work; the
+same lag on $(\xiv,\psib)$ is used by the monolithic Eulerian FSI of
+\cite{Richter2013,Dunne2006}.
 
 \subsection{The four time-integration schemes}
 \label{sec:four-schemes}

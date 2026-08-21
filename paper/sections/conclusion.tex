@@ -1,16 +1,21 @@
 \section{Conclusions and outlook}
 \label{sec:conclusion}
 
-We have presented an incompressible, one-fluid Reference Map Technique for
-viscoelastic fluid--structure interaction that is monolithic in space (one velocity,
-one pressure) and---through an implicit--explicit stack culminating in a Newton--Krylov
-solve---monolithic in time. The stress-carrying strain is transported as a
-log-conformation tensor, guaranteeing positive-definiteness and decoupling the relaxing
-stress from the folding-prone reference map; the staggered discretization makes the
-projection exact. The implicit stack removes the viscous, relaxation and elastic-wave
-CFL restrictions in turn, reusing the pressure transform/Krylov solvers, and reaches
-high-Weissenberg and stiff-solid regimes inaccessible to explicit RMT while reproducing
-the validated explicit results at matched accuracy.
+We have presented an incompressible, one-fluid Reference Map Technique for viscoelastic
+fluid--structure interaction on a single staggered grid. The stress-carrying elastic
+strain is transported as a log-conformation tensor, guaranteeing positive-definiteness and
+decoupling the relaxing stress from the folding-prone reference map, and the staggered
+discretization makes the projection exact. On this spatial method we built four
+time-integration schemes of increasing implicitness: an implicit--explicit stack that
+removes the viscous, relaxation and elastic-wave step-size limits in turn---reusing the
+pressure transform/Krylov solvers, with a trapezoidal elastic coupling that conserves the
+discrete energy to round-off---and a semi-monolithic Newton--Krylov scheme that advances
+the velocity--pressure system implicitly with the reference map and conformation lagged.
+A work--precision comparison shows the implicit stack paying off where the explicit step
+is smallest (the viscous- and elasticity-limited regimes). We demonstrated the coupled
+viscoelastic response on a disc in a Taylor--Green vortex: $\tau\to\infty$ recovers the
+elastic dynamics, finite $\tau$ dissipates stored elastic energy, and the elastic Finger
+tensor remains positive-definite throughout.
 
 Relative to the closest prior work, the method differs from explicit hyperelastic RMT
 \cite{Kamrin2012,Rycroft2020,Jain2019} in both the viscoelastic constitutive transport
@@ -26,6 +31,6 @@ elastic stabilizer (stage~1) adds numerical damping at large $\dt$, which the mo
 solver (\cref{sec:monolithic}) removes.
 
 \paragraph{Outlook.} Natural extensions are three dimensions, variable density and true
-sedimentation, lubrication-corrected contact \cite{Fai2018}, and multi-mode/nonlinear
-(Giesekus, FENE-P) constitutive laws, all of which fit within the present monolithic
-framework.
+sedimentation, lubrication-corrected contact \cite{Fai2018}, multi-mode/nonlinear
+(Giesekus, FENE-P) constitutive laws, and---most directly---closing the outer iteration to
+the fully-coupled $(\uv,p,\xiv,\psib)$ Newton posed in \cref{sec:monolithic}.

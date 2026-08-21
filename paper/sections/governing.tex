@@ -7,13 +7,14 @@ velocity field $\uv(\xv,t)$ and pressure $p(\xv,t)$ are shared by both phases. M
 and incompressibility read
 \begin{align}
 \rho\left(\partial_t\uv + (\uv\!\cdot\!\grad)\uv\right)
-   &= -\grad p + \dive\sig_{\mathrm{d}} + \bm f_{\Gamma} + \bm f_{c},
+   &= -\grad p + \dive\sig_{\mathrm{d}} + \bm f_{\Gamma},
    \label{eq:mom}\\
 \dive\uv &= 0,
    \label{eq:incomp}
 \end{align}
-where $\rho$ is the (piecewise-constant) density, $\bm f_\Gamma$ is the surface-tension
-force and $\bm f_c$ the contact force. The deviatoric stress $\sig_{\mathrm d}$ is
+where $\rho$ is the (piecewise-constant) density and $\bm f_\Gamma$ is the surface-tension
+force (a penalty contact force for solid--solid near-contact is available in the framework
+but is not exercised by any case reported here). The deviatoric stress $\sig_{\mathrm d}$ is
 blended between fluid and solid through a smoothed indicator (one-fluid model),
 \begin{equation}
 \sig_{\mathrm d} = 2\mu_f\,\bm D
