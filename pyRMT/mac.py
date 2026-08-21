@@ -23,6 +23,61 @@ def mac_grid(Nx, Ny, Lx=1.0, Ly=1.0):
     return Lx / Nx, Ly / Ny
 
 
+# ── Time-integration strategy selector ───────────────────────────────────────
+# One knob for the whole MAC/RMT program. Each level makes one more stiff term
+# implicit (the strategy is a stack, not a menu of unrelated options):
+#
+#   explicit      forward-Euler everything; dt limited by viscous, relaxation and
+#                 the elastic wave (backlog baseline).
+#   imex          implicit (backward-Euler) viscosity via the transform/CG Helmholtz
+#                 (#14.1) + exact/exponential relaxation where a relaxation time
+#                 exists (#14.2). Lifts the viscous & dt<~tau CFLs.
+#   imex-elastic  additionally the linearly-implicit elastic-wave stabilizer (#14.4
+#                 stage 1). Lifts the elastic-wave CFL dt<dx/cs. Viscoelastic driver
+#                 only (needs the solid-stress force path).
+#
+# resolve_integrator() maps the unified `integrator=` name to internal (imex,
+# elastic) booleans, and stays backward-compatible with the old per-driver flags
+# (implicit_visc / imex / elastic_imex) when integrator is left None.
+
+INTEGRATORS = ("explicit", "imex", "imex-elastic")
+
+
+def resolve_integrator(integrator=None, imex=False, elastic_imex=False,
+                       implicit_visc=False, supports_elastic=True):
+    """Return (canonical_name, use_imex, use_elastic).
+
+    integrator : one of INTEGRATORS (aliases accepted), or None to fall back to the
+                 legacy booleans. supports_elastic=False makes a driver reject the
+                 elastic strategy with a clear error instead of silently ignoring it.
+    """
+    if integrator is None:
+        if elastic_imex:
+            name = "imex-elastic"
+        elif imex or implicit_visc:
+            name = "imex"
+        else:
+            name = "explicit"
+    else:
+        key = str(integrator).lower().replace("_", "-").strip()
+        aliases = {
+            "explicit": "explicit", "exp": "explicit", "forward-euler": "explicit",
+            "imex": "imex", "imex-visc": "imex", "implicit-viscosity": "imex",
+            "semi-implicit": "imex",
+            "imex-elastic": "imex-elastic", "elastic": "imex-elastic",
+            "implicit-elastic": "imex-elastic",
+        }
+        if key not in aliases:
+            raise ValueError(
+                f"unknown integrator {integrator!r}; choose from {INTEGRATORS}")
+        name = aliases[key]
+    if name == "imex-elastic" and not supports_elastic:
+        raise ValueError(
+            "integrator='imex-elastic' is not available for this driver "
+            "(no solid-stress force path); use 'explicit' or 'imex'")
+    return name, name in ("imex", "imex-elastic"), name == "imex-elastic"
+
+
 def divergence(u, v, dx, dy):
     """Cell-centred divergence of a staggered velocity. u:(Ny,Nx+1), v:(Ny+1,Nx)
     -> (Ny, Nx)."""

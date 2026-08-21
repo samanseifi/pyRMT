@@ -201,6 +201,45 @@ txx, txy, tyy = contact_stress(phi_a, phi_b, eta=2.5, Gsum=2*mu_s,
 fu, fv = interfacial_force_faces(kappa, H, gamma=1.0, dx=dx, dy=dy)
 \end{lstlisting}
 
+\section{Choosing a time-integration strategy}
+Every MAC driver takes one \texttt{integrator} keyword that selects how the stiff
+terms are advanced. The strategies form a stack --- each makes one more term implicit
+and lifts one more time-step limit:
+\begin{center}\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\texttt{integrator} & implicit terms & lifts the limit \\
+\midrule
+\texttt{"explicit"} & --- (forward Euler) & baseline \\
+\texttt{"imex"} & viscosity $+$ relaxation & $\Delta x^2/\nu$ and $\Delta t\lesssim\tau$ \\
+\texttt{"imex-elastic"} & $+$ elastic wave & $+\ \Delta x/c_s$ (viscoelastic driver) \\
+\bottomrule
+\end{tabular}
+\end{center}
+Advection is always explicit (semi-Lagrangian, unconditionally stable). Use
+\texttt{"imex"} when the run is viscosity- or relaxation-limited (low Reynolds number,
+small relaxation time $\tau$); use \texttt{"imex-elastic"} to additionally push past
+the elastic-wave limit of a stiff solid (stage~1: stable but adds mild numerical
+damping at large $\Delta t$). The default is \texttt{"explicit"}, which reproduces the
+original behaviour.
+\begin{lstlisting}
+from benchmarks.mac_soft_disc_lid import run as run_disc
+from benchmarks.mac_viscoelastic_extension import run as run_ve
+
+run_disc(N=128, integrator="explicit")      # forward-Euler baseline
+run_disc(N=128, integrator="imex")          # implicit viscosity (lifts dx^2/nu)
+run_ve(N=128, tau=0.5, integrator="imex-elastic")   # + implicit elastic wave
+
+# programmatic mapping (name, use_imex, use_elastic):
+from pyRMT.mac import resolve_integrator
+resolve_integrator("imex")            # -> ("imex", True, False)
+resolve_integrator("imex-elastic")    # -> ("imex-elastic", True, True)
+\end{lstlisting}
+Requesting \texttt{"imex-elastic"} on a driver without a solid-stress force path (the
+lid / Taylor--Green drivers) raises a clear error. The legacy per-driver flags
+(\texttt{implicit\_visc=}, \texttt{imex=}, \texttt{elastic\_imex=}) still work as
+aliases. Passing a matched \texttt{dt=} lets you compare strategies at the same step.
+
 \section{Building a custom simulation (MAC)}
 A minimal soft-disc-in-flow loop:
 \begin{lstlisting}

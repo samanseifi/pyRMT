@@ -214,13 +214,91 @@ The default scheme is an explicit predictor followed by the projection:
 Three momentum predictors are provided: lid-driven (top wall moves at $U_{\text{lid}}$,
 others no-slip), free-slip box, and periodic. The collocated solver additionally
 offers an RK4 momentum step (\texttt{momentum\_step\_rk4}).
-The time step obeys the advective, viscous, and elastic-wave CFL limits,
-\(
-\Delta t \le \min\!\bigl(C\,\Delta x/U,\;
-C_\nu\,\Delta x^2/\nu,\;
-C\,\Delta x/c_s\bigr),
-\)
-with $c_s=\sqrt{\mu_s/\rho}$.
+The explicit time step obeys the advective, viscous, and elastic-wave CFL limits,
+\begin{equation}
+\Delta t \le \min\!\bigl(\underbrace{C\,\Delta x/U}_{\text{advection}},\;
+\underbrace{C_\nu\,\Delta x^2/\nu}_{\text{viscous}},\;
+\underbrace{C\,\Delta x/c_s}_{\text{elastic wave}}\bigr),
+\qquad c_s=\sqrt{\mu_s/\rho},
+\label{eq:cfl}
+\end{equation}
+and, for viscoelasticity, additionally $\Delta t\lesssim\tau$ from the stiff
+relaxation. The last three are lifted by the implicit-explicit (IMEX) stack below.
+
+\subsection{Implicit--explicit (IMEX) strategy stack}
+\label{sec:imex}
+The stiff terms in \eqref{eq:cfl} are treated implicitly one at a time, forming a
+\emph{stack} of strategies (each contains the previous one). Advection stays explicit
+throughout (the semi-Lagrangian backtrace of Section~\ref{sec:advect} is already
+unconditionally stable).
+
+\paragraph{Implicit viscosity (removes $C_\nu\Delta x^2/\nu$).}
+The viscous term is advanced by backward Euler, giving a Helmholtz solve for the
+predictor,
+\begin{equation}
+\bigl(I-\Delta t\,\nu\nabla^2\bigr)\,\uv^{*}
+   = \uv^{n} - \Delta t\,(\uv\!\cdot\!\nabla)\uv^{n} + \Delta t\,\bm f/\rho .
+\label{eq:helmholtz}
+\end{equation}
+On periodic (and free-slip / Neumann) directions the Helmholtz operator is
+diagonalized by the \emph{same} FFT/DCT used for the pressure Poisson solve, so
+\eqref{eq:helmholtz} costs one extra transform per component
+(\texttt{solve\_helmholtz\_periodic}, \texttt{lap\_eigs\_periodic}). For the
+Dirichlet (no-slip $+$ moving lid) cavity the operator is not diagonalized by the DCT,
+so it is solved matrix-free by conjugate gradients reusing the exact ghost-cell viscous
+stencil (\texttt{momentum\_predictor\_lid\_imex}, \texttt{\_cg\_helmholtz}); the moving
+lid enters as a right-hand-side inhomogeneity, and the operator generalizes to the
+variable one-fluid viscosity.
+
+\paragraph{Exact/exponential relaxation (removes $\Delta t\lesssim\tau$).}
+The log-conformation update is split (Strang) into
+$\text{relax}(\Delta t/2)\!\to\!\text{stretch}(\Delta t)\!\to\!\text{relax}(\Delta t/2)$,
+with the relaxation half-steps integrated \emph{analytically},
+\begin{equation}
+\bten_e \leftarrow I + (\bten_e-I)\,e^{-\Delta t/2\tau},
+\label{eq:relaxexact}
+\end{equation}
+the closed-form solution of $\dot{\bten}_e=-\tfrac1\tau(\bten_e-I)$. This is
+$A$-stable for any $\tau$ and SPD-preserving (a convex blend of two SPD tensors), and
+for $\tau\to\infty$ reduces exactly to the explicit stretch step
+(\texttt{logconf\_local\_step\_strang}, \texttt{relax\_exact}).
+
+\paragraph{Linearly-implicit elastic stabilizer (removes $C\,\Delta x/c_s$).}
+The nonlinear elastic force $\nabla\!\cdot\!\bm\sigma_{\!e}$ is kept explicit
+(physics), but an $O(\Delta t^2)$ wave operator $\Delta t^2 c_s^2\,\chi\,\nabla^2$
+($\chi$ the solid indicator) is added \emph{implicitly} to \eqref{eq:helmholtz}. A
+1-D von-Neumann analysis of the linear elastic wave
+$\uv_t=c_s^2 d_{xx},\ d_t=\uv$ gives the amplification
+$|\lambda|=1/\sqrt{1+\Delta t^2 c_s^2 k^2}\le1$, i.e.\ unconditional stability with
+mild damping --- \emph{provided the elastic force is placed inside the implicit
+right-hand side} (adding it after the solve is unstable at large $\Delta t$). A
+frozen-coefficient split keeps a single transform solve
+(\texttt{momentum\_predictor\_periodic\_imex\_elastic}). This is stage~1: the
+isotropic-Laplacian stabilizer adds numerical damping at large $\Delta t$; the
+fully-consistent Newton/JFNK tangent that removes it is future work
+(Section~\ref{sec:limits}).
+
+\paragraph{Unified selector.} \texttt{resolve\_integrator} maps a single
+\texttt{integrator} keyword to the internal flags, so every MAC driver exposes one
+knob,
+\[
+\texttt{explicit}\ \subset\ \texttt{imex}\ \subset\ \texttt{imex-elastic},
+\]
+with the legacy booleans (\texttt{implicit\_visc}, \texttt{imex},
+\texttt{elastic\_imex}) retained as aliases. Each level makes one more stiff term of
+\eqref{eq:cfl} implicit.
+
+\begin{center}\small
+\begin{tabular}{@{}llll@{}}
+\hline
+\texttt{integrator} & implicit terms & lifts & drivers\\
+\hline
+\texttt{explicit}     & --- & (baseline) & all\\
+\texttt{imex}         & viscosity $+$ relaxation & $\Delta x^2/\nu$, $\tau$ & all\\
+\texttt{imex-elastic} & $+$ elastic wave & $+\,\Delta x/c_s$ & viscoelastic\\
+\hline
+\end{tabular}
+\end{center}
 
 \subsection{Reference-map advection schemes}
 \label{sec:advect}
@@ -349,14 +427,33 @@ digits ($\tau{=}0.25\!\to\!1.3333$, $\tau{=}0.5\!\to\!1.997$ vs.\ $2.0$) and is
 resolution-independent ($N{=}64/96/128$ overlap), while the elastic case diverges as
 $e^{2\varepsilon t}$ (Fig.~\texttt{viscoelastic\_uniform\_money.png}).
 
+\subsection{IMEX time integration}
+The strategy stack of Section~\ref{sec:imex} is verified to reproduce the explicit
+results before claiming any lifted step. \emph{Implicit viscosity:} on Taylor--Green
+the scheme is stable and accurate to $\Delta t=50\times$ the explicit viscous limit
+(where explicit diverges) and keeps second-order spatial accuracy. \emph{Exact
+relaxation:} step-strain is reproduced to machine precision at \emph{any} $\Delta t$,
+whereas the explicit step errs by $0.29$ at $\Delta t/\tau=2$. \emph{Combined IMEX}
+(four-roll blob) reproduces the explicit $b_e^{xx}$ to $0.55\%$ at a matched step and
+completes within ${\sim}2\%$ at $2\!-\!4\times$ the explicit viscous CFL where explicit
+diverges. \emph{Wall solver:} the lid cavity reproduces the Ghia steady state and the
+soft disc reproduces the (Sugiyama-validated) centroid trajectory to $2\times10^{-3}$.
+\emph{Elastic stabilizer (stage~1):} consistent ($0.44\%$ vs.\ explicit at $0.1\times$
+the elastic CFL) and stable to $8\times$ the elastic CFL where the explicit elastic
+force diverges; see \texttt{tests/test\_\{mac,ve\_imex\_fsi,imex\_wall,elastic\_imex\}.py}.
+
 \section{Limitations}
+\label{sec:limits}
 \begin{itemize}[nosep]
   \item Two-dimensional; single density by default (variable density only in the
   collocated AMG path).
   \item Diffuse-interface FSI fields converge below second order
   (Section~\ref{sec:conv}); a sharp-interface treatment is future work.
   \item Penalty contact is non-quantitative near contact (lubrication planned).
-  \item Explicit time stepping ties $\Delta t$ to the elastic-wave / viscous CFL.
+  \item The IMEX stack (Section~\ref{sec:imex}) lifts the viscous, relaxation and
+  (stage~1) elastic-wave limits; the elastic stabilizer is only linearly-implicit and
+  adds numerical damping at large $\Delta t$. The fully-consistent Newton/JFNK elastic
+  kernel (removing the damping, giving accurate large-$\Delta t$ steps) is future work.
   \item Long, high-resolution runs are memory bound; frame data should be streamed
   to disk (the showcase driver does this).
 \end{itemize}
@@ -368,7 +465,8 @@ $e^{2\varepsilon t}$ (Fig.~\texttt{viscoelastic\_uniform\_money.png}).
 file & contents \\
 \midrule
 \texttt{pyRMT/mac.py} & staggered grid, exact projection, momentum predictors, \\
- & periodic/Neumann Poisson, interfacial \& contact stress \\
+ & periodic/Neumann Poisson, IMEX Helmholtz (FFT \& CG), \\
+ & \texttt{resolve\_integrator} selector, interfacial \& contact stress \\
 \texttt{pyRMT/functions.py} & collocated solver, advection schemes, neo-Hookean stress, \\
  & extrapolation, reinitialization, AMG projection \\
 \texttt{pyRMT/viscoelastic.py} & UCM $\bten_e$, log-conformation, $\exp/\log$ of $2{\times}2$ SPD \\
