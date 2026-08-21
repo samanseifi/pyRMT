@@ -4,15 +4,13 @@ Draft manuscript: **"An implicit, monolithic, incompressible Reference Map Techn
 for viscoelastic fluid–structure interaction."**
 
 ## Target venue
-- **Primary: Journal of Computational Physics (JCP)** — the novelty is the *implicit,
-  monolithic, incompressible* RMT (an open gap vs. explicit RMT and vs. the
-  compressible GPR model). Gated on the monolithic solver (§7 / stage 2) clearing the
-  10–100× dt + net-speedup bar.
-- **Fallback: Computers & Fluids / IJNMF** — if framed as the integrated IMEX
-  incompressible viscoelastic RMT (stages 1–IMEX only), without the full monolithic
-  result. Also a natural home for the constitutive + validation content.
-- Both use the Elsevier `elsarticle` class, so the source needs no reformatting to
-  switch.
+- **Computers & Fluids** (Elsevier, `elsarticle`). The contribution is the
+  log-conformation viscoelastic RMT on a MAC staggered grid with a staged semi-implicit
+  (IMEX) time-integration stack, validated (incl. viscoelastic FSI and FSI convergence),
+  positioned honestly against Richter/Dunne (monolithic hyperelastic Eulerian FSI),
+  Kolahdouz (sharp partitioned), and Sugiyama/Ii. The fully-coupled monolithic solver is
+  presented as a foundation + roadmap (fluid JFNK + validated elastic tangent), not a
+  finished result — the full `(u,p,ξ,ψ)` Newton is future work.
 
 ## Build
 ```bash

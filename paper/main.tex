@@ -1,5 +1,5 @@
 %% pyRMT method paper -- Elsevier (elsarticle) format.
-%% Primary target: Journal of Computational Physics. Fallback: Computers & Fluids.
+%% Target: Computers & Fluids.
 %% Build:  pdflatex main ; bibtex main ; pdflatex main ; pdflatex main
 \documentclass[review,3p,11pt]{elsarticle}
 
@@ -12,6 +12,8 @@
 \usepackage[hidelinks]{hyperref}
 \usepackage{cleveref}
 \usepackage{xcolor}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
 
 \newtheorem{proposition}{Proposition}
 \theoremstyle{remark}
@@ -49,13 +51,13 @@
 \newcommand{\tr}{\operatorname{tr}}
 \newcommand{\dev}{\operatorname{dev}}
 
-\journal{Journal of Computational Physics}
+\journal{Computers \& Fluids}
 
 \begin{document}
 
 \begin{frontmatter}
 
-\title{An implicit, monolithic, incompressible Reference Map Technique for
+\title{A semi-implicit log-conformation Reference Map Technique for incompressible
 viscoelastic fluid--structure interaction}
 
 \author[a]{Saman Seifi\corref{cor}}

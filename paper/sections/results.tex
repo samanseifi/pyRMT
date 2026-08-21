@@ -83,6 +83,18 @@ combined scheme delivers the $3.05\times$ net speedup of \cref{sec:disc-speedup}
 solve cost stays low because the DST-preconditioned CG converges in ${\sim}5$--$7$
 iterations independent of $N$.
 
+\paragraph{Semi-monolithic velocity--pressure (Newton--Krylov).} Making advection
+implicit \emph{and consistent}---rather than semi-Lagrangian---removes the split/SL error
+entirely. The semi-monolithic scheme (\cref{alg:mono}) solves the coupled $(\uv,p)$ system
+by JFNK, preconditioned by one IMEX step and the projection. On Taylor--Green it reproduces
+the analytic decay ($1.5\times10^{-4}$ at $\dt$ below the CFL) and, crucially, stays
+\emph{accurate} far above the advective CFL: at $5\times$ the CFL its error is
+$1.1\times10^{-3}$ (clean $O(\dt)$), versus the $2.7\times10^{-2}$ diffusion floor of the
+semi-Lagrangian scheme at the same step---an order of magnitude more accurate at large
+$\dt$, with Newton converging in ${\sim}3$ iterations per step. This is the accuracy
+advantage of the monolithic route; extending it to the fully-coupled solid
+(\cref{sec:monolithic}) is future work.
+
 \paragraph{Scope of the present realization.} The scheme above is the linearly-implicit /
 operator-split realization of \cref{sec:monolithic}: the elastic force uses the
 implicit-midpoint state and the advection is semi-Lagrangian, giving unconditional

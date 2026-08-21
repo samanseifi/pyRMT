@@ -184,3 +184,71 @@ to $2\times10^{-3}$ (c). Its accuracy at large $\dt$ carries an $O(\dt)$ operato
 semi-Lagrangian diffusion error; the fully-consistent Newton--Krylov solve with implicit
 Crank--Nicolson advection (using the analytic tangent above) removes this and restores
 second-order accuracy at large $\dt$, and is the natural refinement of the present scheme.
+
+\subsection{The four time-integration schemes}
+\label{sec:four-schemes}
+We compare four schemes of increasing implicitness (\cref{alg:explicit,alg:imex,alg:imexsl,alg:mono});
+each shares the exact projection and the semi-Lagrangian transport of $(\xiv,\psib)$.
+
+\begin{algorithm}[t]\small\caption{\textsc{Explicit} --- one step}\label{alg:explicit}
+\begin{algorithmic}[1]
+\State advect $(\xiv,\psib)$ with $\uv^n$ (semi-Lagrangian); extrapolate into the band
+\State $\psib\!\leftarrow\!$ explicit relaxation; $\be\!=\!\exp\psib$; assemble blended stress $\sig$, force $\bm f=\dive\sig$
+\State $\uv^{*}=\uv^n+\dt\!\left[-(\uv^n\!\cdot\!\grad)\uv^n+\nu\nabla^2\uv^n+\bm f/\rho\right]$
+\State $(\uv^{n+1},p)\leftarrow\textsc{Project}(\uv^{*})$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[t]\small\caption{\textsc{IMEX} --- implicit viscosity + exact relaxation}\label{alg:imex}
+\begin{algorithmic}[1]
+\State advect $(\xiv,\psib)$; extrapolate; \, $\psib\!\leftarrow\!$ \emph{exact} exponential relaxation ($A$-stable $\forall\tau$)
+\State $\be,\ \sig,\ \bm f$ as above
+\State solve $\left(\It-\dt\,\nu\nabla^2\right)\uv^{*}=\uv^n-\dt(\uv^n\!\cdot\!\grad)\uv^n+\dt\,\bm f/\rho$ \Comment{FFT/DCT, or PCG at walls}
+\State $(\uv^{n+1},p)\leftarrow\textsc{Project}(\uv^{*})$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[t]\small\caption{\textsc{IMEX-SL} --- + semi-Lagrangian advection}\label{alg:imexsl}
+\begin{algorithmic}[1]
+\State advect $(\xiv,\psib)$; extrapolate; exact relaxation; \, $\be,\sig,\bm f$
+\If{$\dt\,\max|\uv^n|/\dx \le 1$} $\tilde{\uv}\leftarrow \uv^n-\dt(\uv^n\!\cdot\!\grad)\uv^n$ \Comment{central (accurate)}
+\Else\ \ $\tilde{\uv}\leftarrow$ semi-Lagrangian backtrace of $\uv^n$ (cubic) \Comment{unconditionally stable}
+\EndIf
+\State solve $\left(\It-\dt\,\nu\nabla^2\right)\uv^{*}=\tilde{\uv}+\dt\,\bm f/\rho$; \ $(\uv^{n+1},p)\leftarrow\textsc{Project}(\uv^{*})$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[t]\small\caption{\textsc{Semi-monolithic} --- Newton--Krylov velocity--pressure}\label{alg:mono}
+\begin{algorithmic}[1]
+\State advect $(\xiv,\psib)$ with $\uv^n$ (lagged); extrapolate; \, $\be,\sig,\bm f$
+\State solve $\bm R(\uv,p)=\bm 0$ by JFNK, with
+$\bm R_{\uv}=\tfrac{\uv-\uv^n}{\dt}+(\uv\!\cdot\!\grad)\uv+\tfrac1\rho\grad p-\nu\nabla^2\uv-\tfrac{\bm f}{\rho}$, $R_p=\dive\uv$:
+\State \quad Newton: $\bm J\,\delta=-\bm R$ via GMRES, preconditioned by one \textsc{IMEX} step + the projection Schur complement
+\State $(\uv^{n+1},p)\leftarrow$ converged state
+\end{algorithmic}
+\end{algorithm}
+
+\Cref{tab:schemes} summarizes them. \textsc{Explicit} and \textsc{IMEX} treat advection
+explicitly (central), so both carry the advective CFL; they differ only in the viscous
+(and relaxation) limits, and on non-stiff-advection problems give identical accuracy---so
+in the results we report \textsc{IMEX} as the representative implicit-viscosity scheme and
+do not separately plot \textsc{Explicit} where the two coincide. \textsc{IMEX-SL} lifts the
+advective limit; \textsc{Semi-monolithic} additionally makes advection and the
+velocity--pressure coupling implicit and consistent (no split/SL error), monolithic in
+$(\uv,p)$ with $(\xiv,\psib)$ lagged---the fully-coupled $(\uv,p,\xiv,\psib)$ Newton is
+\cref{sec:monolithic}.
+
+\begin{table}[t]\centering\small
+\caption{The four schemes. ``advection'' = how the momentum advection is treated.}
+\label{tab:schemes}
+\begin{tabular}{@{}lllll@{}}
+\toprule
+scheme & viscosity & advection & $\uv$--$p$ coupling & CFL limits remaining \\
+\midrule
+\textsc{Explicit} & explicit & explicit central & fractional-step & viscous, elastic, $\tau$, advective \\
+\textsc{IMEX} & implicit & explicit central & fractional-step & advective (+ elastic) \\
+\textsc{IMEX-SL} & implicit & semi-Lagrangian & fractional-step & (+ elastic) \\
+\textsc{Semi-monolithic} & implicit & implicit (Newton) & monolithic $(\uv,p)$ & none for the fluid \\
+\bottomrule
+\end{tabular}
+\end{table}
