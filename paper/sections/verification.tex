@@ -50,8 +50,21 @@ second-order reference line.}
 
 \subsection{Energy conservation of the elastic coupling}
 On the linear elastic standing shear wave the trapezoidal elastic coupling
-(Proposition~\ref{prop:trap}) conserves the discrete energy: at $2\times$ the explicit
-elastic CFL the relative energy drift is $5.5\times10^{-4}$ over five periods, whereas the
-dissipative stage-1 stabilizer (Proposition~\ref{prop:vn}) damps the wave away
-(drift $\to1$), and the explicit scheme diverges above the CFL. \TODO{optional temporal
-order-of-accuracy table (backward-Euler 1st order; trapezoidal/Strang 2nd).}
+(Proposition~\ref{prop:trap}) conserves the discrete energy across a wide range of time
+steps, whereas the dissipative stage-1 stabilizer (Proposition~\ref{prop:vn}) damps the
+wave away (drift $\to1$) and the explicit scheme diverges above the CFL:
+\begin{center}\small
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+$\dt/\dt_{\rm CFL}$ & $0.5$ & $1$ & $2$ & $4$ & $8$ \\
+\midrule
+energy drift (5 periods) & $5.5\!\times\!10^{-5}$ & $2.2\!\times\!10^{-4}$ &
+$1.8\!\times\!10^{-3}$ & $9.7\!\times\!10^{-3}$ & $9.6\!\times\!10^{-3}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+The drift stays below $1\%$ even at $8\times$ the explicit elastic CFL (the residual is the
+$O(\dt^2)$ phase error of the resolved mode, not numerical dissipation). Separately, the
+Oldroyd-B relaxation does not preserve $\det\be$: under steady shear the solver reproduces
+the analytic $\det\be=1+\mathrm{Wi}^2$ (e.g.\ $1.36$ at $\mathrm{Wi}=0.6$), a bounded,
+physical departure whose trace is carried by the pressure.

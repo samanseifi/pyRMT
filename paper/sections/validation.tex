@@ -13,8 +13,10 @@ viscous CFL. \TODO{final high-resolution Ghia figure/table.}
 \label{sec:disc-lid}
 A neo-Hookean disc carried by the cavity flow is compared to the full-Eulerian result of
 Sugiyama \emph{et al.}\ \cite{Sugiyama2011} and to Jain \emph{et al.}\ \cite{Jain2019}.
-The centroid trajectory matches the reference and the deformed interface is
-grid-converged ($N=64\approx N=128$). The IMEX integrator reproduces the explicit
+The centroid trajectory follows the reference over the full inward spiral with a mean
+deviation of $1.4\times10^{-2}$ (max $4.0\times10^{-2}$) at $N{=}64$---about $3.5\%$ of the
+trajectory extent, and consistent with the resolution gap to Sugiyama's $1024^2$ reference
+and the diffuse-interface order of \cref{sec:disc-tg}. The IMEX integrator reproduces the explicit
 (validated) centroid trajectory to $2\times10^{-3}$ with identical minimum Jacobian,
 confirming that the implicit viscosity does not perturb the validated FSI result
 (\cref{fig:disc-centroid}, \cref{tab:disc-integrators}). Over the full inward spiral the
