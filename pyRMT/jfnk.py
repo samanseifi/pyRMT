@@ -125,46 +125,72 @@ def residual_elastic(X, un, vn, x1n, x2n, nu, dx, dy, dt, rho, mu_s, N):
     return _pack5(Ru, Rv, Rp, Rx1, Rx2)
 
 
-def _precond5(r, nu, dx, dy, dt, rho, mu_s, N, lap_eig, peig):
-    """Physics-based preconditioner for the coupled elastic system: implicit
-    viscous+elastic Helmholtz on velocity, Poisson on pressure, mass (dt) on xi."""
+def _precond_gs(r, nu, dx, dy, dt, rho, mu_s, N, lap_eig, peig, x1c, x2c):
+    """Best-in-class physics-based preconditioner: a block Gauss-Seidel (triangular)
+    sweep = one operator-split step.
+      1. velocity: elastic-stabilized Helmholtz (I - dt*nu*L - dt^2*cs^2*L)^-1 (FFT),
+         which includes the elastic stiffness (the coupling a block-Jacobi P misses);
+      2. pressure: exact projection Poisson as the Schur complement, correcting div(du);
+      3. reference map: xi-transport with the JUST-computed velocity (Gauss-Seidel),
+         (I/dt)^-1 with the (du.grad)xi coupling moved to the RHS.
+    x1c,x2c are the current Newton-iterate reference map (for the velocity->xi coupling)."""
     ru, rv, rp, rx1, rx2 = _unpack5(r, N)
     cs2 = mu_s / rho
-    coef = nu * dt + 0.25 * dt * dt * cs2                    # visc + elastic stabilizer
+    coef = dt * nu + dt * dt * cs2                       # velocity block: visc + elastic
     du = np.real(np.fft.ifft2(np.fft.fft2(dt * ru) / (1.0 - coef * lap_eig)))
     dv = np.real(np.fft.ifft2(np.fft.fft2(dt * rv) / (1.0 - coef * lap_eig)))
-    dphat = np.fft.fft2(rp) / peig; dphat[0, 0] = 0.0
+    # pressure Schur: make div(u + du_corrected) match -rp
+    rhs_p = (rho / dt) * (_div_per(du, dv, dx, dy) + rp); rhs_p -= rhs_p.mean()
+    dphat = np.fft.fft2(rhs_p) / peig; dphat[0, 0] = 0.0
     dp = np.real(np.fft.ifft2(dphat))
-    dx1 = dt * rx1; dx2 = dt * rx2                            # xi block ~ (I/dt)^-1
+    du = du - (dt / rho) * _gradx_per(dp, dx)
+    dv = dv - (dt / rho) * _grady_per(dp, dy)
+    # reference-map block, Gauss-Seidel with the corrected velocity
+    dx1 = dt * (rx1 - _adv_scalar_per(x1c, du, dv, dx, dy))
+    dx2 = dt * (rx2 - _adv_scalar_per(x2c, du, dv, dx, dy))
     return _pack5(du, dv, dp, dx1, dx2)
 
 
 def step_elastic(un, vn, x1n, x2n, nu, dx, dy, dt, rho=1.0, mu_s=1.0,
-                 newton_tol=1e-8, max_newton=25, gmres_tol=1e-3, info=None):
+                 newton_tol=1e-8, max_newton=30, info=None):
     """One fully-implicit backward-Euler step of the coupled (u,v,p,xi1,xi2) neo-Hookean
-    system by JFNK. Returns (u, v, p, xi1, xi2)."""
+    system by line-search JFNK with a block-Gauss-Seidel physics-based preconditioner and
+    an Eisenstat-Walker adaptive forcing term. Returns (u, v, p, xi1, xi2)."""
     N = un.shape[0]
     lap_eig = lap_eigs_periodic(N, N, dx, dy); peig = poisson_eigs_periodic(N, N, dx, dy)
     X = _pack5(un.copy(), vn.copy(), np.zeros((N, N)), x1n.copy(), x2n.copy())
-    R = residual_elastic(X, un, vn, x1n, x2n, nu, dx, dy, dt, rho, mu_s, N)
-    res0 = np.linalg.norm(R); nit = 0; git = 0
+
+    def resid(Y):
+        return residual_elastic(Y, un, vn, x1n, x2n, nu, dx, dy, dt, rho, mu_s, N)
+
+    R = resid(X); res0 = np.linalg.norm(R); rn = res0
+    nit = 0; git = 0; eta = 0.1                          # Eisenstat-Walker forcing
+    n2 = N * N
     for _ in range(max_newton):
-        if np.linalg.norm(R) <= newton_tol * max(res0, 1.0):
+        if rn <= newton_tol * max(res0, 1.0):
             break
-        eps = 1e-7 * (np.linalg.norm(X) / max(np.linalg.norm(R), 1e-30) + 1.0)
+        eps = 1e-7 * (np.linalg.norm(X) / max(rn, 1e-30) + 1.0)
+        x1c = X[3*n2:4*n2].reshape(N, N); x2c = X[4*n2:].reshape(N, N)
         J = LinearOperator((X.size, X.size),
-                           matvec=lambda w: (residual_elastic(X + eps*w, un, vn, x1n, x2n,
-                                                              nu, dx, dy, dt, rho, mu_s, N) - R)/eps)
+                           matvec=lambda w: (resid(X + eps * w) - R) / eps)
         M = LinearOperator((X.size, X.size),
-                           matvec=lambda r: _precond5(r, nu, dx, dy, dt, rho, mu_s, N, lap_eig, peig))
+                           matvec=lambda rr: _precond_gs(rr, nu, dx, dy, dt, rho, mu_s, N,
+                                                         lap_eig, peig, x1c, x2c))
         gi = [0]
-        dX, _ = gmres(J, -R, M=M, rtol=gmres_tol, atol=0.0, maxiter=300,
-                      callback=lambda rk: gi.__setitem__(0, gi[0]+1))
-        X = X + dX; R = residual_elastic(X, un, vn, x1n, x2n, nu, dx, dy, dt, rho, mu_s, N)
+        dX, _ = gmres(J, -R, M=M, rtol=min(eta, 0.5), atol=0.0, maxiter=200, restart=50,
+                      callback=lambda rk: gi.__setitem__(0, gi[0] + 1))
+        alpha = 1.0                                       # Armijo backtracking line search
+        for _ls in range(12):
+            Rt = resid(X + alpha * dX); rt = np.linalg.norm(Rt)
+            if rt <= (1.0 - 1e-4 * alpha) * rn:
+                break
+            alpha *= 0.5
+        X = X + alpha * dX; R = Rt; rn_prev = rn; rn = rt
+        eta = max(1e-3, min(0.5, 0.9 * (rn / max(rn_prev, 1e-30)) ** 2))
         nit += 1; git += gi[0]
     u, v, p, x1, x2 = _unpack5(X, N)
     if info is not None:
-        info.update(newton_iters=nit, gmres_iters=git, res0=res0, res=np.linalg.norm(R))
+        info.update(newton_iters=nit, gmres_iters=git, res0=res0, res=rn)
     return u, v, p, x1, x2
 
 
