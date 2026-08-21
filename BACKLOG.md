@@ -169,12 +169,22 @@ here `ψ=log b_e` carries stress, decoupled from a geometry-only ξ).
     *Caveat (honest):* the isotropic-Laplacian stabilizer adds numerical damping, so at
     large dt it is stable but over-damped (4%→17% drift over 1×→8× the elastic CFL) —
     accuracy-at-large-dt needs the consistent tangent (stage 2).
-  - **Stage 2 — fully-consistent JFNK (remaining, the JCP-class part).** Newton/JFNK over
-    `(u,p,ξ,ψ)` with the analytic material tangent `∂σ_el/∂ξ,∂σ_el/∂ψ` (removes the stage-1
-    damping); conservative (differentiable) ξ/ψ advection ([[6]]); projection as the
-    pressure preconditioner; frozen-interface linearization for the non-smooth geometry
-    ops; extend the wall CG-Helmholtz (#14.3 follow-on) to the coupled elastic block.
-    Clears the JCP bar *if* 10–100× dt AND net speedup with accuracy retained.
+  - **Stage 2 — energy-conserving implicit elastic kernel (the JCP-class part). ⏳ IN PROGRESS.**
+    - **Stage 2a ✅ DONE — core numerics de-risked.** The stage-1 damping comes from an
+      explicit force + O(dt²) stabilizer; the fix is a **trapezoidal (implicit-midpoint)
+      coupling** of velocity and displacement, one Helmholtz solve per step, `|λ|=1`
+      (energy-conserving) instead of stage-1's `1/√(1+a)`. Verified on the linear elastic
+      standing shear wave (`benchmarks/implicit_elastic_wave.py`,
+      `tests/test_implicit_elastic.py`): at 2× the explicit CFL stage-2 energy drift
+      `5.5e-5`–`1.8e-3` while stage-1 damps the wave away (drift →1.0); stable at 5× CFL
+      where explicit diverges; accurate (`err<5e-2`) to ~1–2× CFL, phase error only beyond.
+    - **Stage 2b — wire trapezoidal elastic coupling into the nonlinear FSI loop** (advance
+      ξ/ψ with the midpoint velocity, elastic force with the midpoint stress; Helmholtz/CG
+      solve). Neo-Hookean soft disc first, then viscoelastic.
+    - **Stage 2c — full JFNK** over `(u,p,ξ,ψ)` with analytic material tangent, conservative
+      differentiable ξ/ψ advection ([[6]]), projection as pressure preconditioner,
+      frozen-interface linearization. Clears the JCP bar *if* 10–100× dt AND net speedup
+      with accuracy retained.
 
 ### 15. Promote viscoelastic loop to a first-class solver routine (P1, small) — *follow-up to #1*
 The log-conformation FSI loop is currently hand-rolled inside
