@@ -179,6 +179,103 @@ def _precond_gs(r, nu, dx, dy, dt, rho, mu_s, N, lap_eig, peig, x1c, x2c):
     return _pack5(du, dv, dp, dx1, dx2)
 
 
+def _assemble_jacobian_colored(resid, X, N, R0, eps, S=9):
+    """Assemble the sparse Jacobian of the coupled (u,v,p,xi1,xi2) residual by
+    Curtis-Powell-Reid graph coloring: perturb all grid points of one (colour, field)
+    class at once (they are >= S cells apart, so their stencils do not overlap) and read
+    off the response. 5*S^2 residual evaluations. S must exceed twice the residual stencil
+    radius; assembly is checked against matrix-free matvecs in the tests."""
+    from scipy.sparse import csr_matrix
+    n2 = N * N; ntot = 5 * n2
+    Rs = S // 2
+    I, J = np.meshgrid(np.arange(N), np.arange(N))          # (row=j, col=i) layout
+    rows = []; cols = []; vals = []
+    base = np.arange(N)
+    for f in range(5):
+        for cx in range(S):
+            for cy in range(S):
+                probe = np.zeros(ntot)
+                mask = ((I % S == cx) & (J % S == cy))       # (N,N) perturbed points
+                pf = probe[f * n2:(f + 1) * n2].reshape(N, N)
+                pf[mask] = 1.0
+                probe[f * n2:(f + 1) * n2] = pf.ravel()
+                col_resp = (resid(X + eps * probe) - R0) / eps
+                # source point for each output q=(qi,qj): the perturbed point in its stencil
+                di = ((cx - base) % S); di = np.where(di > Rs, di - S, di)   # per column qi
+                dj = ((cy - base) % S); dj = np.where(dj > Rs, dj - S, dj)   # per row qj
+                src_i = (base + di) % N                        # (N,) source col per qi
+                src_j = (base + dj) % N                        # (N,) source row per qj
+                SRCI, SRCJ = np.meshgrid(src_i, src_j)         # (N,N)
+                src_flat = (SRCJ * N + SRCI).ravel()           # source cell index per q
+                col_idx = f * n2 + src_flat                    # source unknown index
+                for g in range(5):
+                    r = col_resp[g * n2:(g + 1) * n2]
+                    nz = np.abs(r) > 1e-13
+                    if not nz.any():
+                        continue
+                    rows.append(np.flatnonzero(nz) + g * n2)
+                    cols.append(col_idx[nz])
+                    vals.append(r[nz])
+    return csr_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
+                      shape=(ntot, ntot))
+
+
+def _assemble_jacobian_bruteforce(resid, X, R0, eps):
+    """Correct-by-construction column-by-column FD assembly (slow, small N only). Used to
+    validate convergence of the exact-Jacobian Newton before optimizing with coloring."""
+    from scipy.sparse import csc_matrix
+    n = X.size; rows = []; cols = []; vals = []
+    e = np.zeros(n)
+    for k in range(n):
+        e[k] = 1.0
+        col = (resid(X + eps * e) - R0) / eps
+        e[k] = 0.0
+        nz = np.abs(col) > 1e-13
+        idx = np.flatnonzero(nz)
+        rows.append(idx); cols.append(np.full(idx.size, k)); vals.append(col[nz])
+    return csc_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
+                      shape=(n, n))
+
+
+def step_elastic_direct(un, vn, x1n, x2n, nu, dx, dy, dt, rho=1.0, mu_s=1.0,
+                        newton_tol=1e-8, max_newton=15, S=9, assemble="color", info=None):
+    """Fully-monolithic backward-Euler step: Newton with the sparse coupled Jacobian
+    (colored assembly) solved DIRECTLY (sparse LU). Proves path A converges; AMG replaces
+    the direct solve for scalability. Line-search globalized. Returns (u,v,p,xi1,xi2)."""
+    from scipy.sparse.linalg import splu
+    N = un.shape[0]
+    X = _pack5(un.copy(), vn.copy(), np.zeros((N, N)), x1n.copy(), x2n.copy())
+
+    def resid(Y):
+        return residual_elastic(Y, un, vn, x1n, x2n, nu, dx, dy, dt, rho, mu_s, N)
+
+    R = resid(X); res0 = np.linalg.norm(R); rn = res0; nit = 0
+    for _ in range(max_newton):
+        if rn <= newton_tol * max(res0, 1.0):
+            break
+        eps = 1e-7 * (np.linalg.norm(X) / max(rn, 1e-30) + 1.0)
+        if assemble == "brute":
+            Jm = _assemble_jacobian_bruteforce(resid, X, R, eps)
+        else:
+            Jm = _assemble_jacobian_colored(resid, X, N, R, eps, S=S)
+        # pin the pressure null space (one Dirichlet row) for invertibility
+        Jm = Jm.tolil(); p0 = 2 * N * N
+        Jm.rows[p0] = [p0]; Jm.data[p0] = [1.0]; Jm = Jm.tocsc()
+        rhs = -R.copy(); rhs[p0] = 0.0
+        dX = splu(Jm).solve(rhs)
+        alpha = 1.0
+        for _ls in range(12):
+            Rt = resid(X + alpha * dX); rt = np.linalg.norm(Rt)
+            if rt <= (1.0 - 1e-4 * alpha) * rn:
+                break
+            alpha *= 0.5
+        X = X + alpha * dX; R = Rt; rn = rt; nit += 1
+    u, v, p, x1, x2 = _unpack5(X, N)
+    if info is not None:
+        info.update(newton_iters=nit, res0=res0, res=rn)
+    return u, v, p, x1, x2
+
+
 def step_elastic(un, vn, x1n, x2n, nu, dx, dy, dt, rho=1.0, mu_s=1.0,
                  newton_tol=1e-8, max_newton=30, info=None):
     """One fully-implicit backward-Euler step of the coupled (u,v,p,xi1,xi2) neo-Hookean
