@@ -10,6 +10,7 @@ explicit $1.71\times10^{-2}$ at $N=48$) and remains correct at $5\times$ the exp
 viscous CFL. \TODO{final high-resolution Ghia figure/table.}
 
 \subsection{Soft disc in a lid-driven cavity (FSI)}
+\label{sec:disc-lid}
 A neo-Hookean disc carried by the cavity flow is compared to the full-Eulerian result of
 Sugiyama \emph{et al.}\ \cite{Sugiyama2011} and to Jain \emph{et al.}\ \cite{Jain2019}.
 The centroid trajectory matches the reference and the deformed interface is
@@ -28,6 +29,33 @@ inward spiral for the explicit, IMEX and monolithic integrators, compared with S
 monolithic (semi-Lagrangian, $4\times\dt$) traces the same spiral in ${\sim}4\times$ fewer
 steps, with a small phase drift on the innermost turns.}
 \label{fig:disc-centroid}
+\end{figure}
+
+\subsection{Viscoelastic disc in a lid-driven cavity}
+\label{sec:ve-fsi}
+To validate the viscoelastic constitutive model \emph{in a two-way-coupled FSI setting}
+(rather than only the $0$-D constitutive limits of \cref{sec:verification}), we replace the
+neo-Hookean disc of \cref{sec:disc-lid} by a Maxwell-branch viscoelastic solid (modulus
+$G$, relaxation time $\tau$), carrying $\psib=\log\be$ and using $\sig_{\!s}=G\,\dev(\be)$.
+As $\tau\to\infty$ the elastic Finger tensor tracks $\Ften\Ften^{\!\top}$ and the model
+reduces to the neo-Hookean solid; the coupled solver reproduces the neo-Hookean
+centroid trajectory (itself validated against Sugiyama, \cref{sec:disc-lid}) to
+$4.3\times10^{-3}$ over the shared time window (\cref{fig:ve-fsi}), so the viscoelastic FSI
+coupling is anchored to a validated benchmark. For finite $\tau$ the relaxing branch lowers
+the transient effective stiffness, so the disc deforms more than the elastic one and, at
+$N{=}64$, reaches the diffuse-interface deformation limit earlier; long-time,
+large-deformation robustness (via reinitialization/refinement) is left to future work.
+The sharp viscoelastic signature is instead reported in the controlled extensional flow of
+\cref{sec:results} (the analytic plateau $b_e^{xx}\to1/(1-2\mathrm{Wi})$).
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.6\linewidth]{figures/viscoelastic_fsi.png}
+\caption{Viscoelastic disc in a lid-driven cavity ($N{=}64$): centroid trajectories for
+$\tau=\infty$ (recovers the neo-Hookean solid), $\tau=2$ and $\tau=0.5$, with the
+neo-Hookean reference (dashed). The $\tau=\infty$ curve overlays the neo-Hookean arc
+(recovery to $4.3\times10^{-3}$); finite-$\tau$ discs deform more and terminate earlier at
+this resolution.}
+\label{fig:ve-fsi}
 \end{figure}
 
 \subsection{Soft disc in a Taylor--Green vortex (energy)}
