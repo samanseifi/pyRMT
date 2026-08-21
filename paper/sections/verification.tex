@@ -30,23 +30,16 @@ wall-boundary velocity yields divergence below $10^{-11}$ (machine-zero, the pro
 collocated solver cannot reach). The FFT Helmholtz solve of \cref{eq:helmholtz} passes
 the same round-trip to $10^{-10}$.
 
-\subsection{Spatial order (all integrators)}
-On the periodic Taylor--Green decaying vortex the solver is second order in space for
-velocity, pressure and kinetic energy, and---crucially---the explicit, IMEX and
-monolithic integrators produce \emph{identical} spatial errors at matched $\dt$
-(\cref{fig:tg-conv}): the implicit and semi-Lagrangian machinery does not degrade spatial
-accuracy. (For non-stiff advection the adaptive monolithic reduces to the central-%
-difference IMEX, \cref{sec:monolithic}, so the three curves coincide.) The
-implicit-viscosity scheme is additionally stable and accurate up to $\dt=50\times$ the
-explicit viscous limit $\dx^2/(4\nu)$, where the explicit scheme diverges.
-
-\begin{figure}[t]\centering
-\includegraphics[width=\linewidth]{figures/tg_convergence_methods.png}
-\caption{Taylor--Green spatial convergence of velocity, pressure and kinetic energy for
-the explicit, IMEX and monolithic integrators (matched $\dt$). All three coincide on the
-second-order reference line.}
-\label{fig:tg-conv}
-\end{figure}
+\subsection{Integrator equivalence and large-step stability}
+On the periodic Taylor--Green decaying vortex the explicit, IMEX and semi-monolithic
+integrators produce \emph{identical} errors at matched $\dt$: the implicit and
+semi-Lagrangian machinery does not perturb the solution it is meant to accelerate. (For
+non-stiff advection the adaptive semi-monolithic scheme reduces to the central-difference
+IMEX, \cref{sec:monolithic}, so the three coincide.) The implicit-viscosity scheme is
+additionally stable and accurate up to $\dt=50\times$ the explicit viscous limit
+$\dx^2/(4\nu)$, where the explicit scheme diverges. The spatial order of the coupled
+method is measured directly on the FSI benchmark in \cref{sec:disc-tg}, which is the
+honest test for a one-fluid interface.
 
 \subsection{Energy conservation of the elastic coupling}
 On the linear elastic standing shear wave the trapezoidal elastic coupling

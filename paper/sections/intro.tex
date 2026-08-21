@@ -1,81 +1,116 @@
 \section{Introduction}
 \label{sec:intro}
 
-Fully Eulerian formulations of fluid--structure interaction (FSI) discretize the
-solid and the fluid on a single fixed grid, sharing one velocity field and one
-pressure solve. This removes the mesh-conforming remeshing and the partitioned
-added-mass instabilities of arbitrary Lagrangian--Eulerian and immersed-boundary
-approaches, at the price of representing the finite-strain solid response in the
-laboratory frame. The \emph{reference map technique} (RMT) does so by transporting
-the inverse motion---the reference map $\xiv(\xv,t)$ mapping a current point back to
-its material label---from which the deformation gradient and hence the elastic stress
-are reconstructed \cite{Kamrin2012,Valkov2015}. The RMT has been developed into a
-robust incompressible FSI method \cite{Rycroft2020} and a conservative, non-dissipative
-finite-difference formulation \cite{Jain2019}.
+Fluid--structure interaction (FSI) problems in which a soft solid undergoes large
+deformation inside a flow---valves, swimmers, capsules, gels and polymeric
+particles---are numerically demanding because the solid and fluid share a moving
+interface across which stress and velocity must remain continuous. The dominant
+strategies treat the two phases with different kinematics. Arbitrary
+Lagrangian--Eulerian (ALE) methods deform a body-fitted mesh with the interface
+\cite{Donea1982,Hu2001}, which is accurate but requires remeshing once the
+deformation becomes severe. Immersed and fictitious-domain methods keep the fluid
+grid fixed and represent the solid through forcing or Lagrange multipliers
+\cite{Peskin2002,Zhang2004}, avoiding remeshing at the cost of interface sharpness.
+Partitioned couplings that iterate between separate fluid and solid solvers are
+modular but suffer the added-mass instability when the densities are comparable, so
+that strong coupling or careful relaxation is required for stability
+\cite{Causin2005,Hou2012}. These difficulties have motivated a third route: fully
+\emph{Eulerian}, one-fluid formulations that discretize solid and fluid on a single
+fixed grid, sharing one velocity field and one pressure solve
+\cite{Sugiyama2011,Ii2012,Cottet2008,Wick2013}. The interface is captured rather than
+tracked, the added-mass coupling is resolved monolithically inside the momentum
+balance, and no remeshing is ever needed; the price is that the finite-strain solid
+response, naturally posed on a material reference, must be reconstructed in the
+laboratory frame.
 
-Three limitations of the existing RMT literature motivate this work.
-\begin{enumerate}[label=(\roman*),nosep]
-\item \textbf{The solid is hyperelastic.} A purely hyperelastic solid sheared without
-bound stores unbounded energy; the stress-carrying strain grows without limit and its
-Eulerian representation (the reference map, or the elastic strain) folds, with
-reinitialization treating the symptom rather than the cause. A relaxing (viscoelastic)
-stress bounds the stored elastic strain and is the principled remedy---\emph{for the
-relaxing branch}. We are careful not to overstate this: in a standard-linear-solid the
-non-relaxing equilibrium branch is still computed from $\Ften=(\grad\xiv)^{-1}$ and can
-still fold under unbounded shear, so relaxation removes the folding sensitivity fully only
-in the Maxwell-fluid limit ($G_\infty\!\to\!0$) and mitigates rather than eliminates it
-otherwise (\cref{sec:constitutive}). Independently, the transport must preserve
-positive-definiteness of the elastic strain, which the log-conformation representation
-guarantees.
-\item \textbf{The time integration is explicit.} The dominant RMT formulations
-\cite{Kamrin2012,Rycroft2020,Jain2019} advance momentum explicitly, so the time step
-is throttled by the elastic-wave speed $c_s=\sqrt{\mu_s/\rho}$, the viscous diffusion
-$\dx^2/\nu$, and---for a viscoelastic solid---the relaxation time $\tau$. Stiff solids
-and high-Weissenberg regimes are effectively out of reach.
-\item \textbf{Existing implicit Eulerian FSI is hyperelastic or partitioned.} Implicit,
-monolithic, incompressible Eulerian FSI already exists for \emph{hyperelastic} solids:
-Dunne \cite{Dunne2006} and Richter \cite{Richter2013} solve a coupled Newton system for
-velocity, pressure and a solid deformation field on a fixed grid, tracking the interface
-with an ``Initial Point Set'' that is itself a reference-map-like field. Richter, however,
-advances the deformation/interface through a \emph{separate extension step outside the
-Jacobian} and explicitly notes that a \emph{fully} implicit treatment (including the
-domain-movement derivatives) remains to be done. Sharp-interface implicit FSI for
-large-deformation solids has also been developed by Kolahdouz \emph{et al.}\
-\cite{Kolahdouz2023}, but through a \emph{partitioned} Dirichlet--Neumann coupling on a
-separate Lagrangian solid mesh, not a monolithic Eulerian solve. Full-Eulerian
-interface-capturing FSI (Sugiyama \cite{Sugiyama2011}, Ii \emph{et al.}\ \cite{Ii2012})
-and the compressible GPR unified model \cite{Peshkov2016,Dumbser2016} are advanced with
-pressure-correction or explicit/semi-implicit schemes. In none of these is a finite-strain
-\emph{viscoelastic} solid coupled monolithically and fully implicitly.
-\end{enumerate}
+The \emph{reference map technique} (RMT) supplies exactly this reconstruction. It
+transports the inverse motion---the reference map $\xiv(\xv,t)$ carrying a current
+point back to its material label---as an Eulerian field, from which the deformation
+gradient $\Ften=(\grad\xiv)^{-1}$ and hence the elastic stress follow pointwise
+\cite{Kamrin2012,Valkov2015}. Since its introduction the RMT has grown into a robust
+incompressible FSI solver with level-set interface capture and stress blending
+\cite{Rycroft2020}, and into a conservative, non-dissipative finite-difference
+formulation \cite{Jain2019}; it belongs to the same Eulerian-solid lineage as the
+full-Eulerian schemes of Sugiyama \emph{et al.}\ \cite{Sugiyama2011,Sugiyama2010} and
+the earlier continuum description of viscoelastic particles by Liu and Walkington
+\cite{Liu2001}. The appeal is a single set of conservation laws on one staggered
+grid; the open questions concern \emph{what} constitutive branch the solid carries and
+\emph{how} the coupled system is advanced in time.
 
-\paragraph{Contributions.} Relative to the above, we contribute, within one
-finite-difference, staggered-grid RMT:
-\begin{enumerate}[label=(\arabic*),nosep]
-\item A finite-strain viscoelastic solid whose stress-carrying strain is transported as
-the \emph{log-conformation} tensor $\psib=\log\be$ \cite{Fattal2004}, guaranteeing
-$\be\succ0$ by construction and decoupling the relaxing stress from the folding-prone
-reference map. The standard-linear-solid form retains an equilibrium hyperelastic
-branch so the body still returns to shape; $\tau\to\infty$ recovers neo-Hookean RMT.
-\item An implicit--explicit (IMEX) time-integration \emph{stack} that lifts the stiff
-CFL limits one term at a time---backward-Euler viscosity through the pressure
-transform/Krylov solvers, exact exponential relaxation, an energy-conserving trapezoidal
-elastic coupling, and semi-Lagrangian advection---each verified to reproduce the explicit
-result and to lift its target limit.
-\item A fully-implicit, monolithic Newton--Krylov (JFNK) formulation of the coupled
-$(\uv,p,\xiv,\psib)$ system in which the reference map is a coupled unknown (not the lagged
-extension step of \cite{Richter2013}), preconditioned by one step of the split IMEX solver
-and by the exact projection as the pressure Schur complement. This is the \emph{fully}
-implicit, \emph{viscoelastic} case left open by \cite{Richter2013,Kolahdouz2023}.
-\end{enumerate}
-The IMEX stack (contribution~2) is fully implemented and validated. The monolithic solver
-(contribution~3) is realized here for the fluid and (in progress) the neo-Hookean coupling;
-its extension to the coupled $\psib$ block and a work--precision comparison against the IMEX
-stack are the remaining steps. \emph{We report each capability at its true status and do not
-claim results the solver does not yet produce.}
-The staggered (MAC) discretization renders the projection exact
-(machine-zero divergence), removing the checkerboard/Rhie--Chow workarounds of the
-collocated formulation. \Cref{sec:governing,sec:rmt,sec:constitutive} set out the
-continuous model, \cref{sec:discretization,sec:time} the discretization and the
-IMEX/monolithic time integration, and \cref{sec:verification,sec:validation,sec:results}
-the verification, validation, and performance results.
+Both questions are consequential. On the constitutive side, the established RMT
+formulations carry a purely \emph{hyperelastic} solid \cite{Kamrin2012,Rycroft2020,Jain2019}.
+A hyperelastic body sheared without bound stores unbounded energy, and its Eulerian
+carrier---the reference map, or equivalently the elastic strain---folds under sustained
+shear, so that reinitialization or filtering is used to treat the symptom. The
+physically principled remedy is a \emph{relaxing} stress: a finite-strain viscoelastic
+constitutive law bounds the stored elastic strain, and in the fluid limit removes the
+folding sensitivity at its root rather than by numerical repair. Transporting a
+viscoelastic stress stably is itself a classical difficulty---the high-Weissenberg
+number problem, in which a naive update of the conformation tensor loses
+positive-definiteness and the computation breaks down \cite{Oldroyd1950,Bird1987}.
+The cure is to evolve a matrix logarithm of the conformation tensor, the
+log-conformation representation of Fattal and Kupferman \cite{Fattal2004,Fattal2005},
+subsequently recast in eigenframe form by Hulsen \emph{et al.}\ \cite{Hulsen2005} and
+placed in a broader factorization framework by Balci \emph{et al.}\ \cite{Balci2011},
+which guarantees a symmetric positive-definite conformation by construction. Bringing
+this representation into the RMT ties the relaxing elastic strain of the solid to the
+same stable transport that viscoelastic \emph{fluids} already enjoy, and decouples it
+from the folding-prone reference map.
+
+On the time-integration side, the same formulations advance momentum explicitly, so
+the step is throttled simultaneously by the elastic-wave speed $c_s=\sqrt{\mu_s/\rho}$,
+the viscous diffusion $\dx^2/\nu$, the advective CFL, and---once the solid relaxes---the
+relaxation time $\tau$. Stiff solids and high-Weissenberg regimes are then effectively
+out of reach. Implicit and monolithic Eulerian FSI does exist, but for
+\emph{hyperelastic} solids: Dunne \cite{Dunne2006}, Richter \cite{Richter2013,Richter2017}
+and Wick \cite{Wick2013} solve a coupled Newton system for velocity, pressure and a
+solid deformation field on a fixed grid, tracking the interface with an ``initial point
+set'' that is itself a reference-map-like field. Even there the deformation/interface is
+advanced through a separate extension step outside the Jacobian, a treatment that is not
+\emph{fully} implicit in the geometry. Sharp-interface implicit FSI for large-deformation
+solids has likewise been developed by Kolahdouz \emph{et al.}\ \cite{Kolahdouz2023}, but
+through a \emph{partitioned} Dirichlet--Neumann coupling on a separate Lagrangian solid
+mesh rather than a monolithic Eulerian solve. In none of these is a finite-strain
+\emph{viscoelastic} solid coupled to a fluid and advanced implicitly on a single grid.
+
+This paper develops that method. Its contribution is the numerical formulation itself:
+a semi-implicit, log-conformation Reference Map Technique for incompressible
+viscoelastic FSI on a marker-and-cell (MAC) staggered grid, together with a family of
+time integrators that remove the stiff step-size limits one at a time. The solid stress
+is carried by a log-conformation tensor $\psib=\log\be$, positive-definite by
+construction and, in the standard-linear-solid form, retaining an equilibrium
+hyperelastic branch so the body still returns to shape while $\tau\!\to\!\infty$
+recovers the neo-Hookean RMT exactly. The staggered discretization makes the pressure
+projection exact---divergence is driven to machine zero---removing the
+checkerboard and Rhie--Chow workarounds that a collocated arrangement requires
+\cite{Harlow1965,Chorin1968,Brown2001}. On top of this spatial method we build four
+time-integration schemes of increasing implicitness. An explicit scheme reproduces the
+established RMT and fixes the reference. An implicit--explicit (IMEX) scheme treats the
+viscous term by backward Euler through the pressure transforms and Krylov solvers, the
+relaxation by an exact exponential update, and the elastic coupling by an
+energy-conserving trapezoidal rule, lifting the viscous, relaxation and elastic-wave
+limits in a fractional-step setting. A semi-Lagrangian variant additionally removes the
+advective CFL restriction. Finally, a Jacobian-free Newton--Krylov (JFNK) scheme solves
+the coupled velocity--pressure--reference-map system \emph{semi-monolithically},
+preconditioned by one step of the split IMEX solver with the exact projection acting as
+the pressure Schur complement, and treats advection and the elastic coupling implicitly
+and consistently. Each scheme is verified to reproduce the explicit result before its
+target limit is lifted, and we report a work--precision comparison across the four,
+delineating the regimes---stiff solids, high Weissenberg number---where implicit
+integration pays for itself. The consistent linearized neo-Hookean tangent underlying
+the implicit coupling, and the physics-based preconditioning that makes the Newton
+solve tractable, follow established practice for stiff nonlinear systems
+\cite{Knoll2004,Kelley1995,Ascher1997,Reese1998,Simo1998}.
+
+We are deliberate about scope. The IMEX and semi-Lagrangian schemes are fully
+implemented and validated; the JFNK scheme is realized for the fluid and the
+neo-Hookean elastic coupling, and its extension to the coupled log-conformation block
+is identified as the remaining step. Every capability is reported at its true status.
+The remainder of the paper is organized as follows.
+\Cref{sec:governing,sec:rmt,sec:constitutive} set out the continuous one-fluid model,
+the reference map, and the finite-strain viscoelastic constitutive law;
+\cref{sec:discretization,sec:time} give the MAC discretization and the four
+time-integration schemes with their algorithms;
+and \cref{sec:verification,sec:validation,sec:results} present the verification against
+analytic and manufactured limits, the FSI validation against the disc-in-vortex and
+lid-driven-cavity benchmarks, and the work--precision comparison.

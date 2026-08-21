@@ -25,6 +25,29 @@ def test_cg_helmholtz_lid_consistency():
     assert np.abs(resid).max() < 1e-8
 
 
+def test_pcg_matches_cg_and_cuts_iterations():
+    """Preconditioned CG solves the same system as CG (the DST preconditioner does not
+    change the answer) but in far fewer iterations, and the iteration count stays small
+    as N grows (the fix for the net-speedup bottleneck)."""
+    from pyRMT.mac import _lap_u_lid_hom, _cg_helmholtz, _pcg_helmholtz
+    embed = lambda x: np.pad(x, ((0, 0), (1, 1)))
+    prev_iters = None
+    for N in (64, 128):
+        dx = dy = 1.0 / N
+        rng = np.random.default_rng(4)
+        rhs = rng.standard_normal((N, N - 1))
+        lap = lambda w: _lap_u_lid_hom(w, dx, dy)
+        coef = 2.0e-3 * 0.01                              # dt*nu, a representative value
+        x_cg = _cg_helmholtz(rhs, lap, embed, coef, rtol=1e-8)
+        cnt = []
+        x_pcg = _pcg_helmholtz(rhs, lap, embed, coef, dx, dy, rtol=1e-8, count=cnt)
+        assert np.abs(x_cg - x_pcg).max() < 1e-6         # same solution
+        assert cnt[0] <= 12                              # few iterations
+        prev_iters = cnt[0]
+    # N-independent conditioning: iteration count does not blow up with resolution
+    assert prev_iters <= 12
+
+
 def test_imex_lid_reproduces_ghia_and_lifts_cfl():
     """IMEX lid-driven cavity reproduces the explicit Ghia RMS (regression) and
     stays correct at a dt above the explicit viscous CFL."""

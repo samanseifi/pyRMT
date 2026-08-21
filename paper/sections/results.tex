@@ -34,10 +34,9 @@ semi-Lagrangian adv. & $\dx/U$ & $6\times$ (soft disc) & $2.2\times10^{-3}$ at m
 
 \begin{figure}[t]\centering
 \includegraphics[width=0.66\linewidth]{figures/taylor_green_overlay.png}
-\caption{Taylor--Green kinetic-energy decay: explicit, IMEX and monolithic all track the
-analytic $e^{-4\nu t}$ (here the adaptive monolithic uses central advection, so it
-coincides with IMEX). The semi-Lagrangian branch is engaged only when the advective CFL
-is exceeded.}
+\caption{Taylor--Green kinetic-energy decay: explicit, IMEX and IMEX-SL all track the
+analytic $e^{-4\nu t}$ (here IMEX-SL uses central advection, so it coincides with IMEX).
+The semi-Lagrangian branch is engaged only when the advective CFL is exceeded.}
 \label{fig:tg-energy}
 \end{figure}
 
@@ -108,13 +107,6 @@ the stability and net-speedup results reported here.
 \TODO{A regime diagram in $(\mathrm{Wi},\ \text{resolution})$ or
 $(c_s\dt/\dx,\ \text{accuracy})$ showing configurations reachable by the implicit stack
 but inaccessible to explicit RMT (explicit diverges / folds).}
-
-\subsection{Viscoelastic extensional stretch}
-Under uniform planar extension the solver reproduces the analytic plateau
-$b_e^{xx}\to1/(1-2\mathrm{Wi})$ to four digits and is resolution-independent, while the
-elastic case diverges as $e^{2\varepsilon t}$---the demonstration a tumbling
-lid-driven disc cannot give. \TODO{final money figure: elastic vs.\ viscoelastic blob
-under the four-roll mill (fig.\ \texttt{viscoelastic\_extension\_money}).}
 
 \subsection{Fold cure (reinit vs.\ relaxation)}
 \TODO{Quantitative case where hyperelastic RMT folds/diverges at a given resolution

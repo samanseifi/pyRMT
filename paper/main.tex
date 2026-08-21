@@ -1,13 +1,16 @@
 %% pyRMT method paper -- Elsevier (elsarticle) format.
-%% Target: Computers & Fluids.
+%% Target: Computers & Fluids (Elsevier).
 %% Build:  pdflatex main ; bibtex main ; pdflatex main ; pdflatex main
-\documentclass[review,3p,11pt]{elsarticle}
+\documentclass[final,3p,times]{elsarticle}
 
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
 \usepackage{amsmath,amssymb,bm}
 \usepackage{amsthm}
 \usepackage{mathtools}
 \usepackage{graphicx}
 \usepackage{booktabs}
+\usepackage{subcaption}
 \usepackage{enumitem}
 \usepackage[hidelinks]{hyperref}
 \usepackage{cleveref}
@@ -53,6 +56,7 @@
 \newcommand{\tr}{\operatorname{tr}}
 \newcommand{\dev}{\operatorname{dev}}
 
+\bibliographystyle{elsarticle-harv}\biboptions{authoryear}
 \journal{Computers \& Fluids}
 
 \begin{document}
@@ -62,9 +66,10 @@
 \title{A semi-implicit log-conformation Reference Map Technique for incompressible
 viscoelastic fluid--structure interaction}
 
-\author[a]{Saman Seifi\corref{cor}}
+\author[bu]{Saman Seifi\corref{cor}}\ead{samansei@bu.edu}
 \cortext[cor]{Corresponding author}
-\affiliation[a]{organization={Affiliation TODO}, country={Country TODO}}
+\address[bu]{Department of Mechanical Engineering, Boston University,
+Boston, MA 02215, USA}
 
 \begin{abstract}
 We present a fully Eulerian, one-fluid Reference Map Technique (RMT) for
@@ -120,7 +125,6 @@ log-conformation \sep implicit time integration \sep Eulerian solid mechanics
 \section*{Acknowledgements}
 \TODO{funding and acknowledgements}
 
-\bibliographystyle{elsarticle-num}
 \bibliography{refs}
 
 \end{document}
