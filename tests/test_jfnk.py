@@ -58,6 +58,34 @@ def test_jfnk_newton_quadratic_ish_convergence_one_step():
     assert info["res"] < 1e-6 * info["res0"], "residual not reduced enough"
 
 
+def test_elastic_tangent_matches_finite_difference():
+    """The consistent linearized neo-Hookean tangent T_b(du) equals the finite-difference
+    directional derivative of the elastic force div(sigma_el(xi)) in the direction
+    delta_xi = -(du.grad)xi -- verified on a DEFORMED reference map (anisotropic b).
+    This is the exact elastic operator needed for the path-A preconditioner."""
+    from pyRMT.jfnk import elastic_tangent, neohookean_stress, _div_stress_faces, _adv_scalar_per
+    N = 32; dx = L / N
+    xc = (np.arange(N) + 0.5) * dx; Xc, Yc = np.meshgrid(xc, xc)
+    rng = np.random.default_rng(1)
+    x1 = Xc - 0.15 * np.sin(Yc); x2 = Yc - 0.20 * np.sin(Xc) + 0.1 * np.cos(Yc)
+    du = 0.01 * rng.standard_normal((N, N)); dv = 0.01 * rng.standard_normal((N, N))
+    mu_s = 1.3
+
+    def fel(a, b):
+        sxx, sxy, syy = neohookean_stress(a, b, dx, dx, mu_s)
+        return _div_stress_faces(sxx, sxy, syy, dx, dx)
+
+    Tu, Tv = elastic_tangent(du, dv, x1, x2, dx, dx, mu_s)
+    d1 = -_adv_scalar_per(x1, du, dv, dx, dx); d2 = -_adv_scalar_per(x2, du, dv, dx, dx)
+    eps = 1e-5
+    fup, fvp = fel(x1 + eps * d1, x2 + eps * d2)
+    fum, fvm = fel(x1 - eps * d1, x2 - eps * d2)
+    FDu = (fup - fum) / (2 * eps); FDv = (fvp - fvm) / (2 * eps)
+    ru = np.max(np.abs(Tu - FDu)) / max(np.max(np.abs(FDu)), 1e-30)
+    rv = np.max(np.abs(Tv - FDv)) / max(np.max(np.abs(FDv)), 1e-30)
+    assert ru < 1e-6 and rv < 1e-6, f"tangent vs FD: {ru:.2e}, {rv:.2e}"
+
+
 def test_jfnk_elastic_coupled_newton_converges_one_step():
     """Stage 2d-2 (WIP): the fully-coupled (u,v,p,xi1,xi2) neo-Hookean Newton solve
     converges for a SINGLE step from rest. NOTE: sustained runs currently stall (Newton

@@ -96,6 +96,34 @@ def _div_stress_faces(sxx, sxy, syy, dx, dy):
     return fu, fv
 
 
+def elastic_tangent(du, dv, x1, x2, dx, dy, mu_s):
+    """Consistent linearized neo-Hookean elastic operator (material tangent) applied to a
+    velocity perturbation (du,dv), evaluated at the reference map (x1,x2). Over a step the
+    reference map perturbs by delta_xi = -(du.grad)xi, so with G=grad(xi), F=G^-1,
+    b=F F^T:  delta_G = grad(delta_xi),  delta_F = -F delta_G F,
+              delta_b = delta_F F^T + F delta_F^T,  delta_sigma = mu_s dev(delta_b),
+    and the elastic-force response is T = div(delta_sigma). Exact (matrix calculus);
+    anisotropic/state-dependent via the deformed F. Returns face forces (fu, fv)."""
+    a, b = _cgrad(x1, dx, dy); c, d = _cgrad(x2, dx, dy)          # G = grad(xi)
+    det = a * d - b * c; det = np.where(np.abs(det) < 1e-12, 1e-12, det)
+    F11 = d / det; F12 = -b / det; F21 = -c / det; F22 = a / det   # F = G^-1
+    dxi1 = -_adv_scalar_per(x1, du, dv, dx, dy)                    # delta_xi = -(du.grad)xi
+    dxi2 = -_adv_scalar_per(x2, du, dv, dx, dy)
+    dGa, dGb = _cgrad(dxi1, dx, dy); dGc, dGd = _cgrad(dxi2, dx, dy)  # delta_G
+    # M = delta_G F
+    M11 = dGa * F11 + dGb * F21; M12 = dGa * F12 + dGb * F22
+    M21 = dGc * F11 + dGd * F21; M22 = dGc * F12 + dGd * F22
+    # delta_F = -F M
+    dF11 = -(F11 * M11 + F12 * M21); dF12 = -(F11 * M12 + F12 * M22)
+    dF21 = -(F21 * M11 + F22 * M21); dF22 = -(F21 * M12 + F22 * M22)
+    # delta_b = delta_F F^T + (delta_F F^T)^T  (symmetric)
+    P11 = dF11 * F11 + dF12 * F12; P12 = dF11 * F21 + dF12 * F22
+    P21 = dF21 * F11 + dF22 * F12; P22 = dF21 * F21 + dF22 * F22
+    db11 = 2.0 * P11; db12 = P12 + P21; db22 = 2.0 * P22
+    dsxx = mu_s * 0.5 * (db11 - db22); dsxy = mu_s * db12; dsyy = mu_s * 0.5 * (db22 - db11)
+    return _div_stress_faces(dsxx, dsxy, dsyy, dx, dy)
+
+
 def _pack5(u, v, p, x1, x2):
     return np.concatenate([u.ravel(), v.ravel(), p.ravel(), x1.ravel(), x2.ravel()])
 
