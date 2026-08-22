@@ -33,11 +33,29 @@ OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
 os.makedirs(OUT, exist_ok=True)
 
 
+def _FFt_from_xi(X1, X2, dx, dy):
+    """Left Cauchy-Green b=F F^T (F=(grad xi)^{-1}) and ln det b, from the reference map."""
+    g11 = grad_central_x_2nd(X1, dx); g12 = grad_central_y_2nd(X1, dy)
+    g21 = grad_central_x_2nd(X2, dx); g22 = grad_central_y_2nd(X2, dy)
+    det = g11 * g22 - g12 * g21
+    det = np.where(np.abs(det) < 1e-9, np.sign(det) * 1e-9 + (det == 0), det)
+    F11 = g22 / det; F12 = -g12 / det; F21 = -g21 / det; F22 = g11 / det
+    b11 = F11 * F11 + F12 * F12
+    b12 = F11 * F21 + F12 * F22
+    b22 = F21 * F21 + F22 * F22
+    lndet = -2.0 * np.log(np.abs(det))
+    return b11, b12, b22, lndet
+
+
 def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
             mu_f=0.01, U0=0.3, rho=1.0, scheme="semilagrangian", w_cut_fac=4.0,
-            elastic_baseline=False, history=False):
-    """One viscoelastic (Maxwell-branch) disc-in-TG run. elastic_baseline=True instead
-    uses the reference-map neo-Hookean stress (paper Sec. 8.2), for the tau->inf check."""
+            model="maxwell", history=False):
+    """One disc-in-Taylor-Green FSI run. ``model`` selects the solid constitution:
+        "elastic" -- reference-map neo-Hookean, sigma = mu_s dev(F F^T)  (Sec. 8.2)
+        "maxwell" -- pure Maxwell branch,       sigma = G dev(b_e)       (fluid drop)
+        "sls"     -- standard linear solid,     sigma = mu_s dev(F F^T) + G dev(b_e)
+    The SLS ("sls") is the model defined in the paper (equilibrium branch + relaxing
+    branch); "elastic" is the tau->inf reference and "maxwell" the fluid limit."""
     dx, dy = mac_grid(N, N)
     xc = (np.arange(N) + 0.5) * dx
     Xc, Yc = np.meshgrid(xc, xc)
@@ -58,7 +76,10 @@ def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
     dt = min(0.25 * dx / (U0 * np.pi), 0.2 * dx * dx / nu, 0.25 * dx / (cs + 1e-9))
     p = np.zeros((N, N))
 
-    hist = {"t": [], "KE": [], "Eel": [], "detbe_max": [], "minJ": [], "cx": [], "cy": []}
+    area0 = float(np.sum(phi <= 0) * dx * dy)
+    hist = {"t": [], "KE": [], "Eel": [], "detbe_max": [], "minJ": [], "cx": [], "cy": [],
+            "bevsF": [], "area": []}
+    has_maxwell = model in ("maxwell", "sls")
     t = 0.0
     while t < t_end:
         if t + dt > t_end:
@@ -70,10 +91,11 @@ def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
         X2 = advect_reference_map(X2, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
         X1, X2 = extrapolate_reference_map(X1, X2, phi, dx, dy, 3)
         phi = rebuild_phi_from_reference_map(X1, X2, phi_init)
-        sxx, sxy, syy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s, 0.0, phi)
+        # equilibrium (neo-Hookean) branch from the reference map -- used by "elastic"/"sls"
+        eqxx, eqxy, eqyy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s, 0.0, phi)
 
         detbe_max = 1.0
-        if not elastic_baseline:
+        if has_maxwell:
             p11 = advect_reference_map(p11, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
             p12 = advect_reference_map(p12, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
             p22 = advect_reference_map(p22, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
@@ -84,9 +106,17 @@ def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
             p11, p12, p22 = logconf_local_step_strang(p11, p12, p22, L11, L12, L21, L22, tau, dt)
             be11, be12, be22 = sym_exp(p11, p12, p22)
             trbe = 0.5 * (be11 + be22)
-            sxx = G_ve * (be11 - trbe); sxy = G_ve * be12; syy = G_ve * (be22 - trbe)
+            mxx = G_ve * (be11 - trbe); mxy = G_ve * be12; myy = G_ve * (be22 - trbe)
             detbe = np.exp(p11 + p22)                     # det(exp psi)=exp(tr psi)
             detbe_max = float(np.max(detbe[phi <= 0])) if np.any(phi <= 0) else 1.0
+
+        # assemble the solid Cauchy stress for the chosen model
+        if model == "elastic":
+            sxx, sxy, syy = eqxx, eqxy, eqyy
+        elif model == "maxwell":
+            sxx, sxy, syy = mxx, mxy, myy
+        else:  # sls: equilibrium + relaxing branch
+            sxx, sxy, syy = eqxx + mxx, eqxy + mxy, eqyy + myy
 
         H = smoothed_heaviside(phi, w_t)
         Sxx = (1 - H) * sxx; Sxy = (1 - H) * sxy; Syy = (1 - H) * syy
@@ -101,33 +131,33 @@ def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
         if history:
             u_c = 0.5 * (u[:, :-1] + u[:, 1:]); v_c = 0.5 * (v[:-1, :] + v[1:, :])
             KE = 0.5 * np.sum(u_c**2 + v_c**2) * dx * dy
-            if elastic_baseline:
-                # stored energy from the reference-map F, using the SAME neo-Hookean
-                # form as the Maxwell branch so the tau->inf comparison is consistent.
-                g11 = grad_central_x_2nd(X1, dx); g12 = grad_central_y_2nd(X1, dy)
-                g21 = grad_central_x_2nd(X2, dx); g22 = grad_central_y_2nd(X2, dy)
-                det = g11 * g22 - g12 * g21
-                det = np.where(np.abs(det) < 1e-9, 1.0, det)
-                F11 = g22 / det; F12 = -g12 / det          # F = inv(grad xi)
-                F21 = -g21 / det; F22 = g11 / det
-                trb = F11**2 + F12**2 + F21**2 + F22**2     # tr(F F^T)
-                lndet = -2.0 * np.log(np.abs(det))          # ln det(F F^T)=ln(1/det^2)
-                w = 0.5 * mu_s * (trb - 2.0 - lndet)
-                Eel = float(np.sum(np.where(phi <= 0, w, 0.0)) * dx * dy)
-            else:
-                be11, be12, be22 = sym_exp(p11, p12, p22)
-                # neo-Hookean-type stored energy of the Maxwell branch:
-                # w = (G/2)(tr b_e - 2 - ln det b_e), integrated over the solid
-                trb = be11 + be22; lndet = p11 + p22
-                w = 0.5 * G_ve * (trb - 2.0 - lndet)
-                Eel = float(np.sum(np.where(phi <= 0, w, 0.0)) * dx * dy)
             msk = phi <= 0
+            fb11, fb12, fb22, flndet = _FFt_from_xi(X1, X2, dx, dy)   # b = F F^T
+            # stored elastic energy w = (G/2)(tr b - 2 - ln det b), same functional for
+            # both strain descriptions; SLS = equilibrium (from F) + relaxing (from b_e)
+            Eel = 0.0; bevsF = 0.0
+            if model in ("elastic", "sls"):
+                w_eq = 0.5 * mu_s * ((fb11 + fb22) - 2.0 - flndet)
+                Eel += float(np.sum(np.where(msk, w_eq, 0.0)) * dx * dy)
+            if has_maxwell:
+                be11, be12, be22 = sym_exp(p11, p12, p22)
+                w_mx = 0.5 * G_ve * ((be11 + be22) - 2.0 - (p11 + p22))
+                Eel += float(np.sum(np.where(msk, w_mx, 0.0)) * dx * dy)
+                # strain-description drift: ||exp(psi) - F F^T||_F / ||F F^T||_F over the
+                # REGULARLY-deformed solid interior (0.5<J<2), so the metric measures the
+                # genuine transport difference between the two representations of F F^T and
+                # not the folding blow-up of F F^T (where b_e correctly stays bounded).
+                num = (be11 - fb11)**2 + 2 * (be12 - fb12)**2 + (be22 - fb22)**2
+                den = fb11**2 + 2 * fb12**2 + fb22**2 + 1e-30
+                mi = (phi < -2.0 * dx) & (J > 0.5) & (J < 2.0)
+                bevsF = float(np.sqrt(np.sum(num[mi]) / np.sum(den[mi]))) if mi.any() else 0.0
             # min J over the solid INTERIOR (exclude the diffuse blend band, where the
             # non-stress-bearing reference map is extrapolated and J is meaningless)
-            msk_int = phi < -2.0 * dx
-            minJ = float(J[msk_int].min()) if msk_int.any() else 1.0
+            mi = phi < -2.0 * dx
+            minJ = float(J[mi].min()) if mi.any() else 1.0
             hist["t"].append(t); hist["KE"].append(KE); hist["Eel"].append(Eel)
             hist["detbe_max"].append(detbe_max); hist["minJ"].append(minJ)
+            hist["bevsF"].append(bevsF); hist["area"].append(float(np.sum(msk) * dx * dy) / area0)
             hist["cx"].append(float(Xc[msk].mean()) if msk.any() else np.nan)
             hist["cy"].append(float(Yc[msk].mean()) if msk.any() else np.nan)
 
@@ -156,72 +186,84 @@ def main():
     from _plotstyle import apply as _style; _style()
     import matplotlib.pyplot as plt
 
-    # (a) mesh convergence at fixed finite tau
+    # (a) mesh convergence of the SLS model at fixed finite tau
     NS = (32, 48, 64, 96, 128); tau_c = 1.0; tconv = 0.6
-    conv = {N: run_one(N, tconv, tau=tau_c) for N in NS}
+    conv = {N: run_one(N, tconv, tau=tau_c, model="sls") for N in NS}
     g = conv[NS[-1]]["xc"]; ref = NS[-1]; coarse = list(NS[:-1])
     spref = _sample(conv[ref]["xc"], conv[ref]["speed"], g)
     prref = _sample(conv[ref]["xc"], conv[ref]["p"], g)
     verr = [np.sqrt(np.mean((_sample(conv[N]["xc"], conv[N]["speed"], g) - spref)**2)) for N in coarse]
     perr = [np.sqrt(np.mean((_sample(conv[N]["xc"], conv[N]["p"], g) - prref)**2)) for N in coarse]
     keerr = [abs(conv[N]["KE"] - conv[ref]["KE"]) for N in coarse]
-    print("VE disc-in-TG convergence (tau=%.2g):" % tau_c)
+    print("SLS disc-in-TG convergence (tau=%.2g):" % tau_c)
     print("  velocity order", [f"{o:.2f}" for o in _order(coarse, verr)])
     print("  pressure order", [f"{o:.2f}" for o in _order(coarse, perr)])
-    print("  kinetic  order", [f"{o:.2f}" for o in _order(coarse, keerr)])
 
-    # (b,c) tau sweep with histories at fixed N
+    # SLS histories at fixed N (the titled model: equilibrium + relaxing branch)
     Nh, tend = 64, 1.2
     taus = [np.inf, 1.0, 0.25]
-    runs = {tau: run_one(Nh, tend, tau=tau, history=True)["hist"] for tau in taus}
-    base = run_one(Nh, tend, elastic_baseline=True, history=True)["hist"]
-    # tau->inf recovery: max relative KE(t) difference between tau=inf and elastic baseline
-    rec = np.max(np.abs(runs[np.inf]["KE"] - base["KE"])) / np.max(base["KE"])
-    print(f"tau->inf vs elastic baseline: max |dKE|/KE = {rec:.2e}")
+    sls = {tau: run_one(Nh, tend, tau=tau, model="sls", history=True)["hist"] for tau in taus}
+    # tau->inf recovery check + strain drift: pure Maxwell (G=mu_s) vs elastic reference
+    mw_inf = run_one(Nh, tend, tau=np.inf, model="maxwell", G_ve=0.1, history=True)["hist"]
+    base = run_one(Nh, tend, model="elastic", history=True)["hist"]
+    rec = np.max(np.abs(mw_inf["KE"] - base["KE"])) / np.max(base["KE"])
+    drift = mw_inf["bevsF"][-1]
+    print(f"maxwell(tau=inf) vs elastic: max|dKE|/KE = {rec:.2e}, final ||exp psi - FF^T||/||FF^T|| = {drift:.2e}")
 
-    fig, ax = plt.subplots(1, 3, figsize=(12.6, 3.7))
+    fig, ax = plt.subplots(2, 2, figsize=(10.4, 7.6))
     labels = {np.inf: r"$\tau=\infty$", 1.0: r"$\tau=1$", 0.25: r"$\tau=0.25$"}
     cols = {np.inf: "C0", 1.0: "C1", 0.25: "C3"}
+    h = np.array([1.0 / N for N in coarse])
 
-    ax[0].loglog(np.array([1/N for N in coarse]), verr, "o-", label="velocity")
-    ax[0].loglog(np.array([1/N for N in coarse]), perr, "s-", label="pressure")
-    ax[0].loglog(np.array([1/N for N in coarse]), keerr, "^-", label="kinetic energy")
-    h = np.array([1/N for N in coarse])
-    ax[0].loglog(h, verr[0]*(h/h[0])**2, "k--", lw=1, label="2nd order")
-    ax[0].loglog(h, perr[0]*(h/h[0])**1, "k:", lw=1, label="1st order")
-    ax[0].invert_xaxis(); ax[0].set_xlabel("$h=1/N$"); ax[0].set_ylabel("$L_2$ error vs finest")
-    ax[0].set_title(r"(a) mesh convergence ($\tau=1$)")
-    ax[0].legend(ncol=2, loc="upper left"); ax[0].grid(True, which="both", alpha=0.2)
+    # (a) mesh convergence
+    a = ax[0, 0]
+    a.loglog(h, verr, "o-", label="velocity"); a.loglog(h, perr, "s-", label="pressure")
+    a.loglog(h, keerr, "^-", label="kinetic energy")
+    a.loglog(h, verr[0]*(h/h[0])**2, "k--", lw=1, label="2nd order")
+    a.loglog(h, perr[0]*(h/h[0])**1, "k:", lw=1, label="1st order")
+    a.invert_xaxis(); a.set_xlabel("$h=1/N$"); a.set_ylabel("$L_2$ error vs finest")
+    a.set_title(r"(a) SLS mesh convergence ($\tau=1$)")
+    a.legend(ncol=2, loc="upper left", fontsize=9); a.grid(True, which="both", alpha=0.2)
 
+    # (b) stored elastic energy: SLS relaxing branch dissipates, equilibrium persists
+    a = ax[0, 1]
     for tau in taus:
-        ax[1].plot(runs[tau]["t"], runs[tau]["Eel"], "-", color=cols[tau], label=labels[tau])
-    ax[1].plot(base["t"], base["Eel"], "k--", lw=1.4, label="elastic (ref. map)")
-    ax[1].set_xlabel("time $t$"); ax[1].set_ylabel("stored elastic energy")
-    ax[1].set_title("(b) elastic energy vs relaxation")
-    ax[1].legend(loc="upper left")
-    ax[1].text(0.97, 0.03, r"$\tau\!\to\!\infty$ recovers elastic dynamics"
-               "\n" r"($\max|\Delta\mathrm{KE}|/\mathrm{KE}=%.1f\times10^{-4}$)" % (rec * 1e4),
-               transform=ax[1].transAxes, ha="right", va="bottom", fontsize=9)
+        a.plot(sls[tau]["t"], sls[tau]["Eel"], "-", color=cols[tau], label="SLS "+labels[tau])
+    a.plot(base["t"], base["Eel"], "k--", lw=1.3, label="elastic only")
+    a.set_xlabel("time $t$"); a.set_ylabel("stored elastic energy")
+    a.set_title("(b) SLS: relaxation vs shape memory"); a.legend(loc="upper left", fontsize=9)
 
+    # (c) robustness: det b_e bounded and solid area preserved (interface integrity)
+    a = ax[1, 0]
     for tau in taus:
-        ax[2].plot(runs[tau]["t"], runs[tau]["detbe_max"], "-", color=cols[tau], label=labels[tau])
-    ax[2].axhline(1.0, ls=":", color="0.6", lw=1)
-    ax[2].set_xlabel("time $t$"); ax[2].set_ylabel(r"$\max\ \det b_e$ (solid)")
-    axr = ax[2].twinx()
+        a.plot(sls[tau]["t"], sls[tau]["detbe_max"], "-", color=cols[tau], label=labels[tau])
+    a.axhline(1.0, ls=":", color="0.6", lw=1)
+    a.set_xlabel("time $t$"); a.set_ylabel(r"$\max\ \det b_e$ (solid)")
+    ar = a.twinx()
     for tau in taus:
-        axr.plot(runs[tau]["t"], np.clip(runs[tau]["minJ"], -0.3, 2), "--",
-                 color=cols[tau], lw=1.1, alpha=0.75)
-    axr.axhline(0.0, ls=":", color="0.6", lw=0.8)
-    axr.set_ylim(-0.35, 1.15); axr.set_ylabel(r"$\min J$ (dashed)")
-    ax[2].set_title(r"(c) $\det b_e$ and $\min J$")
-    ax[2].legend(loc="lower left")
+        ar.plot(sls[tau]["t"], sls[tau]["area"], "--", color=cols[tau], lw=1.1, alpha=0.8)
+    ar.set_ylabel("solid area / initial (dashed)"); ar.set_ylim(0.8, 1.2)
+    a.set_title(r"(c) SLS: $\det b_e$ and solid area"); a.legend(loc="upper left", fontsize=9)
+
+    # (d) strain-description drift at tau=inf, where exp(psi) should equal F F^T:
+    # quantifies the two discrete representations of the same tensor (item raised in review)
+    a = ax[1, 1]
+    a.plot(mw_inf["t"], mw_inf["bevsF"], "-", color="C0", lw=2)
+    a.set_xlabel("time $t$")
+    a.set_ylabel(r"$\|\exp\psi - FF^\top\|/\|FF^\top\|$ (solid interior)")
+    a.set_title(r"(d) strain-description drift ($\tau=\infty$)")
+    a.text(0.5, 0.5, "transported $b_e$ vs reference-map $FF^\\top$:\n"
+           "same tensor, two discretizations.\n"
+           r"Dynamics still agree to $%.1f\times10^{-4}$ (KE)." % (rec * 1e4),
+           transform=a.transAxes, ha="center", va="center", fontsize=9,
+           bbox=dict(boxstyle="round", fc="0.95", ec="0.8"))
 
     fig.tight_layout()
     data = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
     os.makedirs(data, exist_ok=True)
     out = os.path.join(data, "viscoelastic_disc_tg.png")
     fig.savefig(out); print("saved", out)
-    return dict(verr=verr, perr=perr, keerr=keerr, coarse=coarse, recovery=rec)
+    return dict(verr=verr, perr=perr, keerr=keerr, coarse=coarse, recovery=rec, drift=drift)
 
 
 if __name__ == "__main__":
