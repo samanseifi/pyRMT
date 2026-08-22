@@ -48,7 +48,7 @@ def _FFt_from_xi(X1, X2, dx, dy):
 
 
 def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
-            mu_f=0.01, U0=0.3, rho=1.0, scheme="semilagrangian", w_cut_fac=4.0,
+            mu_f=0.01, U0=0.3, rho=1.0, scheme="semilagrangian_cubic", w_cut_fac=4.0,
             model="maxwell", history=False):
     """One disc-in-Taylor-Green FSI run. ``model`` selects the solid constitution:
         "elastic" -- reference-map neo-Hookean, sigma = mu_s dev(F F^T)  (Sec. 8.2)

@@ -823,7 +823,9 @@ $\mathrm{Wi}=0.6$), a bounded, physical departure whose trace is carried by the 
 
 The parameters of every FSI case are collected in \cref{tab:params} for reproducibility.
 Common to all: equal density $\rho_s=\rho_f=1$, interface smoothing width $w_t=2\dx$, band
-extrapolation over $3$ layers, and a cubic semi-Lagrangian transport of $(\xiv,\psib)$.
+extrapolation over $3$ layers, and semi-Lagrangian transport of $(\xiv,\psib)$; the coupled
+viscoelastic runs of \cref{sec:ve-coupled} use cubic interpolation for this transport, which
+markedly reduces the strain-description drift discussed there.
 
 \begin{table}[t]\centering\small
 \caption{Simulation parameters for the FSI cases ($\nu=\mu_f/\rho$; $c_s=\sqrt{\mu_s/\rho}$).
@@ -967,17 +969,17 @@ $1$--$2\%$ (right), so the captured interface stays intact over the run.
 \emph{(d) The $\tau\to\infty$ limit and the two strain descriptions.} A subtlety raised by
 using both $\be$ and $\Ften=(\grad\xiv)^{-1}$: at $\tau\to\infty$ (pure elastic) the
 transported $\be$ and the reference-map $\Ften\Ften^{\!\top}$ are the \emph{same} continuum
-tensor, but they are advanced by two different discrete transports, so they drift apart under
-mesh refinement rather than agreeing exactly. \Cref{fig:ve-coupled}d plots
+tensor, but they are advanced by two different discrete transports, so they need not agree
+exactly at finite resolution. \Cref{fig:ve-coupled}d plots
 $\|\exp\psib-\Ften\Ften^{\!\top}\|/\|\Ften\Ften^{\!\top}\|$ over the regularly-deformed
-solid: it grows from zero to ${\approx}0.4$ by the end of the run, a bilinear
-semi-Lagrangian transport error (reducible with a less-diffusive advection or finer grid).
-Crucially the \emph{dynamics} are insensitive to it---the $\tau\to\infty$ Maxwell run
-reproduces the reference-map neo-Hookean kinetic-energy history to
-$\max|\Delta\mathrm{KE}|/\mathrm{KE}=3.8\times10^{-4}$---because the elastic stress is a small
-perturbation on the flow, and in the SLS model the shape-memory (equilibrium) branch is built
-from $\grad\xiv$ directly, so this drift affects only the relaxing branch. We therefore claim
-recovery of the elastic \emph{dynamics}, not of the strain field pointwise.
+solid. With the cubic semi-Lagrangian transport used here it stays small, reaching
+${\approx}0.11$ by the end of the run---a fourfold reduction over bilinear transport
+($\approx0.44$) and further reducible with resolution. The \emph{dynamics} are essentially
+unaffected: the $\tau\to\infty$ Maxwell run reproduces the reference-map neo-Hookean
+kinetic-energy history to $\max|\Delta\mathrm{KE}|/\mathrm{KE}=1.1\times10^{-4}$, because the
+elastic stress is a small perturbation on the flow and, in the SLS model, the shape-memory
+(equilibrium) branch is built from $\grad\xiv$ directly, so the residual drift touches only
+the relaxing branch.
 
 \begin{figure}[t]\centering
 \includegraphics[width=\linewidth]{figures/viscoelastic_disc_tg.png}
@@ -987,8 +989,9 @@ case); (b) stored elastic energy vs.\ time for $\tau=\infty,1,0.25$ with an elas
 baseline---relaxation dissipates the relaxing branch while the equilibrium branch retains
 shape; (c) $\max\det\be$ (solid, left) bounded near unity and solid area (dashed, right)
 conserved to $1$--$2\%$; (d) drift between the two strain descriptions
-$\|\exp\psib-\Ften\Ften^{\!\top}\|/\|\Ften\Ften^{\!\top}\|$ at $\tau=\infty$, a transport
-error to which the dynamics are insensitive ($\Delta\mathrm{KE}/\mathrm{KE}=3.8\times10^{-4}$).}
+$\|\exp\psib-\Ften\Ften^{\!\top}\|/\|\Ften\Ften^{\!\top}\|$ at $\tau=\infty$ (cubic
+transport), reaching ${\approx}0.11$; the dynamics are insensitive to it
+($\Delta\mathrm{KE}/\mathrm{KE}=1.1\times10^{-4}$).}
 \label{fig:ve-coupled}
 \end{figure}
 
@@ -1133,10 +1136,16 @@ stability is what makes the stiff regime reachable at all. Accuracy at these lar
 however, only $O(\dt)$ (\cref{fig:temporal}): the trajectory (\cref{fig:stiff}b) carries a
 visible operator-split error, so at \emph{matched accuracy} the stiff case obeys the same
 step-size-versus-solve-cost trade as \cref{sec:disc-speedup}, and the fully-consistent Newton
-of \cref{sec:monolithic} is the route to large-step accuracy. The relaxation-stiff
-counterpart---advancing a small-$\tau$ solid at $\dt\!\gg\!\tau$---is handled by the exact
-substep, verified to machine precision at any $\dt$ in \cref{sec:verification}, and the
-finite-$\tau$ coupled behaviour is the SLS case of \cref{sec:ve-coupled}.
+of \cref{sec:monolithic} is the route to large-step accuracy. This is expected on physical
+grounds and worth stating plainly: a stiff \emph{elastic} wave is genuine, non-dissipative
+dynamics, so a large step that fails to resolve it loses phase accuracy however stably it is
+taken---implicit integration \emph{enables} the regime but cannot manufacture accuracy the
+time step does not resolve. The accuracy payoff of implicit integration is instead in the
+\emph{dissipative} stiffnesses, where the stiff modes are damped or exact rather than
+oscillatory: backward-Euler viscosity (the low-Reynolds limit) and, most cleanly, the
+relaxation-stiff limit---advancing a small-$\tau$ solid at $\dt\!\gg\!\tau$ via the exact
+substep, which is accurate to machine precision at \emph{any} $\dt$ (\cref{sec:verification}).
+The finite-$\tau$ coupled behaviour is the SLS case of \cref{sec:ve-coupled}.
 
 \begin{figure}[t]\centering
 \includegraphics[width=\linewidth]{figures/stiff_solid_fsi.png}
