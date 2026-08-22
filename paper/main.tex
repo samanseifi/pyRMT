@@ -219,10 +219,11 @@ physics-based preconditioning that makes the Newton solve tractable, follow esta
 practice for stiff nonlinear systems
 \cite{Knoll2004,Kelley1995,Ascher1997,Reese1998,Simo1998}.
 
-We are deliberate about scope. The IMEX and semi-Lagrangian schemes are fully
-implemented and validated; the JFNK scheme is realized for the fluid and the
-neo-Hookean elastic coupling, and its extension to the coupled log-conformation block
-is identified as the remaining step. Every capability is reported at its true status.
+We are deliberate about scope. The IMEX and semi-Lagrangian schemes are fully implemented
+and validated, and produce all the coupled elastic and viscoelastic FSI results; the
+semi-monolithic Newton--Krylov scheme is realized and demonstrated for the fluid
+velocity--pressure system, and closing it to the fully-coupled $(\uv,p,\xiv,\psib)$ Newton is
+identified as the remaining step. Every capability is reported at its true status.
 The remainder of the paper is organized as follows.
 \Cref{sec:governing,sec:rmt,sec:constitutive} set out the continuous one-fluid model,
 the reference map, and the finite-strain viscoelastic constitutive law;
@@ -1100,6 +1101,51 @@ run at $2,4,6,8\times$ the explicit step. At $N=64$ IMEX-SL is Pareto-optimal (l
 matched accuracy); at $N=128$ the wall-bounded implicit-solve cost per step offsets the
 larger step, so the implicit advantage is regime-dependent.}
 \label{fig:work-precision}
+\end{figure}
+
+\paragraph{Temporal order.} \Cref{fig:temporal} isolates the time-integration error at
+fixed resolution ($N{=}64$): the maximum centroid deviation from a fine-$\dt$ explicit
+reference against $\dt$. The \textsc{IMEX-SL} scheme is first order in $\dt$---the
+operator-split and semi-Lagrangian error---while the explicit scheme sits near the
+small-$\dt$ floor. This $O(\dt)$ slope is the accuracy cost referred to throughout; the
+fully-consistent Newton advection of \cref{sec:monolithic} is what would restore second
+order at large $\dt$.
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.6\linewidth]{figures/temporal_convergence.png}
+\caption{Temporal convergence on the soft-disc-in-lid case ($N{=}64$): max centroid error
+vs.\ a fine-$\dt$ explicit reference. IMEX-SL is first order in $\dt$ (its operator-split
+error); explicit lies at the small-$\dt$ floor.}
+\label{fig:temporal}
+\end{figure}
+
+\subsection{Stiff-solid regime: enabling stability}
+\label{sec:stiff}
+The introduction motivates implicit integration partly by the stiff-solid regime; we
+exercise it directly as an FSI case. A neo-Hookean disc with $\mu_s=16$
+($c_s=\sqrt{\mu_s/\rho}=4\,U_{\rm lid}$) makes the elastic wave the binding explicit limit.
+\Cref{fig:stiff}a shows the outcome: the explicit scheme diverges once $\dt$ exceeds its
+combined elastic/advective CFL (blow-up at $6\times$ the elastic CFL, $\min J$ collapsing at
+$t\!\approx\!0.07$), whereas the energy-conserving trapezoidal coupling
+(Proposition~\ref{prop:trap}) advances the same disc stably at $4\times$ and $8\times$ that
+step, the minimum Jacobian staying near $0.9$ so the body remains intact. This unconditional
+stability is what makes the stiff regime reachable at all. Accuracy at these large steps is,
+however, only $O(\dt)$ (\cref{fig:temporal}): the trajectory (\cref{fig:stiff}b) carries a
+visible operator-split error, so at \emph{matched accuracy} the stiff case obeys the same
+step-size-versus-solve-cost trade as \cref{sec:disc-speedup}, and the fully-consistent Newton
+of \cref{sec:monolithic} is the route to large-step accuracy. The relaxation-stiff
+counterpart---advancing a small-$\tau$ solid at $\dt\!\gg\!\tau$---is handled by the exact
+substep, verified to machine precision at any $\dt$ in \cref{sec:verification}, and the
+finite-$\tau$ coupled behaviour is the SLS case of \cref{sec:ve-coupled}.
+
+\begin{figure}[t]\centering
+\includegraphics[width=\linewidth]{figures/stiff_solid_fsi.png}
+\caption{Stiff disc ($\mu_s=16$, $c_s=4\,U_{\rm lid}$) in the lid-driven cavity:
+(a) $\min J$ over time---explicit diverges at $6\times$ the elastic CFL ($t\!\approx\!0.07$),
+while the trapezoidal coupling runs stably at $4$--$8\times$ with the disc intact;
+(b) centroid trajectory---stable at large steps but carrying the $O(\dt)$ operator-split
+error relative to the resolved explicit reference.}
+\label{fig:stiff}
 \end{figure}
 
 \subsection{Semi-monolithic velocity--pressure solver (fluid)}
