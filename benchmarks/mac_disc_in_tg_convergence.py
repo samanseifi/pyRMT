@@ -28,7 +28,11 @@ NS = [32, 64, 128, 256]
 
 
 def run_one(N, t_end, R=0.15, x0=0.5, y0=0.7, mu_s=0.1, mu_f=0.01, U0=0.3, rho=1.0,
-            scheme="semilagrangian", w_cut_fac=4.0, isochoric=False, normalize_phi=False):
+            scheme="semilagrangian", w_cut_fac=4.0, isochoric=False, normalize_phi=False,
+            kw=1):
+    # Stream function psi = U0 sin(k x) sin(k y), k = kw*pi. kw=1 is a single vortex;
+    # kw=2 (four cells) with U0=0.05, R=0.2, x0=y0=0.5, mu_s=0.5, mu_f=1e-3 reproduces the
+    # disc-in-Taylor-Green convergence benchmark of Jain, Kamrin & Mani (JCP 2019, Sec. 4.4).
     dx, dy = mac_grid(N, N)
     xc = (np.arange(N) + 0.5) * dx
     Xc, Yc = np.meshgrid(xc, xc)
@@ -37,8 +41,9 @@ def run_one(N, t_end, R=0.15, x0=0.5, y0=0.7, mu_s=0.1, mu_f=0.01, U0=0.3, rho=1
     Xu, Yu = np.meshgrid(xf, xc)
     Xv, Yv = np.meshgrid(xc, xf)
 
-    u = U0 * np.pi * np.sin(np.pi * Xu) * np.cos(np.pi * Yu)
-    v = -U0 * np.pi * np.cos(np.pi * Xv) * np.sin(np.pi * Yv)
+    k = kw * np.pi
+    u = U0 * k * np.sin(k * Xu) * np.cos(k * Yu)
+    v = -U0 * k * np.cos(k * Xv) * np.sin(k * Yv)
     u[:, 0] = 0.0; u[:, -1] = 0.0; v[0, :] = 0.0; v[-1, :] = 0.0
 
     phi_init = lambda X, Y: np.sqrt((X - x0)**2 + (Y - y0)**2) - R
@@ -46,9 +51,10 @@ def run_one(N, t_end, R=0.15, x0=0.5, y0=0.7, mu_s=0.1, mu_f=0.01, U0=0.3, rho=1
     X1, X2 = extrapolate_reference_map(Xc * sm, Yc * sm, phi, dx, dy, 3)
     w_t = 2.0 * dx; nu = mu_f / rho; cs = np.sqrt(mu_s / rho)
     eig = poisson_eigs_neumann(N, N, dx, dy)
-    dt = min(0.25 * dx / (U0 * np.pi), 0.2 * dx * dx / nu, 0.25 * dx / (cs + 1e-9))
+    dt = min(0.25 * dx / (U0 * k), 0.2 * dx * dx / nu, 0.25 * dx / (cs + 1e-9))
     p = np.zeros((N, N))
 
+    hist = {"t": [], "ke": [], "se": []}; step = 0
     t = 0.0
     while t < t_end:
         if t + dt > t_end:
@@ -79,15 +85,23 @@ def run_one(N, t_end, R=0.15, x0=0.5, y0=0.7, mu_s=0.1, mu_f=0.01, U0=0.3, rho=1
         fv = np.zeros((N + 1, N)); fv[1:-1, :] = 0.5 * (divy[1:, :] + divy[:-1, :])
         us, vs = momentum_predictor_freeslip(u, v, nu, dx, dy, dt, fu=fu, fv=fv, rho=rho)
         u, v, p = project(us, vs, dx, dy, dt, rho, eig)
-        t += dt
+        t += dt; step += 1
+        if step % 10 == 0 or t >= t_end:
+            uc2 = 0.5 * (u[:, :-1] + u[:, 1:]); vc2 = 0.5 * (v[:-1, :] + v[1:, :])
+            hist["t"].append(t)
+            hist["ke"].append(0.5 * np.sum(uc2**2 + vc2**2) * dx * dy)
+            hist["se"].append(2.0 * compute_strain_energy(X1, X2, phi, mu_s, dx, dy))
 
     u_c = 0.5 * (u[:, :-1] + u[:, 1:]); v_c = 0.5 * (v[:-1, :] + v[1:, :])
     speed = np.sqrt(u_c**2 + v_c**2)
     KE = 0.5 * np.sum(u_c**2 + v_c**2) * dx * dy
-    se = compute_strain_energy(X1, X2, phi, mu_s, dx, dy)
-    Estrain = np.nansum(np.where(np.isfinite(se), se, 0.0)) * dx * dy
+    # compute_strain_energy already returns the integrated total W=(mu_s/2)(I1-2); Jain
+    # et al. (2019) Eq. 38 uses se=mu_s(I1-2) (no 1/2), so double for a like-for-like
+    # comparison with their Fig. 14.
+    Estrain = 2.0 * compute_strain_energy(X1, X2, phi, mu_s, dx, dy)
     # `project` returns the physical pressure (O(1)); do NOT divide by dt.
     return dict(N=N, dx=dx, xc=xc, speed=speed, p=p, KE=KE, Estrain=Estrain,
+                hist={k: np.array(v) for k, v in hist.items()},
                 divmax=np.max(np.abs(divergence(u, v, dx, dy))))
 
 

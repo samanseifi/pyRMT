@@ -846,28 +846,35 @@ reproduces the same steady state at $\mathrm{Re}=100$ (RMS $1.68\times10^{-2}$ v
 explicit $1.71\times10^{-2}$ at $N=48$) and remains correct at $5\times$ the explicit
 viscous CFL.
 
-\subsection{Neo-Hookean (elastic) disc in a Taylor--Green vortex: FSI convergence}
+\subsection{Disc in a Taylor--Green vortex: replicating Jain \emph{et al.}}
 \label{sec:disc-tg}
-The first FSI test measures the spatial order of the coupled discretization. A
-neo-Hookean \emph{elastic} disc is carried by a decaying Taylor--Green vortex---a smooth,
-closed-streamline flow with no walls---so that the only error source is the one-fluid
-interface coupling itself. Measuring the L2 error against the finest grid ($N{=}128$) over
-$N=32$--$128$ (\cref{fig:disc-tg-conv}) gives velocity $\approx1.8$ and kinetic/total
-energy $\approx2$, but \emph{pressure only $\approx1$}: the diffuse interface caps the
-pressure (and, more mildly, the velocity) below the second order the same solver attains
-on a wall-free single-mode fluid flow, consistent with Jain \emph{et al.}\
-\cite{Jain2019}. The reduced order is intrinsic to the smoothed one-fluid interface, not
-to the time integrator---the explicit, IMEX and semi-monolithic schemes share the spatial
-discretization and coincide (\cref{sec:verification}); a sharp-interface treatment
-\cite{Kolahdouz2023} is the route to higher field order and is a limitation of the present
-method.
+The first FSI test reproduces the disc-in-Taylor--Green benchmark of Jain, Kamrin \& Mani
+\cite{Jain2019} (their Sec.~4.4), which they in turn validated against the mixed
+Eulerian--Lagrangian results of Zhao \emph{et al.}\ and Robinson-Mosher \emph{et al.} We
+use their parameters exactly: a neo-Hookean disc of radius $r=0.2$ at the centre of a unit
+box, released in the vortex $\psi=\psi_0\sin(2\pi x)\sin(2\pi y)$ with $\psi_0=0.05$,
+$\mu_f=10^{-3}$, $\mu_s=0.5$, $\rho_s=\rho_f=1$. The disc stretches, elastically retracts and
+oscillates while the fluid viscously damps it.
+\Cref{fig:disc-tg-conv}a reproduces their kinetic- and strain-energy evolution: the two
+exchange energy in anti-phase during the stretch--retract oscillation, the magnitudes
+($\mathrm{ke}\!\approx\!0.02$, $\mathrm{se}\!\approx\!0.012$) and period match Jain \emph{et
+al.}'s Fig.~14, and the curves are grid-independent from $N{=}64$ to $128$.
+The field convergence at $t=0.25$ (\cref{fig:disc-tg-conv}b) is, however, only first order
+in velocity and pressure---below the second order of Jain \emph{et al.}'s
+\emph{conservative} formulation. This is the expected signature of our non-conservative,
+diffuse-interface blend: the smoothed one-fluid interface caps the field order, and a
+conservative or sharp-interface treatment \cite{Jain2019,Kolahdouz2023} is the route to
+higher order. The order is set by the spatial discretization, not the time integrator (the
+explicit, IMEX and semi-monolithic schemes coincide, \cref{sec:verification}).
 
 \begin{figure}[t]\centering
-\includegraphics[width=0.62\linewidth]{figures/disc_tg_convergence.png}
-\caption{Neo-Hookean disc in a Taylor--Green vortex: FSI spatial convergence of velocity,
-pressure and kinetic/total energy (L2 vs the finest grid). Velocity is near second order
-and the energy second order, while the pressure is limited to first order by the diffuse
-one-fluid interface.}
+\includegraphics[width=\linewidth]{figures/disc_tg_convergence.png}
+\caption{Disc in a Taylor--Green vortex, at the parameters of Jain \emph{et al.}\
+\cite{Jain2019}. (a) Kinetic (ke) and strain (se) energy vs.\ time: the stretch--retract
+oscillation and energy exchange, grid-independent from $N{=}64$ to $128$ and matching their
+Fig.~14 in magnitude and period. (b) Field convergence at $t=0.25$: velocity and pressure
+are first order (dotted), capped by the diffuse one-fluid interface, below the $O(\Delta
+x^2)$ (dashed) of their conservative scheme.}
 \label{fig:disc-tg-conv}
 \end{figure}
 
@@ -933,6 +940,32 @@ $\mathrm{Wi}=1$---transient $\sigma_{xy}$ and $N_1$ (markers) vs analytic (grey)
 coil--stretch approach to $\mathrm{Wi}=\tfrac12$ (dotted). Maximum errors
 $1.8\times10^{-6}$, $2\times10^{-4}$ and ${<}3\%$ respectively.}
 \label{fig:ve-valid}
+\end{figure}
+
+\subsection{Elastic vs.\ viscoelastic under sustained extension}
+\label{sec:ve-extension}
+The clearest demonstration that the log-conformation branch is doing its job is a soft blob
+held at the extensional stagnation point of a four-roll mill, where it is stretched
+continuously (\cref{fig:ve-extension}). A purely elastic solid ($\tau\to\infty$) stores the
+stretch without bound---the elastic Finger tensor grows as $e^{2\dot\varepsilon t}$, the
+stress diverges and the computation degrades, as it must for a hyperelastic body under
+sustained extension. With a finite relaxation time the upper-convected Maxwell relaxation
+balances the stretching and $\be$ \emph{saturates}: the centre stretch $b_e^{xx}$ settles at
+the analytic planar-extension plateau $1/(1-2\mathrm{Wi})$ (to within a few percent for
+$\mathrm{Wi}=0.125$ and $0.25$), and the blob reaches a steady filament rather than blowing
+up. This side-by-side elastic/viscoelastic contrast---impossible for the tumbling
+lid-driven and vortex discs, where $\be$ stays bounded for any $\tau$---is the sharp test of
+the viscoelastic implementation.
+
+\begin{figure}[t]\centering
+\includegraphics[width=\linewidth]{figures/ve_extension.png}
+\caption{Soft blob at the extensional stagnation point of a four-roll mill: elastic
+($\tau\to\infty$, top) vs.\ viscoelastic ($\mathrm{Wi}=0.25$, bottom), coloured by the
+maximum eigenvalue of $\be$ with the interface in white. The elastic $\be$ grows without
+bound (field saturates) while the viscoelastic blob reaches a steady filament. Right:
+centre stretch $b_e^{xx}(t)$---elastic diverges, viscoelastic saturates to the analytic
+$1/(1-2\mathrm{Wi})$ (dotted).}
+\label{fig:ve-extension}
 \end{figure}
 
 \subsection{Viscoelastic disc in shear: a deformable-particle benchmark}
