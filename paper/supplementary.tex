@@ -1,0 +1,159 @@
+%% Supplementary material for the pyRMT method paper -- Elsevier (elsarticle).
+%% Build:  pdflatex supplementary ; bibtex supplementary ; pdflatex supplementary ; pdflatex supplementary
+\documentclass[final,3p,times]{elsarticle}
+
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{mathtools}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage[hidelinks]{hyperref}
+\usepackage{cleveref}
+\usepackage{xcolor}
+
+% ---- notation (shared with the main text) ----
+\newcommand{\uv}{\bm{u}}
+\newcommand{\xiv}{\bm{\xi}}
+\newcommand{\be}{\bm{b}_e}
+\newcommand{\It}{\bm{I}}
+\newcommand{\psib}{\bm{\psi}}
+\newcommand{\grad}{\nabla}
+\newcommand{\dt}{\Delta t}
+\newcommand{\dx}{\Delta x}
+
+% ---- supplementary numbering: prefix everything with "S" ----
+\renewcommand{\thesection}{S\arabic{section}}
+\renewcommand{\thefigure}{S\arabic{figure}}
+\renewcommand{\thetable}{S\arabic{table}}
+\renewcommand{\theequation}{S\arabic{equation}}
+
+\begin{document}
+
+\begin{frontmatter}
+\title{Supplementary material for ``A semi-implicit log-conformation Reference Map
+Technique for incompressible viscoelastic fluid--structure interaction''}
+\author[bu]{Saman Seifi}\ead{samansei@bu.edu}
+\address[bu]{Department of Mechanical Engineering, Boston University,
+Boston, MA 02215, USA}
+\end{frontmatter}
+
+\noindent This supplement collects the fluid-solver and time-integrator diagnostics that
+support, but are not central to, the coupled viscoelastic fluid--structure interaction
+results of the main text. Sections, figures and tables here are prefixed with ``S'';
+references to the main text (its sections, algorithms and figures) are named explicitly.
+
+\section{Lifted time-step limits}
+\label{sec:supp-limits}
+Each level of the IMEX stack is verified to reproduce the explicit result at a matched
+step before its lifted step is exercised (\cref{tab:cfl-lift}). Implicit viscosity is
+stable to $50\times$ the explicit viscous CFL on Taylor--Green; the combined IMEX
+reproduces the four-roll extensional blob $b_e^{xx}$ to $0.55\%$ at matched $\dt$ and
+completes within ${\sim}2\%$ at $2$--$4\times$ the explicit viscous CFL where the
+explicit scheme diverges; the linearly-implicit elastic stabilizer is consistent
+($0.44\%$ vs.\ explicit at $0.1\times$ the elastic CFL) and remains stable at
+$8\times$ the elastic CFL, where the explicit elastic force diverges; and the
+semi-Lagrangian advection removes the final advective limit.
+Crucially, the wall Helmholtz is solved by a DST-preconditioned CG that converges in a
+handful of iterations independent of resolution ($17\!\to\!5$ at $N{=}128$), so the
+lifted $\dt$ translates into a wall-clock gain rather than being consumed by the solve.
+
+\begin{table}[t]\centering\small
+\caption{Time-step limits lifted by each strategy (measured). ``reproduces'' is the
+relative error against the explicit reference at matched $\dt$.}
+\label{tab:cfl-lift}
+\begin{tabular}{@{}llll@{}}
+\toprule
+strategy & lifts & max stable $\dt$ (vs explicit) & reproduces \\
+\midrule
+implicit viscosity & $\dx^2/\nu$ & $50\times$ (Taylor--Green) & 2nd-order retained \\
+exact relaxation & $\dt\lesssim\tau$ & $\infty$ (step-strain exact) & machine precision \\
+IMEX combined & both & $2$--$4\times$ (four-roll) & $0.55\%$ \\
+elastic stabilizer & $\dx/c_s$ & $8\times$ (four-roll) & $0.44\%$ at $0.1\times$ \\
+semi-Lagrangian adv. & $\dx/U$ & $6\times$ (soft disc) & $2.2\times10^{-3}$ at matched $\dt$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.66\linewidth]{figures/taylor_green_overlay.png}
+\caption{Taylor--Green kinetic-energy decay: explicit, IMEX and IMEX-SL all track the
+analytic $e^{-4\nu t}$ (here IMEX-SL uses central advection, so it coincides with IMEX).
+The semi-Lagrangian branch is engaged only when the advective CFL is exceeded.}
+\label{fig:tg-energy}
+\end{figure}
+
+\section{Soft disc: integrator comparison and net speedup}
+\label{sec:disc-speedup}
+\Cref{tab:disc-integrators} compares integrators on the soft-disc-in-lid case
+($N=48$, $\mu_s=0.1$). The case is \emph{advection}-limited: implicit viscosity alone
+(\texttt{imex}) reproduces the trajectory at the matched step ($\Delta$centroid
+$2.2\times10^{-3}$) but cannot enlarge $\dt$, so it yields no speedup---confirming that
+the last binding constraint is advection, not diffusion. Adding semi-Lagrangian
+advection (\texttt{imex-sl}) lifts it: at $6\times$ the explicit $\dt$ the run completes
+in $27$ steps instead of $161$, a $3.05\times$ net wall-clock speedup, with the centroid
+trajectory within ${\sim}6\%$ of the explicit reference (the residual is the
+semi-Lagrangian numerical diffusion, which vanishes as $\dt$ is reduced and would be
+removed by the consistent-tangent Newton solve of the main text).
+
+\begin{table}[t]\centering\small
+\caption{Soft disc in lid-driven cavity ($N{=}48$), integrator comparison. Speedup is
+explicit/scheme wall-clock ($>1$ favours the scheme); $\Delta$centroid is the max deviation
+from the matched-resolution ($N{=}48$) explicit trajectory (i.e.\ temporal error at fixed
+grid), so it grows with $\dt$.}
+\label{tab:disc-integrators}
+\begin{tabular}{@{}lllll@{}}
+\toprule
+integrator & $\dt$ (vs explicit) & steps & speedup & $\Delta$centroid \\
+\midrule
+explicit             & $1\times$ & $161$ & $1\times$      & --- \\
+imex (implicit visc) & $1\times$ & $161$ & $0.97\times$   & $2.2\times10^{-3}$ \\
+imex-sl              & $3\times$ & $54$  & $1.53\times$   & $5.6\times10^{-2}$ \\
+imex-sl              & $6\times$ & $27$  & $\mathbf{3.05\times}$ & $6.0\times10^{-2}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The net benefit is regime-dependent: at moderate resolution the semi-Lagrangian step
+lowers cost at controlled accuracy (the $3.05\times$ of \cref{tab:disc-integrators}) by
+lifting the binding advective limit, whereas at finer grids the per-step cost of the
+wall-bounded implicit solve offsets the larger step, so the implicit viscous/elastic solves
+pay off only where the explicit step is throttled by more than the solve cost (low Reynolds
+number, stiff solids).
+
+\paragraph{Temporal order.} \Cref{fig:temporal} isolates the time-integration error at
+fixed resolution ($N{=}64$): the maximum centroid deviation from a fine-$\dt$ explicit
+reference against $\dt$. The IMEX-SL scheme, which spans steps well above the explicit CFL
+where the temporal error dominates, is cleanly first order in $\dt$---the operator-split and
+semi-Lagrangian error. The explicit scheme, confined by its CFL to a narrow band of small
+steps, has a temporal error already at the floor of the centroid measure (which changes in
+small discrete increments as the diffuse interface crosses cells), so its points lie flat
+rather than tracing a slope; the order is read from IMEX-SL. This $O(\dt)$ slope is the
+accuracy cost referred to in the main text, which the fully-consistent Newton advection
+there would restore to second order at large $\dt$.
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.6\linewidth]{figures/temporal_convergence.png}
+\caption{Temporal convergence on the soft-disc-in-lid case ($N{=}64$): max centroid error
+vs.\ a fine-$\dt$ explicit reference. IMEX-SL is first order in $\dt$ (its operator-split
+error); explicit lies at the small-$\dt$ floor.}
+\label{fig:temporal}
+\end{figure}
+
+\section{Semi-monolithic velocity--pressure solver (fluid)}
+\label{sec:supp-mono}
+The four schemes lift the FSI step-size limits by fractional-step means: the IMEX-SL runs of
+\cref{sec:disc-speedup} use the energy-conserving trapezoidal elastic coupling (lossless on
+the standing wave, verified in the main text) with semi-Lagrangian advection, at the price of
+an $O(\dt)$ operator-split/semi-Lagrangian error. The semi-monolithic scheme (Algorithm~4 of
+the main text) removes that error by making advection implicit and \emph{consistent}: it
+solves the $(\uv,p)$ system by JFNK, preconditioned by one IMEX step and the exact
+projection. We demonstrate it here on the fluid. On Taylor--Green it reproduces the analytic
+decay ($1.5\times10^{-4}$ at $\dt$ below the CFL) and, crucially, stays accurate far above
+the advective CFL: at $5\times$ the CFL its error is $1.1\times10^{-3}$ (clean $O(\dt)$), an
+order of magnitude below the $2.7\times10^{-2}$ semi-Lagrangian diffusion floor at the same
+step, with Newton converging in ${\sim}3$ iterations per step. Extending this
+velocity--pressure solve to the coupled solid---the full Newton posed in the main text---is
+future work; the coupled results there use the IMEX-SL scheme.
+
+\end{document}
