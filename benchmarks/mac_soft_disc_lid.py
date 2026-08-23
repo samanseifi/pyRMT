@@ -23,7 +23,7 @@ from pyRMT.viscoelastic import logconf_local_step_strang, sym_exp
 
 def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0,
         reinit=False, isochoric=False, out_root="outputs", imex=False, dt=None, write=True,
-        integrator=None, mu_s=0.1, viscoelastic=False, G_ve=None, tau=np.inf):
+        integrator=None, mu_s=0.1, viscoelastic=False, G_ve=None, tau=np.inf, snap_times=None):
     dx, dy = mac_grid(N, N)
     xc = (np.arange(N) + 0.5) * dx
     Xc, Yc = np.meshgrid(xc, xc)
@@ -79,7 +79,7 @@ def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0
     out_dir = os.path.join(out_root, f"mac_soft_disc_N{N}"); os.makedirs(out_dir, exist_ok=True)
     print(f"[MAC FSI] N={N} mu_s={mu_s} mu_f={mu_f} dt={dt:.2e} t_end={t_end} integrator={name}")
 
-    t = 0.0; step = 0; traj = []
+    t = 0.0; step = 0; traj = []; snaps = []; snap_q = list(snap_times) if snap_times else []
     while t < t_end:
         step += 1
         # face velocity -> cell centres for advecting the reference map
@@ -166,11 +166,17 @@ def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0
         cx = Xc[msk].mean(); cy = Yc[msk].mean()
         t += dt
         traj.append((t, cx, cy, J.min(), J.max()))
+        while snap_q and t >= snap_q[0]:
+            uc2 = 0.5 * (u[:, :-1] + u[:, 1:]); vc2 = 0.5 * (v[:-1, :] + v[1:, :])
+            snaps.append(dict(t=t, phi=phi.copy(), speed=np.sqrt(uc2**2 + vc2**2),
+                              Xc=Xc, Yc=Yc)); snap_q.pop(0)
         if step % 200 == 0 or t >= t_end:
             print(f"  step {step:5d} t={t:6.3f} centroid=({cx:.3f},{cy:.3f}) "
                   f"minJ={J.min():.3f} maxJ={J.max():.3f} max|div|={np.max(np.abs(divergence(u,v,dx,dy))):.1e}")
 
     traj = np.array(traj)
+    if snap_times is not None:
+        return traj, snaps
     if not write:
         return traj
     np.savetxt(os.path.join(out_dir, "centroid.csv"), traj, delimiter=",",

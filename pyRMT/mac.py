@@ -144,14 +144,15 @@ def project(u_star, v_star, dx, dy, dt, rho, eig):
 # y-wall). Normal velocity at every wall is zero (u[:,0]=u[:,-1]=0, v[0,:]=v[-1,:]=0);
 # tangential no-slip / lid is imposed via reflected ghost rows/cols.
 
-def _u_ghost_y(u, U_lid):
+def _u_ghost_y(u, U_lid, U_bot=0.0):
     """Pad u (Ny,Nx+1) with one ghost row top & bottom enforcing tangential BC:
-    bottom wall u=0 -> ghost=-u[0]; top lid u=U_lid -> ghost=2*U_lid-u[-1]."""
+    bottom wall u=U_bot -> ghost=2*U_bot-u[0]; top wall u=U_lid -> ghost=2*U_lid-u[-1].
+    U_bot=0 is the lid-driven cavity; U_bot=-U_lid gives plane counter-shear."""
     Ny, Nxp1 = u.shape
     up = np.empty((Ny + 2, Nxp1))
     up[1:-1, :] = u
-    up[0, :] = -u[0, :]                 # bottom no-slip
-    up[-1, :] = 2.0 * U_lid - u[-1, :]  # top lid
+    up[0, :] = 2.0 * U_bot - u[0, :]    # bottom wall (u=U_bot)
+    up[-1, :] = 2.0 * U_lid - u[-1, :]  # top wall  (u=U_lid)
     return up
 
 
@@ -193,13 +194,14 @@ def interfacial_force_faces(kappa, H, gamma, dx, dy):
     return fu, fv
 
 
-def momentum_predictor(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None, rho=1.0):
+def momentum_predictor(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None, rho=1.0, U_bot=0.0):
     """One explicit predictor step (central advection + diffusion) for the
     lid-driven cavity, plus optional face body forces fu (Ny,Nx+1)/fv (Ny+1,Nx)
-    (e.g. surface tension) added as fu/rho. Returns u*, v* with wall faces zeroed."""
+    (e.g. surface tension) added as fu/rho. U_bot sets the bottom-wall tangential
+    velocity (U_bot=-U_lid gives plane counter-shear). Returns u*, v* with wall faces zeroed."""
     Ny, Nxp1 = u.shape
     Nx = Nxp1 - 1
-    up = _u_ghost_y(u, U_lid)            # (Ny+2, Nx+1)
+    up = _u_ghost_y(u, U_lid, U_bot)     # (Ny+2, Nx+1)
     vp = _v_ghost_x(v)                   # (Ny+1, Nx+2)
 
     # --- u-momentum at interior u-faces i=1..Nx-1 ---

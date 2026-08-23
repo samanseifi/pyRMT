@@ -49,7 +49,7 @@ def _FFt_from_xi(X1, X2, dx, dy):
 
 def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
             mu_f=0.01, U0=0.3, rho=1.0, scheme="semilagrangian_cubic", w_cut_fac=4.0,
-            model="maxwell", history=False):
+            model="maxwell", history=False, snap_times=None):
     """One disc-in-Taylor-Green FSI run. ``model`` selects the solid constitution:
         "elastic" -- reference-map neo-Hookean, sigma = mu_s dev(F F^T)  (Sec. 8.2)
         "maxwell" -- pure Maxwell branch,       sigma = G dev(b_e)       (fluid drop)
@@ -80,6 +80,7 @@ def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
     hist = {"t": [], "KE": [], "Eel": [], "detbe_max": [], "minJ": [], "cx": [], "cy": [],
             "bevsF": [], "area": []}
     has_maxwell = model in ("maxwell", "sls")
+    snaps = []; snap_q = list(snap_times) if snap_times else []
     t = 0.0
     while t < t_end:
         if t + dt > t_end:
@@ -128,6 +129,12 @@ def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
         u, v, p = project(us, vs, dx, dy, dt, rho, eig)
         t += dt
 
+        while snap_q and t >= snap_q[0]:
+            uc2 = 0.5 * (u[:, :-1] + u[:, 1:]); vc2 = 0.5 * (v[:-1, :] + v[1:, :])
+            snaps.append(dict(t=t, phi=phi.copy(), speed=np.sqrt(uc2**2 + vc2**2),
+                              field=(np.exp(p11 + p22) if has_maxwell else J).copy(),
+                              Xc=Xc, Yc=Yc)); snap_q.pop(0)
+
         if history:
             u_c = 0.5 * (u[:, :-1] + u[:, 1:]); v_c = 0.5 * (v[:-1, :] + v[1:, :])
             KE = 0.5 * np.sum(u_c**2 + v_c**2) * dx * dy
@@ -168,6 +175,8 @@ def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
                divmax=float(np.max(np.abs(divergence(u, v, dx, dy)))))
     if history:
         out["hist"] = {k: np.array(val) for k, val in hist.items()}
+    if snap_times:
+        out["snaps"] = snaps
     return out
 
 

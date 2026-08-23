@@ -32,9 +32,11 @@
   \caption{#2}\label{#1}
   \end{figure}}
 
-% ---- draft placeholder macro (remove for submission) ----
+% ---- draft placeholder macros (remove for submission) ----
 \newcommand{\TODO}[1]{{\color{red}\textbf{[TODO: #1]}}}
 \newcommand{\PLACE}[1]{{\color{blue}\texttt{<#1>}}}
+% inline flag for spots needing the authors' attention (renders in red)
+\newcommand{\attention}[1]{{\color{red}[\textbf{attention:} #1]}}
 
 % ---- notation ----
 \newcommand{\uv}{\bm{u}}                 % velocity
@@ -229,9 +231,10 @@ The remainder of the paper is organized as follows.
 the reference map, and the finite-strain viscoelastic constitutive law;
 \cref{sec:discretization,sec:time} give the MAC discretization and the four
 time-integration schemes with their algorithms;
-and \cref{sec:verification,sec:validation,sec:results} present the verification against
-analytic and manufactured limits, the FSI validation against the disc-in-vortex and
-lid-driven-cavity benchmarks, and the work--precision comparison.
+and \cref{sec:verification} presents the numerical examples---constitutive verification
+against analytic limits, the disc-in-vortex convergence and lid-cavity benchmark, the
+viscoelastic shear benchmark and coupled SLS disc, and the stiff-solid regime---with the
+solver and integrator diagnostics collected in \cref{sec:results}.
 %% ===== end intro.tex =====
 
 %% ===== begin governing.tex =====
@@ -522,42 +525,37 @@ semi-Lagrangian backtrace is already unconditionally stable.
 The strategies form a stack, each making one more stiff term of \cref{eq:cfl} implicit,
 selected by a single keyword (\texttt{explicit} $\subset$ \texttt{imex} $\subset$
 \texttt{imex-elastic}, with a \texttt{-sl} suffix adding semi-Lagrangian advection).
-Levels (i)--(iii) below lift the viscous, relaxation and elastic-wave limits; the
+The three levels below lift the viscous, relaxation and elastic-wave limits; the
 semi-Lagrangian advection of \cref{sec:monolithic} lifts the remaining advective limit.
 
-\paragraph{(i) Implicit viscosity.} The viscous term is advanced by backward Euler,
-yielding a Helmholtz solve for the predictor,
+\label{sec:elastic-stab}%
+The first level makes the \emph{viscous} term implicit by backward Euler, yielding a
+Helmholtz solve for the predictor,
 \begin{equation}
 \left(\It-\dt\,\nu\nabla^2\right)\uv^{*}
    = \uv^{n} - \dt\,(\uv\!\cdot\!\grad)\uv^{n} + \dt\,\bm f/\rho .
 \label{eq:helmholtz}
 \end{equation}
-On periodic and Neumann directions the Helmholtz operator is diagonalized by the
-\emph{same} transform (FFT/DCT) as the pressure Poisson solve of
-\cref{sec:discretization}: in spectral space each mode is divided by
-$1-\dt\,\nu\,\lambda_k>0$, so \cref{eq:helmholtz} is unconditionally stable and costs one
-extra transform per component. For Dirichlet (no-slip $+$ moving lid) walls, where the
-DCT does not diagonalize the operator, \cref{eq:helmholtz} is solved matrix-free by
-conjugate gradients on the same ghost-cell viscous stencil (symmetric positive-definite,
-hence CG-convergent), with the moving lid entering as a right-hand-side inhomogeneity;
-this route also accommodates the variable one-fluid viscosity.
-
-\paragraph{(ii) Exact relaxation.} The stiff relaxation of \cref{eq:ucm} is removed by
-the analytic Strang substep \cref{eq:relax-exact}, which is $A$-stable in $\tau$ and
-positive-definite-preserving (\cref{sec:exact-relax}).
-
-\paragraph{(iii) Linearly-implicit elastic-wave stabilizer.}
-\label{sec:elastic-stab}
-The nonlinear elastic force $\dive\sig_{\!s}$ is kept explicit (physics), while an
+On periodic and Neumann directions this operator is diagonalized by the \emph{same}
+transform (FFT/DCT) as the pressure Poisson solve of \cref{sec:discretization}---each mode
+divided by $1-\dt\,\nu\,\lambda_k>0$, so \cref{eq:helmholtz} is unconditionally stable at
+one extra transform per component---while at Dirichlet (no-slip and moving-lid) walls it is
+solved matrix-free by conjugate gradients on the same ghost-cell viscous stencil (symmetric
+positive-definite, hence CG-convergent), the lid entering as a right-hand-side
+inhomogeneity, a route that also accommodates the variable one-fluid viscosity. The second
+level removes the stiff \emph{relaxation} of \cref{eq:ucm} through the analytic Strang
+substep \cref{eq:relax-exact}, which is $A$-stable in $\tau$ and positive-definite-preserving
+(\cref{sec:exact-relax}). The third level is a linearly-implicit \emph{elastic-wave}
+stabilizer: the nonlinear elastic force $\dive\sig_{\!s}$ is kept explicit (physics) while an
 $O(\dt^2)$ wave operator is added implicitly to \cref{eq:helmholtz},
 \begin{equation}
 \left(\It-\dt\,\nu\nabla^2-\dt^2 c_s^2\,\chi\,\nabla^2\right)\uv^{*}
    = \uv^{n}-\dt\,(\uv\!\cdot\!\grad)\uv^{n}+\dt\,\bm f/\rho,
 \label{eq:elastic-stab}
 \end{equation}
-with $\chi=1-H$ the solid indicator. A frozen-coefficient split (constant $c_s^2$
-treated implicitly everywhere, removed from the fluid by an explicit defect) keeps a
-single transform solve. Crucially the elastic force must sit \emph{inside} the implicit
+with $\chi=1-H$ the solid indicator; a frozen-coefficient split (constant $c_s^2$ treated
+implicitly everywhere, removed from the fluid by an explicit defect) keeps a single
+transform solve. Crucially the elastic force must sit \emph{inside} the implicit
 right-hand side, as the following stability analysis shows.
 
 \begin{proposition}[Unconditional stability of the elastic stabilizer]
@@ -580,16 +578,13 @@ the force is applied \emph{after} the implicit solve, the analogous map has
 $\det=1/(1+a)$ but $\operatorname{tr}=1/(1+a)+1-a$, whose eigenvalues exceed unity for
 $a>1$ (unstable). \hfill
 \end{proof}
-\begin{remark}[Interpretation and the role of the ``inside'' force]
-\label{rem:vn}
-The scheme is non-oscillatory and stable for every $\dt$ and wavenumber $k$: resolved long
-waves ($a\ll1$) lose only $O(\dt^2)$ energy per step, vanishing under refinement, while
+The scheme is thus non-oscillatory and stable for every $\dt$ and wavenumber $k$: resolved
+long waves ($a\ll1$) lose only $O(\dt^2)$ energy per step, vanishing under refinement, while
 grid-scale waves ($a\gg1$) are strongly damped, supplying the dissipation that lets an
 explicit force be stabilized. The proof also shows why the force must sit \emph{inside} the
 implicit solve: applying it afterwards leaves the eigenvalue product unchanged but raises
 their sum, forcing $|\lambda|>1$ once $a>1$---an absolute instability that only the
 ``inside'' form, advancing displacement and velocity with the same implicit force, avoids.
-\end{remark}
 
 The stage-1 damping is the joint price of the isotropic-Laplacian stabilizer and a
 one-sided (backward-Euler-type) coupling; symmetrizing the time coupling removes it
@@ -617,14 +612,12 @@ unit modulus; the Cayley transform of a Hamiltonian matrix is symplectic, so the
 energy is conserved. \hfill
 \end{proof}
 
-\begin{remark}[Stage-1 vs.\ trapezoidal]
-Proposition~\ref{prop:vn} gives a dissipative, extremely robust integrator (useful as a
-stabilizer or for strongly stiff transients); Proposition~\ref{prop:trap} gives a
-neutrally-stable, energy-conserving one. The solver uses the trapezoidal form for the
-elastic branch so that a persistently oscillating solid neither grows nor decays
-numerically; \cref{sec:verification} verifies the predicted energy conservation on a
-standing elastic shear wave.
-\end{remark}
+The two propositions are complementary: Proposition~\ref{prop:vn} gives a dissipative,
+extremely robust integrator (useful as a stabilizer or for strongly stiff transients),
+while Proposition~\ref{prop:trap} gives a neutrally-stable, energy-conserving one. The solver
+uses the trapezoidal form for the elastic branch so that a persistently oscillating solid
+neither grows nor decays numerically; \cref{sec:verification} verifies the predicted energy
+conservation on a standing elastic shear wave.
 
 \subsection{Toward a fully-coupled Newton solve}
 \label{sec:monolithic}
@@ -745,7 +738,7 @@ scheme & viscosity & advection & $\uv$--$p$ coupling & CFL limits remaining \\
 %% ===== end timeintegration.tex =====
 
 %% ===== begin verification.tex =====
-\section{Verification}
+\section{Numerical examples}
 \label{sec:verification}
 
 \subsection{Constitutive update}
@@ -818,9 +811,6 @@ $\mathrm{Wi}=0.6$), a bounded, physical departure whose trace is carried by the 
 %% ===== end verification.tex =====
 
 %% ===== begin validation.tex =====
-\section{Validation}
-\label{sec:validation}
-
 The parameters of every FSI case are collected in \cref{tab:params} for reproducibility.
 Common to all: equal density $\rho_s=\rho_f=1$, interface smoothing width $w_t=2\dx$, band
 extrapolation over $3$ layers, and semi-Lagrangian transport of $(\xiv,\psib)$; the coupled
@@ -943,6 +933,43 @@ $1.8\times10^{-6}$, $2\times10^{-4}$ and ${<}3\%$ respectively.}
 \label{fig:ve-valid}
 \end{figure}
 
+\subsection{Viscoelastic disc in shear: a deformable-particle benchmark}
+\label{sec:shear}
+To test the coupled viscoelastic \emph{solid} against the phenomenology of deformable
+particles in flow, we place a soft disc at the centre of a plane-shear cell (top and bottom
+walls translating at $\pm U$, giving a mean shear rate $\dot\gamma=2U/L_y$) and measure its
+steady Taylor deformation $D=(a-b)/(a+b)$ and orientation $\theta$ from the second-moment
+tensor of the solid, as functions of the elastic capillary number
+$\mathrm{Ca}=\mu_f\dot\gamma/G$ (viscous stress over elastic modulus). This is the classic
+deformable-particle-in-shear test \cite{Sugiyama2011,Jain2019}, here for a finite-strain
+viscoelastic solid carried by the reference map and log-conformation.
+For the elastic disc (\cref{fig:shear}a) the small-Ca response follows the universal
+small-deformation limit---$D\!\to\!\mathrm{Ca}$ with the particle aligning toward
+$\theta\!\to\!45^\circ$ as $\mathrm{Ca}\!\to\!0$---and departs sublinearly at larger Ca as the
+particle stiffens geometrically and rotates toward the flow ($\theta$ falling to
+${\sim}22^\circ$ at $\mathrm{Ca}=0.4$), reproducing the deformation--orientation behaviour
+established for elastic and hyperelastic particles \cite{Sugiyama2011}. The absolute $D$
+carries an $O(10\%)$ scatter set by the diffuse-interface shape measure.
+Turning on the relaxing branch (SLS, \cref{fig:shear}b) lowers the steady deformation
+monotonically with the Weissenberg number $\mathrm{Wi}=\dot\gamma\tau$: under sustained
+shear the Maxwell branch accumulates a steady elastic stress $\sim G\tau\dot\gamma$ that
+stiffens the particle, and $\mathrm{Wi}\!\to\!0$ recovers the elastic curve. This is the
+viscoelastic-solid signature the title promises, absent from a purely elastic solver.
+\attention{This shear benchmark is new work; if a specific published deformable-particle
+curve (e.g.\ Gao \& Hu; Rosti \& Brandt) should be digitized for a quantitative overlay,
+say which and I will add it.}
+
+\begin{figure}[t]\centering
+\includegraphics[width=\linewidth]{figures/disc_in_shear.png}
+\caption{Viscoelastic-solid disc in plane shear. (a) Elastic disc: steady deformation $D$
+(blue, left) vs.\ elastic capillary number, with the small-deformation limit $D=\mathrm{Ca}$
+(dashed) and the orientation $\theta$ (red, right) decreasing from ${\sim}45^\circ$ with Ca.
+(b) SLS disc at $\mathrm{Ca}=0.2$: steady $D$ decreases with the Weissenberg number as the
+relaxing branch stiffens the particle under sustained shear; $\mathrm{Wi}=0$ is the elastic
+limit.}
+\label{fig:shear}
+\end{figure}
+
 \subsection{Two-way-coupled viscoelastic FSI: an SLS disc in a Taylor--Green vortex}
 \label{sec:ve-coupled}
 We now couple the full \emph{standard-linear-solid} of \cref{sec:constitutive} to the flow:
@@ -995,13 +1022,62 @@ transport), reaching ${\approx}0.11$; the dynamics are insensitive to it
 \label{fig:ve-coupled}
 \end{figure}
 
+\Cref{fig:snapshots} collects snapshots of the three coupled examples---the elastic disc
+along the lid-cavity spiral, the viscoelastic disc in shear at increasing capillary number,
+and the SLS disc carried and deformed by the Taylor--Green vortex---showing the captured
+interface over the flow speed.
+
+\begin{figure}[t]\centering
+\includegraphics[width=\linewidth]{figures/snapshots.png}
+\caption{Simulation snapshots (solid interface, white, over the flow speed): (a) elastic
+disc in the lid-driven cavity at $t=2,5,8$; (b) viscoelastic disc in plane shear at
+$\mathrm{Ca}=0.1,0.2,0.4$ (steady inclined ellipse, deformation growing with Ca); (c) SLS
+disc in the Taylor--Green vortex at $t=0.3,0.6,1.0$.}
+\label{fig:snapshots}
+\end{figure}
+
+\subsection{Stiff-solid regime: enabling stability}
+\label{sec:stiff}
+The introduction motivates implicit integration partly by the stiff-solid regime; we
+exercise it directly as an FSI case. A neo-Hookean disc with $\mu_s=16$
+($c_s=\sqrt{\mu_s/\rho}=4\,U_{\rm lid}$) makes the elastic wave the binding explicit limit.
+\Cref{fig:stiff}a shows the outcome: the explicit scheme diverges once $\dt$ exceeds its
+combined elastic/advective CFL (blow-up at $6\times$ the elastic CFL, $\min J$ collapsing at
+$t\!\approx\!0.07$), whereas the energy-conserving trapezoidal coupling
+(Proposition~\ref{prop:trap}) advances the same disc stably at $4\times$ and $8\times$ that
+step, the minimum Jacobian staying near $0.9$ so the body remains intact. This unconditional
+stability is what makes the stiff regime reachable at all. Accuracy at these large steps is,
+however, only $O(\dt)$ (\cref{fig:temporal}): the trajectory (\cref{fig:stiff}b) carries a
+visible operator-split error, so at \emph{matched accuracy} the stiff case obeys the same
+step-size-versus-solve-cost trade as \cref{sec:disc-speedup}, and the fully-consistent Newton
+of \cref{sec:monolithic} is the route to large-step accuracy. This is expected on physical
+grounds and worth stating plainly: a stiff \emph{elastic} wave is genuine, non-dissipative
+dynamics, so a large step that fails to resolve it loses phase accuracy however stably it is
+taken---implicit integration \emph{enables} the regime but cannot manufacture accuracy the
+time step does not resolve. The accuracy payoff of implicit integration is instead in the
+\emph{dissipative} stiffnesses, where the stiff modes are damped or exact rather than
+oscillatory: backward-Euler viscosity (the low-Reynolds limit) and, most cleanly, the
+relaxation-stiff limit---advancing a small-$\tau$ solid at $\dt\!\gg\!\tau$ via the exact
+substep, which is accurate to machine precision at \emph{any} $\dt$ (\cref{sec:verification}).
+The finite-$\tau$ coupled behaviour is the SLS case of \cref{sec:ve-coupled}.
+
+\begin{figure}[t]\centering
+\includegraphics[width=\linewidth]{figures/stiff_solid_fsi.png}
+\caption{Stiff disc ($\mu_s=16$, $c_s=4\,U_{\rm lid}$) in the lid-driven cavity:
+(a) $\min J$ over time---explicit diverges at $6\times$ the elastic CFL ($t\!\approx\!0.07$),
+while the trapezoidal coupling runs stably at $4$--$8\times$ with the disc intact;
+(b) centroid trajectory---stable at large steps but carrying the $O(\dt)$ operator-split
+error relative to the resolved explicit reference.}
+\label{fig:stiff}
+\end{figure}
+
 \subsection{Surface tension}
 The static Laplace jump $\Delta p=\gamma/R$ is captured to $0.4\%$ with bounded parasitic
 currents (balanced-force CSF); a dynamic oscillating-drop test is left to future work.
 %% ===== end validation.tex =====
 
 %% ===== begin results.tex =====
-\section{Results: stiff regimes and speedup}
+\section{Supplementary material: solver and integrator diagnostics}
 \label{sec:results}
 
 \subsection{Lifted time-step limits}
@@ -1122,41 +1198,6 @@ error); explicit lies at the small-$\dt$ floor.}
 \label{fig:temporal}
 \end{figure}
 
-\subsection{Stiff-solid regime: enabling stability}
-\label{sec:stiff}
-The introduction motivates implicit integration partly by the stiff-solid regime; we
-exercise it directly as an FSI case. A neo-Hookean disc with $\mu_s=16$
-($c_s=\sqrt{\mu_s/\rho}=4\,U_{\rm lid}$) makes the elastic wave the binding explicit limit.
-\Cref{fig:stiff}a shows the outcome: the explicit scheme diverges once $\dt$ exceeds its
-combined elastic/advective CFL (blow-up at $6\times$ the elastic CFL, $\min J$ collapsing at
-$t\!\approx\!0.07$), whereas the energy-conserving trapezoidal coupling
-(Proposition~\ref{prop:trap}) advances the same disc stably at $4\times$ and $8\times$ that
-step, the minimum Jacobian staying near $0.9$ so the body remains intact. This unconditional
-stability is what makes the stiff regime reachable at all. Accuracy at these large steps is,
-however, only $O(\dt)$ (\cref{fig:temporal}): the trajectory (\cref{fig:stiff}b) carries a
-visible operator-split error, so at \emph{matched accuracy} the stiff case obeys the same
-step-size-versus-solve-cost trade as \cref{sec:disc-speedup}, and the fully-consistent Newton
-of \cref{sec:monolithic} is the route to large-step accuracy. This is expected on physical
-grounds and worth stating plainly: a stiff \emph{elastic} wave is genuine, non-dissipative
-dynamics, so a large step that fails to resolve it loses phase accuracy however stably it is
-taken---implicit integration \emph{enables} the regime but cannot manufacture accuracy the
-time step does not resolve. The accuracy payoff of implicit integration is instead in the
-\emph{dissipative} stiffnesses, where the stiff modes are damped or exact rather than
-oscillatory: backward-Euler viscosity (the low-Reynolds limit) and, most cleanly, the
-relaxation-stiff limit---advancing a small-$\tau$ solid at $\dt\!\gg\!\tau$ via the exact
-substep, which is accurate to machine precision at \emph{any} $\dt$ (\cref{sec:verification}).
-The finite-$\tau$ coupled behaviour is the SLS case of \cref{sec:ve-coupled}.
-
-\begin{figure}[t]\centering
-\includegraphics[width=\linewidth]{figures/stiff_solid_fsi.png}
-\caption{Stiff disc ($\mu_s=16$, $c_s=4\,U_{\rm lid}$) in the lid-driven cavity:
-(a) $\min J$ over time---explicit diverges at $6\times$ the elastic CFL ($t\!\approx\!0.07$),
-while the trapezoidal coupling runs stably at $4$--$8\times$ with the disc intact;
-(b) centroid trajectory---stable at large steps but carrying the $O(\dt)$ operator-split
-error relative to the resolved explicit reference.}
-\label{fig:stiff}
-\end{figure}
-
 \subsection{Semi-monolithic velocity--pressure solver (fluid)}
 \label{sec:results-mono}
 The four schemes above lift the FSI step-size limits by fractional-step means: the
@@ -1216,7 +1257,6 @@ sedimentation, lubrication-corrected contact \cite{Fai2018}, multi-mode/nonlinea
 (Giesekus, FENE-P) constitutive laws, and---most directly---closing the outer iteration to
 the fully-coupled $(\uv,p,\xiv,\psib)$ Newton posed in \cref{sec:monolithic}.
 %% ===== end conclusion.tex =====
-
 
 \section*{Code availability}
 The Python implementation of the solver (pyRMT) and the scripts that generate every figure
