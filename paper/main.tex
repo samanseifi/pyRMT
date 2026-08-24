@@ -838,30 +838,35 @@ oscillates while the fluid viscously damps it.
 \Cref{fig:disc-tg-conv}a reproduces their kinetic- and strain-energy evolution: the two
 exchange energy in anti-phase during the stretch--retract oscillation, the magnitudes
 ($\mathrm{ke}\!\approx\!0.02$, $\mathrm{se}\!\approx\!0.012$) and period match Jain \emph{et
-al.}'s Fig.~14, and the curves are grid-independent from $N{=}64$ to $128$.
-The field convergence at $t=0.25$ (\cref{fig:disc-tg-conv}b) is, however, only first order
-in velocity and pressure---below the second order of Jain \emph{et al.}'s
-\emph{conservative} formulation. This is the expected signature of our smoothed one-fluid
-interface: the mollified Heaviside spreads the stress (and pressure) jump over a band of
-width ${\sim}2\dx$, and the captured interface sits at an $O(\dx)$-different sub-cell
-position on each grid, so the near-interface field error is $O(\dx)$ while the bulk vortex is
-second order. We verified this order is robust---it is unchanged under higher-order
-(cubic, central) advection, under level-set normalization, and under conservative flux
-transport of $\xiv$ with per-step reinitialization---so it is intrinsic to the
-diffuse-interface blend rather than to any one operator; the second order of Jain \emph{et
-al.}\ follows from their fully-conservative, discretely-telescoping finite-difference
-construction, and a sharp-interface treatment \cite{Kolahdouz2023} is the alternative route
-to higher order. The order is set by the spatial discretization, not the time integrator
+al.}'s Fig.~14, and the curves are grid-independent from $N{=}64$ to $128$. The
+convergence study (\cref{fig:disc-tg-conv}b) uses the standard soft-disc parameters
+($\mu_s=0.1$, $\mu_f=0.01$, single vortex) of \cref{tab:params}.
+The spatial convergence (\cref{fig:disc-tg-conv}b, measured against a resolved $N{=}256$
+reference) splits cleanly by quantity. The \emph{integrated energies} converge at second
+order---the $O(\dx)$ interfacial error largely cancels in the volume integral---so the
+kinetic and strain energy track $O(\dx^2)$, matching the second-order energy convergence of
+Jain \emph{et al.} The \emph{pointwise fields} (velocity, pressure) are first order: the
+mollified Heaviside spreads the stress and pressure jump over a band of width ${\sim}2\dx$,
+and the captured interface sits at an $O(\dx)$-different sub-cell position on each grid, so
+the near-interface field error is $O(\dx)$ on top of a second-order bulk. (We verified the
+field order is genuine and robust: it is unchanged under higher-order cubic or central
+advection, level-set normalization, and conservative flux transport of $\xiv$ with per-step
+reinitialization---so it is intrinsic to the diffuse interface, not to any one operator. An
+earlier report of ${\approx}1.8$-order velocity was an artifact of using too coarse a
+convergence reference.) Second order in the \emph{fields} would require Jain \emph{et al.}'s
+fully-conservative, discretely-telescoping stencil or a sharp-interface treatment
+\cite{Kolahdouz2023}. The order is set by the spatial discretization, not the time integrator
 (the explicit, IMEX and semi-monolithic schemes coincide, \cref{sec:verification}).
 
 \begin{figure}[t]\centering
 \includegraphics[width=\linewidth]{figures/disc_tg_convergence.png}
-\caption{Disc in a Taylor--Green vortex, at the parameters of Jain \emph{et al.}\
-\cite{Jain2019}. (a) Kinetic (ke) and strain (se) energy vs.\ time: the stretch--retract
-oscillation and energy exchange, grid-independent from $N{=}64$ to $128$ and matching their
-Fig.~14 in magnitude and period. (b) Field convergence at $t=0.25$: velocity and pressure
-are first order (dotted), capped by the diffuse one-fluid interface, below the $O(\Delta
-x^2)$ (dashed) of their conservative scheme.}
+\caption{Disc in a Taylor--Green vortex. (a) Kinetic (ke) and strain (se) energy vs.\ time
+at Jain \emph{et al.}'s parameters \cite{Jain2019}: the stretch--retract oscillation and
+energy exchange, grid-independent from $N{=}64$ to $128$ and matching their Fig.~14 in
+magnitude and period. (b) Spatial convergence (soft-disc parameters, vs.\ a resolved
+$N{=}256$ reference): the \emph{integrated energies} converge at $O(\Delta x^2)$ (dashed)
+because the interfacial error cancels in the integral, while the pointwise \emph{velocity and
+pressure} are first order (dotted), capped by the diffuse one-fluid interface.}
 \label{fig:disc-tg-conv}
 \end{figure}
 
