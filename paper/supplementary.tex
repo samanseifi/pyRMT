@@ -43,6 +43,69 @@ support, but are not central to, the coupled viscoelastic fluid--structure inter
 results of the main text. Sections, figures and tables here are prefixed with ``S'';
 references to the main text (its sections, algorithms and figures) are named explicitly.
 
+\section{Solver verification}
+The following operator, integrator and fluid-solver checks underpin the coupled
+results of the main text.
+
+\subsection{Operators and projection}
+The MAC divergence is exact on linear fields and second-order on smooth fields; the
+identity $\mathrm{div}\circ\mathrm{grad}\equiv\mathrm{Lap}$ holds to $10^{-9}$; the
+Poisson round-trip recovers the field to $10^{-10}$; and projecting an arbitrary
+wall-boundary velocity yields divergence below $10^{-11}$ (machine-zero, the property the
+collocated solver cannot reach). The implicit-viscosity Helmholtz solve passes the same
+round-trip to $10^{-10}$.
+
+\subsection{Integrator equivalence and large-step stability}
+On the periodic Taylor--Green decaying vortex the explicit, IMEX and semi-monolithic
+integrators produce \emph{identical} errors at matched $\dt$: the implicit and
+semi-Lagrangian machinery does not perturb the solution it is meant to accelerate. (For
+non-stiff advection the adaptive semi-monolithic scheme reduces to the central-difference
+IMEX, so the three coincide.) The implicit-viscosity scheme is additionally stable and
+accurate up to $\dt=50\times$ the explicit viscous limit $\dx^2/(4\nu)$, where the explicit
+scheme diverges. The spatial order of the coupled method is measured directly on the
+disc-in-Taylor--Green benchmark of the main text, the honest test for a one-fluid interface.
+
+\subsection{Energy conservation of the elastic coupling}
+On the linear elastic standing shear wave the trapezoidal coupling (main text, Prop.~2)
+is genuinely lossless. Measured with the discrete energy
+invariant tied to the \emph{same} Laplacian used in the update, the drift is at round-off
+($\le2\times10^{-14}$) for every step from $0.5\times$ to $8\times$ the explicit CFL,
+confirming $|\lambda|=1$ (top row); the dissipative stage-1 stabilizer instead damps the
+wave away (drift $\to1$) and the explicit scheme diverges above the CFL.
+\begin{center}\small
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+$\dt/\dt_{\rm CFL}$ & $0.5$ & $1$ & $2$ & $4$ & $8$ \\
+\midrule
+consistent-energy drift & $1.9\!\times\!10^{-14}$ & $6.9\!\times\!10^{-15}$ &
+$1.5\!\times\!10^{-14}$ & $9.5\!\times\!10^{-15}$ & $1.8\!\times\!10^{-14}$ \\
+centered-difference drift & $5.5\!\times\!10^{-5}$ & $2.2\!\times\!10^{-4}$ &
+$1.8\!\times\!10^{-3}$ & $9.7\!\times\!10^{-3}$ & $9.6\!\times\!10^{-3}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+The apparent growth in the second row---an earlier measure that computes the elastic
+energy with a centered-difference gradient rather than the operator the scheme
+conserves---is a spatial-discretization mismatch between that measured functional and the
+true invariant, not temporal dissipation: for a Hamiltonian update phase error cannot
+change energy, and the consistent measure removes the drift entirely.
+Separately, the Oldroyd-B relaxation does not preserve $\det\be$: under steady shear the
+solver reproduces the analytic $\det\be=1+\mathrm{Wi}^2$ (e.g.\ $1.36$ at
+$\mathrm{Wi}=0.6$), a bounded, physical departure whose trace is carried by the pressure.
+
+\subsection{Lid-driven cavity (fluid solver)}
+The centreline velocity $u(y)$ at $x=0.5$ is compared to Ghia \emph{et al.}
+\cite{Ghia1982}. The MAC solver attains an RMS error of $1.7\times10^{-3}$ at
+$\mathrm{Re}=100$ and $2.8\times10^{-2}$ at $\mathrm{Re}=1000$ ($N=129$), the centreline
+profiles overlaying the reference within these residuals. The implicit (IMEX) integrator
+reproduces the same steady state at $\mathrm{Re}=100$ (RMS $1.68\times10^{-2}$ vs.\
+explicit $1.71\times10^{-2}$ at $N=48$) and remains correct at $5\times$ the explicit
+viscous CFL.
+
+\subsection{Surface tension}
+The static Laplace jump $\Delta p=\gamma/R$ is captured to $0.4\%$ with bounded parasitic
+currents (balanced-force CSF); a dynamic oscillating-drop test is left to future work.
+
 \section{Lifted time-step limits}
 \label{sec:supp-limits}
 Each level of the IMEX stack is verified to reproduce the explicit result at a matched
@@ -155,5 +218,8 @@ order of magnitude below the $2.7\times10^{-2}$ semi-Lagrangian diffusion floor 
 step, with Newton converging in ${\sim}3$ iterations per step. Extending this
 velocity--pressure solve to the coupled solid---the full Newton posed in the main text---is
 future work; the coupled results there use the IMEX-SL scheme.
+
+\bibliographystyle{elsarticle-num}
+\bibliography{refs}
 
 \end{document}
