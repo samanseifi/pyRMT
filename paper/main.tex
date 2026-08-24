@@ -841,11 +841,18 @@ exchange energy in anti-phase during the stretch--retract oscillation, the magni
 al.}'s Fig.~14, and the curves are grid-independent from $N{=}64$ to $128$.
 The field convergence at $t=0.25$ (\cref{fig:disc-tg-conv}b) is, however, only first order
 in velocity and pressure---below the second order of Jain \emph{et al.}'s
-\emph{conservative} formulation. This is the expected signature of our non-conservative,
-diffuse-interface blend: the smoothed one-fluid interface caps the field order, and a
-conservative or sharp-interface treatment \cite{Jain2019,Kolahdouz2023} is the route to
-higher order. The order is set by the spatial discretization, not the time integrator (the
-explicit, IMEX and semi-monolithic schemes coincide, \cref{sec:verification}).
+\emph{conservative} formulation. This is the expected signature of our smoothed one-fluid
+interface: the mollified Heaviside spreads the stress (and pressure) jump over a band of
+width ${\sim}2\dx$, and the captured interface sits at an $O(\dx)$-different sub-cell
+position on each grid, so the near-interface field error is $O(\dx)$ while the bulk vortex is
+second order. We verified this order is robust---it is unchanged under higher-order
+(cubic, central) advection, under level-set normalization, and under conservative flux
+transport of $\xiv$ with per-step reinitialization---so it is intrinsic to the
+diffuse-interface blend rather than to any one operator; the second order of Jain \emph{et
+al.}\ follows from their fully-conservative, discretely-telescoping finite-difference
+construction, and a sharp-interface treatment \cite{Kolahdouz2023} is the alternative route
+to higher order. The order is set by the spatial discretization, not the time integrator
+(the explicit, IMEX and semi-monolithic schemes coincide, \cref{sec:verification}).
 
 \begin{figure}[t]\centering
 \includegraphics[width=\linewidth]{figures/disc_tg_convergence.png}
