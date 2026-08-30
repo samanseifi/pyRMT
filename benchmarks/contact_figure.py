@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from benchmarks.contact_collision import run
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-N, T, V0, MUF, ETA, SEP, R = 128, 1.6, 0.6, 0.005, 2.0, 0.30, 0.12
+N, T, V0, MUF, ETA, SEP, R = 128, 1.6, 1.2, 0.005, 2.0, 0.30, 0.12
 GTOT = 0.8
 EL = dict(model="elastic", mu_s=GTOT)
 VE = dict(model="sls", mu_s=0.2, G_ve=0.6, tau=0.2)
@@ -22,31 +22,23 @@ def main():
     from _plotstyle import apply as _style; _style()
     import matplotlib.pyplot as plt
 
-    common = dict(N=N, t_end=T, V0=V0, mu_f=MUF, eta=ETA, sep=SEP, R=R)
-    runs = {
-        ("elastic", "explicit"): run(**EL, integrator="explicit", **common),
-        ("elastic", "imex"):     run(**EL, integrator="imex", **common),
-        ("sls", "explicit"):     run(**VE, integrator="explicit", **common),
-        ("sls", "imex"):         run(**VE, integrator="imex", **common),
-    }
-    np.savez(os.path.join(ROOT, "outputs", "overlay", "contact_collision.npz"),
-             **{f"{m}_{i}": h for (m, i), h in runs.items()})
+    common = dict(N=N, t_end=T, V0=V0, mu_f=MUF, eta=ETA, sep=SEP, R=R, integrator="imex")
+    runs = {"elastic": run(**EL, **common), "sls": run(**VE, **common)}
+    np.savez(os.path.join(ROOT, "outputs", "overlay", "contact_collision.npz"), **runs)
 
     # ---- gap vs time: elastic vs viscoelastic (IMEX; the explicit comparison is in the supp) ----
     fig, ax = plt.subplots(figsize=(6.2, 4.5))
-    ax.plot(runs[("elastic", "imex")][:, 0], runs[("elastic", "imex")][:, 3], "-",
-            color="blue", lw=2.0, label="elastic")
-    ax.plot(runs[("sls", "imex")][:, 0], runs[("sls", "imex")][:, 3], "-",
-            color="red", lw=2.0, label="viscoelastic (SLS)")
+    ax.plot(runs["elastic"][:, 0], runs["elastic"][:, 3], "-", color="blue", lw=2.0, label="elastic")
+    ax.plot(runs["sls"][:, 0], runs["sls"][:, 3], "-", color="red", lw=2.0, label="viscoelastic (SLS)")
     ax.axhline(2 * R, color="0.5", ls=":", lw=1.2, label=r"$2R$ (touching)")
     ax.set_xlabel("time $t$"); ax.set_ylabel("centroid gap")
-    ax.legend(loc="lower right"); fig.tight_layout()
+    ax.legend(loc="upper right"); fig.tight_layout()
     fig.savefig(os.path.join(ROOT, "paper", "figures", "contact_collision.png"), dpi=200)
     print("saved contact_collision.png")
 
     # ---- snapshot montage: the discs colliding in the fluid ----
-    times = [0.15, 0.35, 0.55, 0.90, 1.40]
-    _, snaps = run(**EL, integrator="explicit", snap_times=times, **common)
+    times = [0.15, 0.30, 0.42, 0.70, 1.20]
+    _, snaps = run(**EL, snap_times=times, **common)
     fig, axes = plt.subplots(1, len(snaps), figsize=(2.3 * len(snaps), 2.6))
     for ax, s in zip(np.atleast_1d(axes), snaps):
         xc = s["Xc"][0, :]; yc = s["Yc"][:, 0]
