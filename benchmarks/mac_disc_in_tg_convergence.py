@@ -16,7 +16,8 @@ import os, sys
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pyRMT.mac import (mac_grid, momentum_predictor_freeslip, project,
+from pyRMT.mac import (mac_grid, momentum_predictor_freeslip,
+                       momentum_predictor_freeslip_imex, project,
                        poisson_eigs_neumann, divergence)
 from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
     rebuild_phi_from_reference_map, solid_cauchy_stress, smoothed_heaviside,
@@ -29,7 +30,7 @@ NS = [32, 64, 128, 256]
 
 def run_one(N, t_end, R=0.15, x0=0.5, y0=0.7, mu_s=0.1, mu_f=0.01, U0=0.3, rho=1.0,
             scheme="semilagrangian", w_cut_fac=4.0, isochoric=False, normalize_phi=False,
-            kw=1):
+            kw=1, dt=None, dt_coef=None, integrator="explicit"):
     # Stream function psi = U0 sin(k x) sin(k y), k = kw*pi. kw=1 is a single vortex;
     # kw=2 (four cells) with U0=0.05, R=0.2, x0=y0=0.5, mu_s=0.5, mu_f=1e-3 reproduces the
     # disc-in-Taylor-Green convergence benchmark of Jain, Kamrin & Mani (JCP 2019, Sec. 4.4).
@@ -51,7 +52,14 @@ def run_one(N, t_end, R=0.15, x0=0.5, y0=0.7, mu_s=0.1, mu_f=0.01, U0=0.3, rho=1
     X1, X2 = extrapolate_reference_map(Xc * sm, Yc * sm, phi, dx, dy, 3)
     w_t = 2.0 * dx; nu = mu_f / rho; cs = np.sqrt(mu_s / rho)
     eig = poisson_eigs_neumann(N, N, dx, dy)
-    dt = min(0.25 * dx / (U0 * k), 0.2 * dx * dx / nu, 0.25 * dx / (cs + 1e-9))
+    imex = (integrator == "imex")
+    if dt is None:
+        limits = [0.25 * dx / (U0 * k), 0.25 * dx / (cs + 1e-9)]
+        if not imex:                   # explicit also bound by the viscous CFL
+            limits.append(0.2 * dx * dx / nu)
+        dt = min(limits)
+    if dt_coef is not None:            # force dt = dt_coef * dx^2 (constant diffusion number)
+        dt = dt_coef * dx * dx
     p = np.zeros((N, N))
 
     hist = {"t": [], "ke": [], "se": []}; step = 0
@@ -83,22 +91,29 @@ def run_one(N, t_end, R=0.15, x0=0.5, y0=0.7, mu_s=0.1, mu_f=0.01, U0=0.3, rho=1
         divy = grad_central_x_2nd(Sxy, dx) + grad_central_y_2nd(Syy, dy)
         fu = np.zeros((N, N + 1)); fu[:, 1:-1] = 0.5 * (divx[:, 1:] + divx[:, :-1])
         fv = np.zeros((N + 1, N)); fv[1:-1, :] = 0.5 * (divy[1:, :] + divy[:-1, :])
-        us, vs = momentum_predictor_freeslip(u, v, nu, dx, dy, dt, fu=fu, fv=fv, rho=rho)
+        if imex:
+            us, vs = momentum_predictor_freeslip_imex(u, v, nu, dx, dy, dt, fu=fu, fv=fv, rho=rho)
+        else:
+            us, vs = momentum_predictor_freeslip(u, v, nu, dx, dy, dt, fu=fu, fv=fv, rho=rho)
         u, v, p = project(us, vs, dx, dy, dt, rho, eig)
         t += dt; step += 1
         if step % 10 == 0 or t >= t_end:
             uc2 = 0.5 * (u[:, :-1] + u[:, 1:]); vc2 = 0.5 * (v[:-1, :] + v[1:, :])
             hist["t"].append(t)
             hist["ke"].append(0.5 * np.sum(uc2**2 + vc2**2) * dx * dy)
-            hist["se"].append(2.0 * compute_strain_energy(X1, X2, phi, mu_s, dx, dy))
+            # se = physical elastic potential energy W = (mu_s/2) int(I1-2). With our
+            # convention sigma = mu_s b (mu_s = shear modulus G, as in Rycroft et al.
+            # 2018 Eq. 3.16), this IS Jain et al. (2019) Eq. 38 se = mu_s_Jain(I1-2):
+            # Jain writes sigma = 2 mu_s_Jain b, so mu_s_Jain = G/2 and mu_s_Jain(I1-2)
+            # = (G/2)(I1-2) = compute_strain_energy(G). No extra factor of 2.
+            hist["se"].append(compute_strain_energy(X1, X2, phi, mu_s, dx, dy, isochoric=True))
 
     u_c = 0.5 * (u[:, :-1] + u[:, 1:]); v_c = 0.5 * (v[:-1, :] + v[1:, :])
     speed = np.sqrt(u_c**2 + v_c**2)
     KE = 0.5 * np.sum(u_c**2 + v_c**2) * dx * dy
-    # compute_strain_energy already returns the integrated total W=(mu_s/2)(I1-2); Jain
-    # et al. (2019) Eq. 38 uses se=mu_s(I1-2) (no 1/2), so double for a like-for-like
-    # comparison with their Fig. 14.
-    Estrain = 2.0 * compute_strain_energy(X1, X2, phi, mu_s, dx, dy)
+    # Physical elastic potential energy W = (mu_s/2) int(I1-2); with sigma = mu_s b
+    # (mu_s = shear modulus G) this equals Jain et al. (2019) Eq. 38 se (see note above).
+    Estrain = compute_strain_energy(X1, X2, phi, mu_s, dx, dy, isochoric=True)
     # `project` returns the physical pressure (O(1)); do NOT divide by dt.
     return dict(N=N, dx=dx, xc=xc, speed=speed, p=p, KE=KE, Estrain=Estrain,
                 hist={k: np.array(v) for k, v in hist.items()},
@@ -208,7 +223,7 @@ def plot_pub(out_dir, coarse, Ns, REF, h, verr, perr, KE, Es):
             ax.annotate(f"{N}", (hv, max(e[list(coarse).index(N)] for e in present)),
                         textcoords="offset points", xytext=(0, 8), fontsize=8, ha="center", color="0.4")
         ax.set_xlabel("grid spacing  $h = 1/N$"); ax.set_ylabel(ylabel)
-        ax.set_title(title); ax.grid(True, which="both", alpha=.25)
+        ax.set_title(title)
         ax.legend(frameon=True, framealpha=.92, loc="lower left")
         fig.tight_layout(); fig.savefig(os.path.join(out_dir, fname), dpi=200); plt.close(fig)
 
@@ -223,7 +238,7 @@ def plot_pub(out_dir, coarse, Ns, REF, h, verr, perr, KE, Es):
             ax.semilogx(Ns, vals[sch], marker=mk[sch], color=col[sch], lw=2, ms=7, label=lbl[sch])
         ax.set_xlabel("$N$"); ax.set_ylabel(f"{ttl} at $T$")
         ax.set_title(f"Disc-in-Taylor-Green: {ttl} vs resolution")
-        ax.grid(True, alpha=.25); ax.legend(); fig.tight_layout()
+        ax.legend(); fig.tight_layout()
         fig.savefig(os.path.join(out_dir, fn), dpi=200); plt.close(fig)
     print(f"\n  saved 4 publication plots in {out_dir}/")
 

@@ -169,6 +169,7 @@ def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0
         while snap_q and t >= snap_q[0]:
             uc2 = 0.5 * (u[:, :-1] + u[:, 1:]); vc2 = 0.5 * (v[:-1, :] + v[1:, :])
             snaps.append(dict(t=t, phi=phi.copy(), speed=np.sqrt(uc2**2 + vc2**2),
+                              uc=uc2.copy(), vc=vc2.copy(), X1=X1.copy(), X2=X2.copy(),
                               Xc=Xc, Yc=Yc)); snap_q.pop(0)
         if step % 200 == 0 or t >= t_end:
             print(f"  step {step:5d} t={t:6.3f} centroid=({cx:.3f},{cy:.3f}) "

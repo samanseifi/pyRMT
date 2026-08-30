@@ -21,7 +21,8 @@ Usage: python benchmarks/disc_in_shear.py
 import os, sys
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from pyRMT.mac import (mac_grid, momentum_predictor, project, poisson_eigs_neumann,
+from pyRMT.mac import (mac_grid, momentum_predictor, momentum_predictor_lid_imex,
+                       project, poisson_eigs_neumann,
                        divergence)
 from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
     rebuild_phi_from_reference_map, solid_cauchy_stress, smoothed_heaviside,
@@ -48,9 +49,9 @@ def deformation(phi, Xc, Yc, dx, dy):
     return float(D), float(th)
 
 
-def run(N=48, Ca=0.1, model="elastic", tau=np.inf, G_ve=None, mu_f=0.1, U=0.5,
+def run(N=48, Ca=0.1, model="elastic", tau=np.inf, G_ve=None, mu_f=0.02, U=0.5,
         R=0.15, rho=1.0, Lx=2.0, Ly=1.0, t_end=12.0, scheme="semilagrangian_cubic",
-        w_cut_fac=4.0, history=False, return_fields=False):
+        w_cut_fac=4.0, history=False, return_fields=False, imex=True):
     Nx, Ny = int(Lx * N), int(Ly * N)
     dx, dy = mac_grid(Nx, Ny, Lx, Ly)
     gdot = 2.0 * U / Ly
@@ -71,7 +72,10 @@ def run(N=48, Ca=0.1, model="elastic", tau=np.inf, G_ve=None, mu_f=0.1, U=0.5,
     u[:, 0] = 0.0; u[:, -1] = 0.0               # no-slip side walls (normal vel)
     nu = mu_f / rho; cs = np.sqrt(mu_s / rho); w_t = 2.0 * dx
     eig = poisson_eigs_neumann(Nx, Ny, dx, dy)
-    dt = min(0.25 * dx / (abs(U) + 1e-9), 0.2 * dx * dx / nu, 0.25 * dx / (cs + 1e-9))
+    if imex:   # implicit viscosity lifts the viscous CFL -> advection/elastic-wave limited
+        dt = min(0.25 * dx / (abs(U) + 1e-9), 0.25 * dx / (cs + 1e-9))
+    else:
+        dt = min(0.25 * dx / (abs(U) + 1e-9), 0.2 * dx * dx / nu, 0.25 * dx / (cs + 1e-9))
     has_mx = model in ("maxwell", "sls")
     hist = {"t": [], "D": [], "th": []}
     t = 0.0
@@ -109,7 +113,11 @@ def run(N=48, Ca=0.1, model="elastic", tau=np.inf, G_ve=None, mu_f=0.1, U=0.5,
         divy = grad_central_x_2nd(Sxy, dx) + grad_central_y_2nd(Syy, dy)
         fu = np.zeros((Ny, Nx + 1)); fu[:, 1:-1] = 0.5 * (divx[:, 1:] + divx[:, :-1])
         fv = np.zeros((Ny + 1, Nx)); fv[1:-1, :] = 0.5 * (divy[1:, :] + divy[:-1, :])
-        us, vs = momentum_predictor(u, v, nu, dx, dy, dt, U, fu=fu, fv=fv, rho=rho, U_bot=-U)
+        if imex:
+            us, vs = momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U, fu=fu, fv=fv,
+                                                 rho=rho, U_bot=-U)
+        else:
+            us, vs = momentum_predictor(u, v, nu, dx, dy, dt, U, fu=fu, fv=fv, rho=rho, U_bot=-U)
         u, v, p = project(us, vs, dx, dy, dt, rho, eig)
         t += dt
         if not (np.all(np.isfinite(u)) and J.min() > 0):
@@ -134,37 +142,41 @@ def main():
     from _plotstyle import apply as _style; _style()
     import matplotlib.pyplot as plt
 
-    TEND, SCH = 4.0, "semilagrangian"
+    TEND, SCH, NRES = 5.0, "semilagrangian", 128
     # (a) elastic D vs Ca (grid-converged); orientation theta
-    Cas = [0.05, 0.1, 0.15, 0.2, 0.3, 0.4]
-    el = [run(N=48, Ca=c, model="elastic", t_end=TEND, scheme=SCH) for c in Cas]
+    Cas = [0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4]
+    el = [run(N=NRES, Ca=c, model="elastic", t_end=TEND, scheme=SCH) for c in Cas]
     D_el = [r["D"] for r in el]; th_el = [np.degrees(r["th"]) for r in el]
     print("elastic D vs Ca:", [(c, f"{d:.3f}") for c, d in zip(Cas, D_el)])
     # grid convergence at Ca=0.2
     conv = {Nn: run(N=Nn, Ca=0.2, model="elastic", t_end=TEND, scheme=SCH)["D"] for Nn in (32, 48, 64)}
+    # orientation is ill-defined for a near-circular disc (D small -> Ixx~Iyy); mask it
+    th_mask = [d >= 0.08 for d in D_el]
     print("grid conv (Ca=0.2):", {k: f"{v:.4f}" for k, v in conv.items()})
     # (b) viscoelastic (SLS) at Ca=0.2: steady D vs Weissenberg number
     Ca_v = 0.2; gdot = 2 * 0.5 / 1.0
-    Wis = [0.0, 0.25, 0.5, 1.0, 2.0]
+    Wis = [0.0, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0]
     ve = []
     for Wi in Wis:
         tau = np.inf if Wi == 0 else Wi / gdot
         # SLS with G=mu_s(Ca_v); Wi=0 is the elastic limit (tau->inf handled by model)
         m = "elastic" if Wi == 0 else "sls"
-        ve.append(run(N=48, Ca=Ca_v, model=m, tau=(np.inf if Wi == 0 else tau), t_end=TEND, scheme=SCH)["D"])
+        ve.append(run(N=NRES, Ca=Ca_v, model=m, tau=(np.inf if Wi == 0 else tau), t_end=TEND, scheme=SCH)["D"])
     print("SLS D vs Wi (Ca=0.2):", [(w, f"{d:.3f}") for w, d in zip(Wis, ve)])
 
     fig, ax = plt.subplots(1, 2, figsize=(10.6, 4.2))
-    ax[0].plot(Cas, D_el, "o-", color="C0", label="RMT (elastic disc)")
+    ax[0].plot(Cas, D_el, "o-", color="b", lw=1.4, label="RMT (elastic disc)")
     ax[0].plot([0, max(Cas)], [0, max(Cas)], "k--", lw=1, label=r"linear limit $D=\mathrm{Ca}$")
     ax[0].set_xlabel(r"$\mathrm{Ca}=\mu_f\dot\gamma/G$"); ax[0].set_ylabel(r"deformation $D=(a-b)/(a+b)$")
-    ax[0].set_title("(a) elastic disc in shear"); ax[0].legend(loc="upper left")
+    ax[0].set_title("(a) elastic disc in shear"); ax[0].legend(loc="lower right", frameon=False)
     axr = ax[0].twinx()
-    axr.plot(Cas, th_el, "s:", color="C3", ms=4, alpha=0.8)
-    axr.set_ylabel(r"orientation $\theta$ (deg)", color="C3"); axr.set_ylim(0, 50)
-    axr.axhline(45, ls=":", color="C3", lw=0.7)
+    Cm = [c for c, mk in zip(Cas, th_mask) if mk]
+    Tm = [t for t, mk in zip(th_el, th_mask) if mk]
+    axr.plot(Cm, Tm, "s:", color="r", ms=4, alpha=0.85)
+    axr.set_ylabel(r"orientation $\theta$ (deg)", color="r"); axr.set_ylim(0, 50)
+    axr.axhline(45, ls=":", color="r", lw=0.7)
 
-    ax[1].plot(Wis, ve, "^-", color="C1")
+    ax[1].plot(Wis, ve, "^-", color="g", lw=1.4)
     ax[1].set_xlabel(r"$\mathrm{Wi}=\dot\gamma\,\tau$")
     ax[1].set_ylabel(r"steady $D$ at $\mathrm{Ca}=0.2$")
     ax[1].set_title("(b) viscoelastic (SLS) disc")
@@ -174,6 +186,8 @@ def main():
     fig.tight_layout()
     data = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
     os.makedirs(data, exist_ok=True)
+    np.savez(os.path.join(data, "disc_in_shear_data.npz"), Cas=Cas, D_el=D_el, th_el=th_el,
+             th_mask=th_mask, Wis=Wis, ve=ve)
     out = os.path.join(data, "disc_in_shear.png"); fig.savefig(out); print("saved", out)
     return dict(Cas=Cas, D_el=D_el, th_el=th_el, conv=conv, Wis=Wis, ve=ve)
 

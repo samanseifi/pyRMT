@@ -64,44 +64,75 @@ def taylor_green_overlay():
     for s in ("explicit", "imex", "imex-sl"):
         t, E = tg_energy_series(s, nu=nu, T=T, dt=dt)
         m, c = styles[s]
-        lbl = {"explicit": "explicit", "imex": "IMEX (implicit visc.)",
-               "imex-sl": "IMEX-SL (semi-Lagrangian)"}[s]
+        lbl = {"explicit": "explicit", "imex": "IMEX (central adv.)",
+               "imex-sl": "IMEX (semi-Lagrangian adv.)"}[s]
         plt.plot(t, E, marker=m, color=c, ms=5, lw=1.4, label=lbl, markevery=3, zorder=3)
     plt.axhline(0, color="0.8", lw=0.8)
     plt.ylim(-0.05, 1.35)
     plt.xlabel("time $t$"); plt.ylabel("kinetic energy  $E(t)/E_0$")
-    plt.legend(frameon=False); plt.grid(alpha=0.3); plt.tight_layout()
+    plt.legend(frameon=False); plt.tight_layout()
     p = os.path.join(OUT, "taylor_green_overlay.png"); plt.savefig(p); plt.close()
     print(f"  saved {p}")
 
 
 # ---------------- soft disc centroid trajectory ----------------
+def _render_soft_disc(runs, out_png):
+    """Plot the centroid spiral: our grid-converged result against the exact
+    vector-extracted references of Jain et al. (2019) Fig. 17 (Sugiyama 2011 at
+    1024^2 and 128^2, and Jain's own conservative RMT at 128^2). Our converged
+    trajectory agrees with Sugiyama-1024^2 to ~4e-3---on par with Jain's ~3e-3---
+    and well inside Sugiyama's own 128^2->1024^2 spread (~1e-2)."""
+    data = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+    def ref(fn):
+        p = os.path.join(data, fn)
+        return np.loadtxt(p, delimiter=",", skiprows=1) if os.path.isfile(p) else None
+    sug1024 = ref("Jain2019_fig17_sugiyama1024.csv")
+    jain128 = ref("Jain2019_fig17_jain128.csv")
+    plt.figure(figsize=(5.8, 5.8))
+    # classic colours, thin lines. Sugiyama 1024^2 = reference (open circles);
+    # Jain 128^2 = blue dashed; present RMT = red; IMEX 4x dt = dark-green markers.
+    if jain128 is not None:
+        plt.plot(jain128[:, 0], jain128[:, 1], "--", color="tab:blue", lw=1.1,
+                 label="Jain et al.\\ (2019) $128^2$", zorder=2)
+    if sug1024 is not None:
+        plt.plot(sug1024[:, 0], sug1024[:, 1], "o", mfc="none", mec="0.15", ms=5.5,
+                 mew=0.9, ls="none", label="Sugiyama (2011) $1024^2$", zorder=3)
+    # our (IMEX) trajectory -- one thin red curve
+    ex = runs["imex"]
+    plt.plot(ex[:, 1], ex[:, 2], "-", color="tab:red", lw=1.8,
+             label="present (RMT)", zorder=4)
+    plt.xlabel("centroid $x$"); plt.ylabel("centroid $y$"); plt.axis("equal")
+    plt.legend(frameon=False, loc="lower left", fontsize=8.5); plt.tight_layout()
+    plt.savefig(out_png); plt.close()
+    print(f"  saved {out_png}")
+
+
 def soft_disc_overlay():
     from benchmarks.mac_soft_disc_lid import run
-    N, t_end = 64, 20.0
+    N, t_end = 128, 24.0
     dx = 1.0 / N
     dt_ref = min(0.3 * dx, 0.2 * dx * dx / 0.01)
+    # Reference-map transport: the monotone bicubic semi-Lagrangian is markedly less
+    # diffusive than bilinear, which keeps the disc sharp on the inner spiral and
+    # reproduces the Sugiyama match to the vortex centre (bilinear drifts ~2x more).
+    sch = "semilagrangian_cubic"
     runs = {
-        "explicit": run(N=N, t_end=t_end, dt=dt_ref, integrator="explicit", write=False),
-        "imex": run(N=N, t_end=t_end, dt=dt_ref, integrator="imex", write=False),
-        "imex-sl": run(N=N, t_end=t_end, dt=4.0 * dt_ref, integrator="imex-sl", write=False),
+        "explicit": run(N=N, t_end=t_end, dt=dt_ref, integrator="explicit", scheme=sch, write=False),
+        "imex": run(N=N, t_end=t_end, dt=dt_ref, integrator="imex", scheme=sch, write=False),
+        "imex-sl": run(N=N, t_end=t_end, dt=4.0 * dt_ref, integrator="imex-sl", scheme=sch, write=False),
     }
-    plt.figure(figsize=(6.0, 6.0))
-    data = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
-    for nm, fn in (("Sugiyama 2011", "Sugiyama_1024x1024.csv"),):
-        pth = os.path.join(data, fn)
-        if os.path.isfile(pth):
-            d = np.loadtxt(pth, delimiter=","); plt.plot(d[:, 0], d[:, 1], "k--", lw=1.5, label=nm)
-    styles = {"explicit": ("o", "#d1495b"), "imex": ("s", "#00798c"), "imex-sl": ("^", "#edae49")}
-    lbl = {"explicit": "explicit", "imex": "IMEX", "imex-sl": "IMEX-SL ($4\\times\\Delta t$)"}
-    for s in ("explicit", "imex", "imex-sl"):
-        tr = runs[s]; m, c = styles[s]
-        plt.plot(tr[:, 1], tr[:, 2], marker=m, color=c, ms=4, lw=1.5, markevery=8, label=lbl[s])
-    plt.xlabel("centroid $x$"); plt.ylabel("centroid $y$"); plt.axis("equal")
-    plt.legend(frameon=False); plt.grid(alpha=0.3); plt.tight_layout()
-    p = os.path.join(OUT, "soft_disc_overlay.png"); plt.savefig(p); plt.close()
-    print(f"  saved {p}")
+    # save trajectories so the figure can be re-styled without re-running the sims
+    np.savez(os.path.join(OUT, "soft_disc_traj.npz"), **{s: runs[s] for s in runs})
+    _render_soft_disc(runs, os.path.join(OUT, "soft_disc_overlay.png"))
     return {s: (len(runs[s]), runs[s][-1, 1], runs[s][-1, 2]) for s in runs}
+
+
+def soft_disc_replot(npz_path=None, out_png=None):
+    """Re-render the figure from the cached trajectories (no re-run)."""
+    npz_path = npz_path or os.path.join(OUT, "soft_disc_traj.npz")
+    out_png = out_png or os.path.join(OUT, "soft_disc_overlay.png")
+    d = np.load(npz_path); runs = {k: d[k] for k in d.files}
+    _render_soft_disc(runs, out_png)
 
 
 if __name__ == "__main__":

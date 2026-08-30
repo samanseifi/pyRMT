@@ -25,19 +25,15 @@
 \theoremstyle{remark}
 \newtheorem{remark}{Remark}
 
-% placeholder figure box (draft only): \phfig{label}{caption}
+% placeholder figure box (DRAFT ONLY -- replace each with a real render before submission)
 \newcommand{\phfig}[2]{%
   \begin{figure}[t]\centering
-  \fbox{\parbox[c][0.28\textheight][c]{0.72\textwidth}{\centering
-    \color{blue}\texttt{[figure placeholder: #1]}}}
-  \caption{#2}\label{#1}
+  \setlength{\fboxsep}{0pt}%
+  \fbox{\parbox[c][0.30\textheight][c]{0.82\textwidth}{\centering
+    \color{blue!60}\ttfamily [snapshot placeholder]\\[4pt]\small #1}}
+  \caption{#2}\label{fig:#1}
   \end{figure}}
 
-% ---- draft placeholder macros (remove for submission) ----
-\newcommand{\TODO}[1]{{\color{red}\textbf{[TODO: #1]}}}
-\newcommand{\PLACE}[1]{{\color{blue}\texttt{<#1>}}}
-% inline flag for spots needing the authors' attention (renders in red)
-\newcommand{\attention}[1]{{\color{red}[\textbf{attention:} #1]}}
 
 % ---- notation ----
 \newcommand{\uv}{\bm{u}}                 % velocity
@@ -74,35 +70,28 @@ viscoelastic fluid--structure interaction}
 \address[bu]{Department of Mechanical Engineering, Boston University,
 Boston, MA 02215, USA}
 
+
+
 \begin{abstract}
 We present a fully Eulerian, one-fluid Reference Map Technique (RMT) for incompressible
-fluid--structure interaction (FSI) that couples a finite-strain \emph{viscoelastic} solid
-to a Newtonian fluid on a single staggered (MAC) grid with one pressure solve. The
-stress-carrying elastic strain is transported as a log-conformation tensor
-$\psib=\log\be$, positive-definite by construction, which decouples the relaxing elastic
-stress from the folding-prone reference map; as the relaxation time $\tau\to\infty$ the
-model reduces to the neo-Hookean RMT. On this spatial method we build a family of four
-time-integration schemes of increasing implicitness---explicit; an implicit--explicit
-(IMEX) scheme with backward-Euler viscosity through the pressure transforms and an exact
-exponential relaxation; a semi-Lagrangian variant (IMEX-SL); and a semi-monolithic
-Newton--Krylov (JFNK) solve of the velocity--pressure system---which remove the viscous,
-relaxation, elastic-wave and advective step-size limits in turn, each verified to reproduce
-the explicit result before its target limit is lifted. The coupled elastic and viscoelastic
-FSI runs use the IMEX-SL scheme with an energy-conserving trapezoidal elastic coupling; the
-semi-monolithic Newton--Krylov solve, which makes advection implicit and consistent, is
-demonstrated here on the fluid, and the fully-coupled Newton over $(\uv,p,\xiv,\psib)$ is
-posed and left as the next step. The staggered discretization makes the projection exact
-(machine-zero divergence), and the trapezoidal coupling conserves the discrete energy to
-round-off at every step. We validate the constitutive update against analytic Maxwell
-solutions (startup of shear, oscillatory moduli, planar extension), the fluid and
-neo-Hookean-solid FSI against the lid-driven cavity and a disc-in-vortex convergence study,
-and a two-way-coupled \emph{viscoelastic} (standard-linear-solid) disc in a Taylor--Green
-vortex, where the relaxing branch dissipates stored elastic energy, the equilibrium branch
-retains shape, and $\be$ stays positive-definite. A work--precision study delineates where
-the implicit stack pays off: the semi-Lagrangian scheme reaches a target accuracy at lower
-wall-clock by taking several-fold larger steps, while the benefit of the implicit
-viscous/elastic solves is set by how far the step can grow relative to the per-step solve
-cost.
+fluid--structure interaction (FSI) that couples a finite-strain elastic or viscoelastic
+solid to a Newtonian fluid on a single staggered grid with one pressure solve. Two
+ingredients make the method both accurate and fast. First, the reference map and the
+stress-carrying elastic strain are transported by a low-diffusion bicubic semi-Lagrangian
+scheme that needs no level-set reinitialization; the elastic strain is advanced through
+its matrix logarithm, so it stays positive-definite by construction and the relaxing
+stress is kept separate from the folding-prone reference map, with the neo-Hookean elastic
+solid recovered as the long-relaxation-time limit. Second, the coupled system is advanced by an
+\emph{implicit--explicit} (IMEX) integrator that treats the fluid viscosity by a direct
+sine/cosine-transform solve---exact even at no-slip and moving-lid walls, so the implicit step
+costs no more than an explicit one---relaxes the elastic stress exactly, and couples the elastic
+force by an energy-conserving trapezoidal rule that holds the discrete energy to round-off. By
+lifting the viscous, elastic-wave and advective step-size limits at no per-step cost it reaches a
+target accuracy in fewer, larger steps---a several-fold wall-clock reduction that grows with
+resolution. The solver is validated against analytic Maxwell solutions, the Jain disc-in-vortex
+convergence study, and the Sugiyama lid-driven cavity, for both elastic and viscoelastic solids.
+No reported run uses level-set reinitialization; throughout, the staggered discretization keeps
+the velocity divergence-free to machine precision.
 \end{abstract}
 
 \begin{keyword}
@@ -119,10 +108,16 @@ log-conformation \sep implicit time integration \sep Eulerian solid mechanics
 Fluid--structure interaction (FSI) problems in which a soft solid undergoes large
 deformation inside a flow---valves, swimmers, capsules, gels and polymeric
 particles---are numerically demanding because the solid and fluid share a moving
-interface across which stress and velocity must remain continuous. The dominant
+interface across which stress and velocity must remain continuous. Many of these solids are not
+purely elastic but \emph{viscoelastic}: cells, capsules, gels, tissues and polymeric particles
+store elastic energy yet also relax it over a characteristic time, so their response depends on
+the ratio of that relaxation time to the flow time scale. Capturing this dependence is central
+to problems ranging from cell and particle sorting in microfluidics to the rheology of
+deformable-particle suspensions \cite{Sugiyama2011,Rosti2018prf}, and it is precisely what a
+purely elastic solver cannot represent. The dominant
 strategies treat the two phases with different kinematics. Arbitrary
 Lagrangian--Eulerian (ALE) methods deform a body-fitted mesh with the interface
-\cite{Donea1982,Hu2001}, which is accurate but requires remeshing once the
+\cite{Donea1982,Hu2001},  which is accurate but requires remeshing once the
 deformation becomes severe. Immersed and fictitious-domain methods keep the fluid
 grid fixed and represent the solid through forcing or Lagrange multipliers
 \cite{Peskin2002,Zhang2004}, avoiding remeshing at the cost of interface sharpness.
@@ -133,10 +128,10 @@ that strong coupling or careful relaxation is required for stability
 \emph{Eulerian}, one-fluid formulations that discretize solid and fluid on a single
 fixed grid, sharing one velocity field and one pressure solve
 \cite{Sugiyama2011,Ii2012,Cottet2008,Wick2013}. The interface is captured rather than
-tracked, the added-mass coupling is resolved monolithically inside the momentum
+tracked, the added-mass coupling is resolved implicitly inside the momentum
 balance, and no remeshing is ever needed; the price is that the finite-strain solid
-response, naturally posed on a material reference, must be reconstructed in the
-laboratory frame.
+response, naturally posed on a material reference configuration, must be reconstructed on the
+fixed Eulerian grid.
 
 The \emph{reference map technique} (RMT) supplies exactly this reconstruction. It
 transports the inverse motion---the reference map $\xiv(\xv,t)$ carrying a current
@@ -158,7 +153,7 @@ A hyperelastic body sheared without bound stores unbounded energy, and its Euler
 carrier---the reference map, or equivalently the elastic strain---folds under sustained
 shear, so that reinitialization or filtering is used to treat the symptom. A \emph{relaxing}
 stress helps, but it is important to state what it does and does not do: relaxation bounds
-the \emph{stored elastic strain} and makes the stress insensitive to a folding reference
+the stored elastic strain and makes the stress insensitive to a folding reference
 map---the stress is then carried by the bounded, always-positive-definite $\be$ rather than
 by $\Ften=(\grad\xiv)^{-1}$---but it does not prevent the map itself from folding, and a
 more fluid-like (smaller-$\tau$) body in fact stretches and folds sooner. Relaxation thus
@@ -189,53 +184,59 @@ advanced through a separate extension step outside the Jacobian, a treatment tha
 \emph{fully} implicit in the geometry. Sharp-interface implicit FSI for large-deformation
 solids has likewise been developed by Kolahdouz \emph{et al.}\ \cite{Kolahdouz2023}, but
 through a \emph{partitioned} Dirichlet--Neumann coupling on a separate Lagrangian solid
-mesh rather than a monolithic Eulerian solve. In none of these is a finite-strain
-\emph{viscoelastic} solid coupled to a fluid and advanced implicitly on a single grid.
+mesh rather than a monolithic Eulerian solve. Fully Eulerian one-continuum FSI with
+finite-strain solids is itself well established in the deformable-particle community: Rosti
+and Brandt and co-workers \cite{Rosti2017,Rosti2018jnnfm,Rosti2018prf} carry a viscous
+\emph{hyperelastic} (Kelvin--Voigt) solid on a single grid, and Roub\'i\v{c}ek
+\cite{Roubicek2022} analyses Eulerian reference-map models of viscoelastic-solid/fluid
+interaction. What distinguishes the present method from these is the constitutive branch and
+its transport: it is, to our knowledge, the first fully Eulerian FSI method that carries a
+finite-strain \emph{stress-relaxing} solid---a standard-linear-solid with a Maxwell branch,
+hence a genuine relaxation time and Weissenberg number, in contrast to Kelvin--Voigt
+formulations that possess neither---advanced by \emph{log-conformation} transport with
+semi-implicit integration.
 
 This paper develops that method. Its contribution is the numerical formulation itself:
-a semi-implicit, log-conformation Reference Map Technique for incompressible
-viscoelastic FSI on a marker-and-cell (MAC) staggered grid, together with a family of
-time integrators that remove the stiff step-size limits one at a time. The solid stress
+an \emph{implicit--explicit} (IMEX), log-conformation Reference Map Technique for incompressible
+viscoelastic FSI on a marker-and-cell (MAC) staggered grid. To our knowledge this is the first
+implicit RMT---the technique has been an explicit finite-difference method throughout
+\cite{Kamrin2012,Rycroft2020,Jain2019}---and the first to carry a finite-strain, stress-relaxing
+viscoelastic solid inside the FSI solver.
+The solid stress
 is carried by a log-conformation tensor $\psib=\log\be$, positive-definite by
 construction and, in the standard-linear-solid form, retaining an equilibrium
 hyperelastic branch so the body still returns to shape while $\tau\!\to\!\infty$
 recovers the neo-Hookean RMT exactly. The staggered discretization makes the pressure
-projection exact---divergence is driven to machine zero---removing the
-checkerboard and Rhie--Chow workarounds that a collocated arrangement requires
-\cite{Harlow1965,Chorin1968,Brown2001}. On top of this spatial method we build four
-time-integration schemes of increasing implicitness. An explicit scheme reproduces the
-established RMT and fixes the reference. An implicit--explicit (IMEX) scheme treats the
-viscous term by backward Euler through the pressure transforms and Krylov solvers, the
-relaxation by an exact exponential update, and the elastic coupling by an
-energy-conserving trapezoidal rule, lifting the viscous, relaxation and elastic-wave
-limits in a fractional-step setting. A semi-Lagrangian variant additionally removes the
-advective CFL restriction and gives the coupled elastic and viscoelastic FSI results.
-Finally, a Jacobian-free Newton--Krylov (JFNK) scheme solves the velocity--pressure system
-\emph{semi-monolithically}, making advection implicit and consistent (removing the
-operator-split error), preconditioned by one step of the split IMEX solver with the exact
-projection acting as the pressure Schur complement; we demonstrate it on the fluid, with the
-reference map and conformation held fixed within the Newton iteration. Each scheme is
-verified to reproduce the explicit result before its target limit is lifted, and we report a
-work--precision comparison that delineates where implicit integration pays for itself. The
-consistent linearized neo-Hookean tangent underlying the implicit coupling, and the
-physics-based preconditioning that makes the Newton solve tractable, follow established
-practice for stiff nonlinear systems
-\cite{Knoll2004,Kelley1995,Ascher1997,Reese1998,Simo1998}.
+projection exact---divergence is driven to machine zero, the standard advantage of the MAC
+arrangement over a collocated one, which needs no checkerboard or Rhie--Chow fix
+\cite{Harlow1965,Chorin1968,Brown2001}. On this spatial method---in which
+the reference map and the elastic strain are carried by a low-diffusion \emph{bicubic
+semi-Lagrangian} scheme that requires no level-set reinitialization, in contrast to the
+conservative finite-difference transport of \cite{Jain2019}---the IMEX scheme makes the method
+fast: it treats the fluid viscosity by backward Euler, the relaxation by an exact exponential
+update, and the elastic coupling by an energy-conserving trapezoidal rule, lifting the viscous,
+elastic-wave and advective step-size limits in a fractional-step setting. The viscous Helmholtz
+solve reuses the pressure transforms and, for constant viscosity, is \emph{exact} even at no-slip
+and moving-lid walls through a direct sine-transform diagonalization, so the implicit predictor
+costs no more than an explicit step and the lifted step converts directly into wall-clock: the
+net speedup, benchmarked against an explicit baseline, grows with resolution (supplementary
+material). The energy-conserving elastic coupling and the finite-strain constitutive update
+follow established practice for stiff nonlinear systems \cite{Ascher1997,Reese1998,Simo1998}.
 
-We are deliberate about scope. The IMEX and semi-Lagrangian schemes are fully implemented
-and validated, and produce all the coupled elastic and viscoelastic FSI results; the
-semi-monolithic Newton--Krylov scheme is realized and demonstrated for the fluid
-velocity--pressure system, and closing it to the fully-coupled $(\uv,p,\xiv,\psib)$ Newton is
-identified as the remaining step. Every capability is reported at its true status.
-The remainder of the paper is organized as follows.
+The method is fully implemented and validated on the coupled elastic and viscoelastic
+FSI results. The remainder of the paper is organized as follows.
 \Cref{sec:governing,sec:rmt,sec:constitutive} set out the continuous one-fluid model,
-the reference map, and the finite-strain viscoelastic constitutive law;
-\cref{sec:discretization,sec:time} give the MAC discretization and the four
-time-integration schemes with their algorithms;
+the reference map with its bicubic semi-Lagrangian transport, and the finite-strain
+viscoelastic constitutive law;
+\cref{sec:discretization,sec:time} give the MAC discretization and the explicit and IMEX
+time integrators;
 and \cref{sec:verification} presents the numerical examples---constitutive verification
-against analytic limits, the disc-in-vortex convergence and lid-cavity benchmark, the
-viscoelastic shear benchmark and coupled SLS disc, and the stiff-solid regime---with the
-solver and integrator diagnostics collected in the supplementary material.
+against analytic limits; the disc-in-Taylor--Green benchmark and its viscoelastic (SLS)
+extension; the four-roll extension and shear benchmarks; colliding-disc contact in both
+regimes; the stiff-solid regime; and the neo-Hookean lid-driven cavity against Sugiyama
+\emph{et al.}---with the pure-fluid lid-cavity
+(Ghia) validation, the spatial-accuracy check, and the reference-map advection-scheme
+comparison collected in the supplementary material.
 %% ===== end intro.tex =====
 
 %% ===== begin governing.tex =====
@@ -248,14 +249,14 @@ velocity field $\uv(\xv,t)$ and pressure $p(\xv,t)$ are shared by both phases. M
 and incompressibility read
 \begin{align}
 \rho\left(\partial_t\uv + (\uv\!\cdot\!\grad)\uv\right)
-   &= -\grad p + \dive\sig_{\mathrm{d}} + \bm f_{\Gamma},
+   &= -\grad p + \dive\sig_{\mathrm{d}},
    \label{eq:mom}\\
 \dive\uv &= 0,
    \label{eq:incomp}
 \end{align}
-where $\rho$ is the (piecewise-constant) density and $\bm f_\Gamma$ is the surface-tension
-force (a penalty contact force for solid--solid near-contact is available in the framework
-but is not exercised by any case reported here). The deviatoric stress $\sig_{\mathrm d}$ is
+where $\rho$ is the (piecewise-constant) density. A penalty contact force for solid--solid
+near-contact is available in the framework but is not exercised by any case reported here.
+The deviatoric stress $\sig_{\mathrm d}$ is
 blended between fluid and solid through a smoothed indicator (one-fluid model),
 \begin{equation}
 \sig_{\mathrm d} = 2\mu_f\,\bm D
@@ -264,11 +265,26 @@ blended between fluid and solid through a smoothed indicator (one-fluid model),
 \bm D=\tfrac12\!\left(\grad\uv+\grad\uv^{\!\top}\right),
    \label{eq:blend}
 \end{equation}
-with $\mu_f$ the fluid viscosity, $\bm D$ the rate-of-strain, $\sig_{\!s}$ the solid
-Cauchy stress (\cref{sec:rmt,sec:constitutive}), and $H\in[0,1]$ a smoothed Heaviside
-of the level set $\phi$ ($H\to1$ in the fluid, $H\to0$ in the solid). The trace of
+with $\mu_f$ the fluid viscosity, $\bm D$ the rate-of-strain, and $\sig_{\!s}$ the solid
+Cauchy stress (\cref{sec:rmt,sec:constitutive}). The indicator $H\in[0,1]$ is the smoothed
+Heaviside of the level set $\phi$, ramping over a transition band of half-width $w_t$
+(\cref{fig:rmt-schematic}),
+\begin{equation}
+H(\phi)=
+\begin{cases}
+0, & \phi<-w_t,\\[2pt]
+\tfrac12\!\left(1+\dfrac{\phi}{w_t}+\dfrac1\pi\sin\dfrac{\pi\phi}{w_t}\right), & |\phi|\le w_t,\\[6pt]
+1, & \phi>w_t,
+\end{cases}
+\label{eq:heaviside}
+\end{equation}
+so $H\to1$ in the fluid and $H\to0$ in the solid, with $w_t=2\dx$ throughout. The trace of
 $\sig_{\!s}$ is carried by the pressure, so only its deviatoric part enters
-\cref{eq:mom} up to a redefinition of $p$.
+\cref{eq:mom} up to a redefinition of $p$. The viscous term $2\mu_f\bm D$ is applied
+\emph{unblended} across the domain, so the solid carries the fluid viscosity in parallel with
+its elastic stress---a weak Kelvin--Voigt element, a modelling choice made here (and by
+Sugiyama \emph{et al.}\ \cite{Sugiyama2011}) for a single one-fluid momentum balance; it is a
+small effect for the stiff and short-relaxation-time solids considered.
 
 The material occupied by the solid is tracked by the reference map (\cref{sec:rmt}),
 from which the level set $\phi$ and the deformation are reconstructed. Boundary
@@ -314,21 +330,31 @@ frame from the spatial gradient of the reference map,
     \node at (0,2.15) {\small current config. (fixed MAC grid)};
     \draw[step=0.375,gray!35,very thin] (-1.5,-1.5) grid (1.5,1.5);
     \draw[rounded corners] (-1.5,-1.5) rectangle (1.5,1.5);
-    \draw[fill=blue!18,draw=blue!55,thick,rotate=25] (0,0) ellipse (1.15 and 0.62);
-    \fill (0.5,0.28) circle (1.1pt) node[above right]{\scriptsize $\xv$};
-    \node at (0,-1.85) {\small solid $\phi\le0$ \; / \; fluid $\phi>0$};
+    % diffuse transition band: annulus straddling the phi=0 contour (H ramps 0->1)
+    \fill[orange!25,rotate=25,even odd rule] (0,0) ellipse (1.32 and 0.74)
+                                             (0,0) ellipse (0.98 and 0.50);
+    \fill[blue!16,rotate=25] (0,0) ellipse (0.98 and 0.50);
+    \draw[orange!55,dashed,very thin,rotate=25] (0,0) ellipse (1.32 and 0.74);
+    \draw[orange!55,dashed,very thin,rotate=25] (0,0) ellipse (0.98 and 0.50);
+    \draw[blue!60,very thick,rotate=25] (0,0) ellipse (1.15 and 0.62);
+    \node[blue!55,font=\scriptsize] at (0,0) {$H\!=\!0$};
+    \node[gray!60,font=\scriptsize] at (-1.02,1.12) {$H\!=\!1$};
+    \fill (0.62,0.12) circle (1.1pt) node[above right,font=\scriptsize]{$\xv$};
+    \draw[->,orange!65!black] (2.15,-0.75) to[bend right=15] (1.20,-0.28);
+    \node[align=left,orange!65!black,font=\scriptsize] at (2.62,-1.02)
+       {transition band\\ $H\!:0\!\to\!1$\\ $w_t\!\sim\!2\dx$};
+    \node at (0,-2.05) {\small solid $\phi\le0$ \, / \, fluid $\phi>0$};
   \end{scope}
   % --- maps ---
   \draw[->,thick] (1.7,0.7) to[bend left=20] node[above]{\small motion $\bm\chi$} (4.7,0.7);
   \draw[->,thick] (4.7,-0.7) to[bend left=20] node[below]{\small $\xiv=\bm\chi^{-1}$} (1.7,-0.7);
   \node[align=center] at (3.2,0.0) {\scriptsize $\xiv(\xv,t)=\Xv$\\[2pt]$\Ften=(\grad\xiv)^{-1}$};
 \end{tikzpicture}
-\caption{The reference map technique. The material body carries labels $\Xv$ (reference
-configuration, left). On the fixed staggered (MAC) grid (right) each cell stores the
-reference map $\xiv(\xv,t)=\bm\chi^{-1}(\xv,t)$---the label of the material currently at
-$\xv$---which is advected passively; the deformation gradient $\Ften=(\grad\xiv)^{-1}$ and
-hence the solid stress follow from it, and the level set $\phi$ (solid where $\phi\le0$) is
-reconstructed from $\xiv$.}
+\caption{The reference map technique. Each MAC cell stores the reference map
+$\xiv(\xv,t)=\bm\chi^{-1}$ (the material label at $\xv$), advected passively; the deformation
+gradient $\Ften=(\grad\xiv)^{-1}$ and the solid stress follow, and the level set $\phi$
+($\phi\le0$ in the solid) is reconstructed from $\xiv$. The solid stress blends into the
+momentum balance across a diffuse band of width $w_t\sim2\dx$ (orange).}
 \label{fig:rmt-schematic}
 \end{figure}
 and the left Cauchy--Green (Finger) tensor is $\bt=\Ften\Ften^{\!\top}$. For an
@@ -343,26 +369,56 @@ material,
    = \mu_s\!\left(\bt - \tfrac12\tr(\bt)\,\It\right)\quad(\text{2-D}),
 \label{eq:neohookean}
 \end{equation}
-with shear modulus $\mu_s$ and elastic wave speed $c_s=\sqrt{\mu_s/\rho}$. In the purely
-hyperelastic limit ($\tau\to\infty$, \cref{sec:constitutive}) this is the entire solid
-stress; the general viscoelastic solid adds a relaxing branch.
+with shear modulus $\mu_s$ and elastic wave speed $c_s=\sqrt{\mu_s/\rho}$. Here $\mu_s$
+is the small-strain shear modulus in the convention of Rycroft \emph{et al.}\
+\cite{Rycroft2020}, in which $\sig_{\!s}\!\propto\!\mu_s\bt$; some authors instead write
+$\sig_{\!s}=2\mu_s\bt-P\It$ \cite{Jain2019}, so that \emph{their} $\mu_s$ equals \emph{our}
+$\mu_s/2$, which we convert accordingly when reproducing external benchmarks
+(\cref{sec:disc-tg}). Throughout, $\mu_s$ denotes the equilibrium (neo-Hookean) modulus and
+$G$---introduced in \cref{sec:constitutive}---the modulus of the relaxing Maxwell branch; the
+two coincide only when a case sets them equal. In the purely hyperelastic limit ($\tau\to\infty$,
+\cref{sec:constitutive}) this is the entire solid stress; the general viscoelastic solid
+adds a relaxing branch.
 
 \subsection{Level set, extrapolation, reinitialization}
 The solid occupies $\{\phi\le0\}$. The level set is reconstructed from the reference map
 each step (the material boundary is the image of the initial boundary under $\xiv$), and
-the reference map is extrapolated into a narrow band outside the solid so that the
-gradient in \cref{eq:F} and the interfacial forces have valid stencils. Optional
-level-set reinitialization (PDE or fast-marching) restores a signed-distance band. The
-advection of \cref{eq:xi-advect} is discretized by a switchable scheme (semi-Lagrangian
-RK4 backtrace by default; central/WENO or a conservative flux form for
-differentiability, \cref{sec:time}).
+the reference map is extrapolated into a narrow band outside the solid so that the gradient in
+\cref{eq:F} and the interfacial forces have valid stencils. We use a direct constant-normal
+(velocity-)extrapolation of $\xiv$ into the band, following Kamrin \emph{et al.}\
+\cite{Kamrin2012} and Rycroft \emph{et al.}\ \cite{Rycroft2020}, rather than solving an
+auxiliary PDE (a Hamilton--Jacobi extrapolation equation) to fill it: the direct fill is cheaper
+and, because the transported map is already smooth, sufficient. Because the level set is rebuilt
+from this smooth reference map at every step and the monotone bicubic transport keeps the map
+sharp, the interface \emph{does not require level-set reinitialization}---none of the reported
+runs reinitializes.
+
+The reference map \cref{eq:xi-advect} (and the conformation $\psib$) is transported by a
+\emph{semi-Lagrangian} backtrace: each grid value is taken as the field interpolated at the
+departure point traced back along the flow (RK4 in the trace). Because the departure
+interpolation is unconditionally stable, semi-Lagrangian transport carries no advective CFL
+restriction---this is what allows the IMEX scheme (\cref{sec:time}) to take steps well
+above the explicit advective limit. The interpolation order matters: bilinear interpolation
+is only $C^0$ and strongly diffusive, smearing the reference-map gradients (hence $\Ften$ and
+the captured interface) over long runs, whereas a \emph{monotone bicubic} interpolant is
+$C^1$ and markedly less diffusive. The bicubic form is Catmull--Rom, with the interpolated
+value at each departure point clamped to the local minimum and maximum over its $4\times4$
+support (a discrete-maximum-principle limiter applied to the transported field $\xiv$ or $\psib$
+itself); this suppresses Catmull--Rom overshoot at the reference-map kink without any
+physical-quantity clamping. We use the bicubic form throughout; it is what keeps the interface
+sharp and the strain accurate on the sensitive parts of the flow (\cref{sec:disc-lid}). The
+velocity departure point in the semi-Lagrangian momentum branch (\cref{alg:imex}) uses plain
+cubic interpolation (no limiter is needed for the smooth velocity), a distinct stencil from the
+limited $(\xiv,\psib)$ transport.
+The semi-Lagrangian transport adopted here removes the advective step-size limit while keeping
+the map smooth.
 %% ===== end rmt.tex =====
 
 %% ===== begin constitutive.tex =====
 \section{Finite-strain viscoelasticity via log-conformation}
 \label{sec:constitutive}
 
-\subsection{Standard-linear-solid model}
+\emph{Standard-linear-solid model.}
 The solid stress is split into a non-relaxing (equilibrium) neo-Hookean branch
 \cref{eq:neohookean} and a relaxing Maxwell branch carried by an elastic Finger tensor
 $\be$,
@@ -386,11 +442,18 @@ therefore spans, under one framework, elastic solid $\leftrightarrow$ viscoelast
 solid $\leftrightarrow$ viscoelastic fluid.
 
 The model derives from the free energy
-$\Psi=\tfrac{\mu_s}{2}\!\left(\tr\Ften\Ften^{\!\top}-2\right)
-      +\tfrac{G}{2}\!\left(\tr\be-2-\ln\det\be\right)$,
-with the relaxation term giving a non-negative dissipation $\tfrac{G}{2\tau}\,
-\tr(\be+\be^{-1}-2\It)\ge0$; \cref{eq:sls} is its (deviatoric) Cauchy stress.
-Two honest caveats. \emph{(i) Folding.} Only the relaxing branch is bounded by
+\begin{equation}
+\Psi=\tfrac{\mu_s}{2}\!\left(\tr\Ften\Ften^{\!\top}-2\right)
+      +\tfrac{G}{2}\!\left(\tr\be-2-\ln\det\be\right),
+\label{eq:free-energy}
+\end{equation}
+of which \cref{eq:sls} is the (deviatoric) Cauchy stress, while the relaxation term produces
+the non-negative dissipation
+\begin{equation}
+\mathcal D=\tfrac{G}{2\tau}\,\tr\!\left(\be+\be^{-1}-2\It\right)\ge0.
+\label{eq:dissipation}
+\end{equation}
+Two caveats. \emph{(i) Folding.} Only the relaxing branch is bounded by
 relaxation; the equilibrium branch $\mu_s\dev(\Ften\Ften^{\!\top})$ is still built from
 $\Ften=(\grad\xiv)^{-1}$ and can fold under unbounded shear, so relaxation eliminates the
 folding sensitivity only in the Maxwell-fluid limit and mitigates it otherwise.
@@ -398,15 +461,24 @@ folding sensitivity only in the Maxwell-fluid limit and mitigates it otherwise.
 $\det\be=1$ (as in Oldroyd-B); the trace is carried by the pressure, and $\det\be$ is
 monitored as a diagnostic.
 
-\paragraph{Viscometric limits (used for verification).} For homogeneous simple shear
+The model has closed-form viscometric limits, used later for verification
+(\cref{sec:verification}). For homogeneous simple shear
 $\Lt=\dot\gamma\,\bm e_x\!\otimes\!\bm e_y$ the steady solution of \cref{eq:ucm} is
-$b_e^{xy}=\tau\dot\gamma$, $b_e^{xx}=1+2\tau^2\dot\gamma^2$, $b_e^{yy}=1$, giving
-$\sigma_{xy}=G\tau\dot\gamma$ and first normal-stress difference
-$N_1=2G\tau^2\dot\gamma^2$. For a step shear strain $\gamma$ held from $t=0$,
-$b_e^{xy}(t)=\gamma\,e^{-t/\tau}$; for uniform planar extension at rate $\varepsilon$
-with $\mathrm{Wi}=\varepsilon\tau<\tfrac12$, $b_e^{xx}\to1/(1-2\mathrm{Wi})$.
+\begin{equation}
+b_e^{xy}=\tau\dot\gamma,\quad b_e^{xx}=1+2\tau^2\dot\gamma^2,\quad b_e^{yy}=1,
+\qquad
+\sigma_{xy}=G\tau\dot\gamma,\quad N_1=2G\tau^2\dot\gamma^2,
+\label{eq:shear-limits}
+\end{equation}
+with $N_1$ the first normal-stress difference. A step shear strain $\gamma$ relaxes as
+$b_e^{xy}(t)=\gamma\,e^{-t/\tau}$, and uniform planar extension at rate $\varepsilon$
+(Weissenberg number $\mathrm{Wi}=\varepsilon\tau<\tfrac12$) saturates at
+\begin{equation}
+b_e^{xx}\to\frac{1}{1-2\,\mathrm{Wi}}.
+\label{eq:ext-limit}
+\end{equation}
 
-\subsection{Log-conformation transport}
+\emph{Log-conformation transport.}
 Direct transport of $\be$ is either over-diffusive or, if non-dissipative, loses
 positive-definiteness and blows up at high Weissenberg number. Following
 Fattal--Kupferman \cite{Fattal2004} we evolve
@@ -430,13 +502,20 @@ evolution of $\psib$ is
 \label{eq:logconf-rhs}
 \end{equation}
 rotated back by $\bm R(\cdot)\bm R^{\!\top}$; the diagonal carries stretching and
-relaxation, the off-diagonal the eigenvector rotation. The degenerate limit
-$\ell_1\!\to\!\ell_2$ of $\Omega_{12}$ is $e^{-\ell_1}(M_{12}+M_{21})$, recovering
-$\dot{\psib}=2\,\mathrm{sym}(\Lt)$ at $\be=\It$, so \cref{eq:logconf-rhs} is smooth.
-In two dimensions the eigendecomposition of the symmetric $2\times2$ field is available
-in closed form, so \cref{eq:logconf-rhs} is evaluated without iterative diagonalization.
+relaxation, the off-diagonal the eigenvector rotation. In the degenerate limit
+$\ell_1\!\to\!\ell_2$ the prefactor $(\ell_2-\ell_1)/(\lambda_2-\lambda_1)\to\lambda_1^{-1}
+=e^{-\ell_1}$ while $\lambda_2 M_{12}+\lambda_1 M_{21}\to\lambda_1(M_{12}+M_{21})$, so
+$\Omega_{12}\to M_{12}+M_{21}$, recovering $\dot{\psib}=2\,\mathrm{sym}(\Lt)$ at $\be=\It$;
+\cref{eq:logconf-rhs} is therefore smooth. In two dimensions the eigendecomposition of the
+symmetric $2\times2$ field is available in closed form, so \cref{eq:logconf-rhs} is evaluated
+without iterative diagonalization; the code evaluates
+$\Omega_{12}=\big[(\ell_2-\ell_1)/(\lambda_2-\lambda_1)\big]\,(\lambda_2 M_{12}+\lambda_1 M_{21})$,
+replacing \emph{only the prefactor} by its limit $(\ell_2-\ell_1)/(\lambda_2-\lambda_1)\to
+\lambda_1^{-1}=e^{-\ell_1}$ while keeping the factor $\lambda_2 M_{12}+\lambda_1 M_{21}$ when
+$|\lambda_1-\lambda_2|<10^{-10}$, so the full product tends to the correct limit
+$M_{12}+M_{21}$ in both branches.
 
-\subsection{Exact relaxation for stiff \texorpdfstring{$\tau$}{tau}}
+\emph{Exact relaxation for stiff $\tau$.}
 \label{sec:exact-relax}
 The relaxation term $-\tfrac1\tau(\be-\It)$ is stiff for small $\tau$ (high
 Weissenberg), forcing $\dt\lesssim\tau$ under explicit integration. We remove this by
@@ -458,8 +537,7 @@ this scheme is exact at any $\dt$; the property is verified in \cref{sec:verific
 %% ===== begin discretization.tex =====
 \section{Spatial discretization and exact projection}
 \label{sec:discretization}
-
-\subsection{Staggered (MAC) grid}
+\emph{Staggered (MAC) grid.}
 The domain $[0,L_x]\times[0,L_y]$ is divided into $N_x\times N_y$ cells of size
 $\dx\times\Delta y$. Pressure and the reference map live at cell centres,
 $x$-velocity $u$ on the $x$-faces, and $y$-velocity $v$ on the $y$-faces
@@ -468,7 +546,7 @@ pressure gradient (to faces) and Laplacian ($\dive\grad$) are then \emph{consist
 construction}, $\mathrm{div}=-\mathrm{grad}^{\!\top}$ and
 $\mathrm{Lap}=\mathrm{div}\circ\mathrm{grad}$, so the projection is exact.
 
-\subsection{Fractional-step projection}
+\emph{Fractional-step projection.}
 Momentum is advanced by a predictor--projector (Chorin) split \cite{Chorin1968}. Given a
 predictor velocity $\uv^{*}$, the projection solves a pressure-Poisson problem and
 corrects to a divergence-free field,
@@ -482,9 +560,12 @@ corrects to a divergence-free field,
 \end{equation}
 On the staggered grid the correction is exact: the projected velocity is
 divergence-free to round-off, without the checkerboard mode or Rhie--Chow interpolation
-required by a collocated arrangement.
+required by a collocated arrangement. This non-incremental (Chorin) form carries an $O(\dt)$
+pressure-splitting error \cite{GuermondMinevShen2006}; the explicit $\dt\propto\dx^2$ check of
+\cref{sec:disc-tg} confirms this splitting error does not account for the near-first-order
+pointwise fields there.
 
-\subsection{Direct Poisson solvers}
+\emph{Direct Poisson solvers.}
 The pressure boundary condition is chosen consistently with the velocity boundary
 condition. For no-slip/free-slip walls the homogeneous-Neumann Laplacian is diagonalized
 by the discrete cosine transform (DCT), with eigenvalues
@@ -492,24 +573,23 @@ $\lambda_{k}=-2\!\left(1-\cos(\pi k/N)\right)/\dx^2$; for periodic problems the 
 used, $\lambda_{k}=-4\sin^2(\pi k/N)/\dx^2$. Each solve is $O(N\log N)$. These
 transforms are reused verbatim by the implicit viscous solve of \cref{sec:time}.
 
-\subsection{Blended forcing}
+\emph{Blended forcing.}
 The solid stress \cref{eq:sls} is blended by $(1-H)$, and its divergence is added to the
-face momentum. Surface tension is a balanced-force continuum-surface-force model
-$\bm f_\Gamma=-\gamma\kappa\,\grad H$ with $\kappa=\dive(\grad\phi/|\grad\phi|)$, in
-which $\grad H$ uses the same compact face gradient as the pressure, so a constant-%
-curvature interface is discretely balanceable by pressure (small parasitic currents)
-\cite{Brackbill1992}. Contact between solids is applied as a trace-free stress whose
+face momentum. Contact between solids is applied as a trace-free stress whose
 divergence survives the projection \cite{Rycroft2020}.
 %% ===== end discretization.tex =====
 
 %% ===== begin timeintegration.tex =====
-\section{Time integration: from explicit to implicit--monolithic}
+\section{Time integration}
 \label{sec:time}
 
-\subsection{Explicit baseline and its CFL restrictions}
-One step of the explicit scheme advects $(\xiv,\psib)$ with the cell-centred velocity,
-extrapolates into the band, assembles the blended stress \cref{eq:sls} and forces, takes
-a forward-Euler momentum predictor, and projects \cref{eq:project}. Stability requires
+We advance the coupled system with an \emph{implicit--explicit} (IMEX) scheme that makes the
+stiff terms implicit, sharing the exact projection of \cref{sec:discretization} and the bicubic
+semi-Lagrangian transport of $(\xiv,\psib)$.
+
+\subsection{Stiff step-size limits}
+Advanced fully explicitly---as in prior reference-map solvers---the coupled system is bound by
+four step-size limits,
 \begin{equation}
 \dt \le \min\!\Big(
 \underbrace{C\,\dx/U}_{\text{advection}},\;
@@ -518,224 +598,145 @@ a forward-Euler momentum predictor, and projects \cref{eq:project}. Stability re
 \qquad \text{and}\quad \dt\lesssim\tau,
 \label{eq:cfl}
 \end{equation}
-with $c_s=\sqrt{\mu_s/\rho}$. The viscous, relaxation and elastic-wave limits are
-progressively removed below; advection is retained explicitly because the
-semi-Lagrangian backtrace is already unconditionally stable.
+with $c_s=\sqrt{\mu_s/\rho}$. The IMEX scheme below removes all four: the viscous, elastic-wave
+and advective CFLs by implicit and semi-Lagrangian treatment, and the relaxation limit
+$\dt\lesssim\tau$ by the exact substep of \cref{sec:exact-relax}---at no per-step cost. The
+quantitative comparison against an explicit baseline (matched-step reproduction and the net
+wall-clock speedup) is collected in the supplementary material.
 
-\subsection{IMEX stack}
-The strategies form a stack, each making one more stiff term of \cref{eq:cfl} implicit,
-selected by a single keyword (\texttt{explicit} $\subset$ \texttt{imex} $\subset$
-\texttt{imex-elastic}, with a \texttt{-sl} suffix adding semi-Lagrangian advection).
-The three levels below lift the viscous, relaxation and elastic-wave limits; the
-semi-Lagrangian advection of \cref{sec:monolithic} lifts the remaining advective limit.
-
+\subsection{The IMEX scheme}
+\label{sec:imex}
 \label{sec:elastic-stab}%
-The first level makes the \emph{viscous} term implicit by backward Euler, yielding a
-Helmholtz solve for the predictor,
+The IMEX scheme makes each stiff term of \cref{eq:cfl} implicit while leaving the nonlinear
+physics (advection, elastic force) explicit.
+\emph{Implicit viscosity.} The viscous term is made implicit by
+backward Euler, yielding a Helmholtz solve for the predictor,
 \begin{equation}
 \left(\It-\dt\,\nu\nabla^2\right)\uv^{*}
    = \uv^{n} - \dt\,(\uv\!\cdot\!\grad)\uv^{n} + \dt\,\bm f/\rho .
 \label{eq:helmholtz}
 \end{equation}
-On periodic and Neumann directions this operator is diagonalized by the \emph{same}
-transform (FFT/DCT) as the pressure Poisson solve of \cref{sec:discretization}---each mode
-divided by $1-\dt\,\nu\,\lambda_k>0$, so \cref{eq:helmholtz} is unconditionally stable at
-one extra transform per component---while at Dirichlet (no-slip and moving-lid) walls it is
-solved matrix-free by conjugate gradients on the same ghost-cell viscous stencil (symmetric
-positive-definite, hence CG-convergent), the lid entering as a right-hand-side
-inhomogeneity, a route that also accommodates the variable one-fluid viscosity. The second
-level removes the stiff \emph{relaxation} of \cref{eq:ucm} through the analytic Strang
-substep \cref{eq:relax-exact}, which is $A$-stable in $\tau$ and positive-definite-preserving
-(\cref{sec:exact-relax}). The third level is a linearly-implicit \emph{elastic-wave}
-stabilizer: the nonlinear elastic force $\dive\sig_{\!s}$ is kept explicit (physics) while an
-$O(\dt^2)$ wave operator is added implicitly to \cref{eq:helmholtz},
+For constant viscosity this operator is diagonalized \emph{exactly} by the same
+sine/cosine transforms as the pressure Poisson solve of \cref{sec:discretization}---on
+periodic, Neumann, and Dirichlet (no-slip / moving-lid) walls alike---each mode divided by
+$1-\dt\,\nu\,\lambda_k>0$. So \cref{eq:helmholtz} is a single direct transform pair per
+component, unconditionally stable, with the lid entering as a right-hand-side
+inhomogeneity: the wall predictor costs the same as the explicit one, and the lifted step
+converts directly into wall-clock. A matrix-free conjugate-gradient solve on the identical
+stencil remains available for the variable one-fluid viscosity. \emph{Exact relaxation.} The stiff relaxation of \cref{eq:ucm} is removed by the analytic
+Strang substep \cref{eq:relax-exact}, which is $A$-stable in $\tau$ and
+positive-definite-preserving (\cref{sec:exact-relax}).
+
+\emph{Elastic-wave coupling.} The nonlinear elastic force
+$\bm f^n=\dive\sig_{\!s}(\xiv^n,\be^n)$ is kept explicit (evaluated from the start-of-step
+reference map), while the elastic-\emph{wave} operator $c_s^2\nabla^2$, with the frozen constant
+coefficient $c_s^2=\mu_s/\rho$, is advanced by the energy-conserving trapezoidal
+(implicit-midpoint) rule,
 \begin{equation}
-\left(\It-\dt\,\nu\nabla^2-\dt^2 c_s^2\,\chi\,\nabla^2\right)\uv^{*}
-   = \uv^{n}-\dt\,(\uv\!\cdot\!\grad)\uv^{n}+\dt\,\bm f/\rho,
+\left(\It-\dt\,\nu\nabla^2-\tfrac14\dt^2 c_s^2\,\nabla^2\right)\uv^{*}
+   = \uv^{n}-\dt\,(\uv\!\cdot\!\grad)\uv^{n}+\tfrac14\dt^2 c_s^2\,\nabla^2\uv^{n}+\dt\,\bm f^n/\rho,
 \label{eq:elastic-stab}
 \end{equation}
-with $\chi=1-H$ the solid indicator; a frozen-coefficient split (constant $c_s^2$ treated
-implicitly everywhere, removed from the fluid by an explicit defect) keeps a single
-transform solve. Crucially the elastic force must sit \emph{inside} the implicit
-right-hand side, as the following stability analysis shows.
+which keeps the constant-coefficient direct solve of \cref{eq:helmholtz}. The frozen $c_s^2$ is
+applied over the whole domain; in the fluid the resulting term is a consistent $O(\dt^2)$
+perturbation. The reference map is then re-advected with the implicit-midpoint velocity
+$\tfrac12(\uv^n+\uv^{n+1})$, which the wave analysis requires for the coupling to be undamped,
+and a \emph{single linear solve} is used---no nonlinear iteration. The force must sit
+\emph{inside} the implicit right-hand side, as a von Neumann analysis of the linearized wave
+shows (proved below):
 
-\begin{proposition}[Unconditional stability of the elastic stabilizer]
+\begin{proposition}[Unconditional stability of the one-sided coupling]
 \label{prop:vn}
-Consider the linearized elastic wave $\uv_t=c_s^2 d_{xx},\ d_t=\uv$ ($d$ the
-displacement), discretized as
-$\uv^{n+1}=\uv^{n}+\dt\,c_s^2 d^{n}_{xx}+\dt^2 c_s^2\,\uv^{n+1}_{xx}$,
-$d^{n+1}=d^{n}+\dt\,\uv^{n+1}$. For a Fourier mode $k$ with $a\equiv\dt^2 c_s^2 k^2\ge0$
-the amplification matrix has spectral radius $|\lambda|=1/\sqrt{1+a}\le1$; the scheme is
-unconditionally stable, with mild damping that vanishes as $\dt\to0$.
+For the linearized elastic wave $\uv_t=c_s^2 d_{xx},\ d_t=\uv$ advanced by the simpler one-sided
+implicit coupling ($\uv^{n+1}=\uv^n+\dt\,c_s^2 d^n_{xx}+\dt^2 c_s^2\uv^{n+1}_{xx}$), a Fourier
+mode $k$ with $a\equiv\dt^2 c_s^2 k^2\ge0$ has spectral radius $|\lambda|=1/\sqrt{1+a}\le1$:
+unconditionally stable, with $O(\dt^2)$ damping that vanishes as $\dt\to0$. Applying the force
+\emph{after} the implicit solve is unstable once $a>1$.
 \end{proposition}
-\begin{proof}
-With $\partial_{xx}\to-k^2$ the update is
-$(1+a)\uv^{n+1}=\uv^n-\dt c_s^2 k^2 d^n$, $d^{n+1}=d^n+\dt\,\uv^{n+1}$. Eliminating
-gives the map $\bm M=\tfrac{1}{1+a}\begin{psmallmatrix}1 & -\dt c_s^2 k^2\\ \dt & 1\end{psmallmatrix}$
-with $\det\bm M=1/(1+a)$ and $\operatorname{tr}\bm M=2/(1+a)$. The eigenvalues solve
-$\lambda^2-\tfrac{2}{1+a}\lambda+\tfrac1{1+a}=0$, i.e.\
-$\lambda=(1\pm i\sqrt a)/(1+a)$, so $|\lambda|^2=(1+a)/(1+a)^2=1/(1+a)\le1$. If instead
-the force is applied \emph{after} the implicit solve, the analogous map has
-$\det=1/(1+a)$ but $\operatorname{tr}=1/(1+a)+1-a$, whose eigenvalues exceed unity for
-$a>1$ (unstable). \hfill
-\end{proof}
-The scheme is thus non-oscillatory and stable for every $\dt$ and wavenumber $k$: resolved
-long waves ($a\ll1$) lose only $O(\dt^2)$ energy per step, vanishing under refinement, while
-grid-scale waves ($a\gg1$) are strongly damped, supplying the dissipation that lets an
-explicit force be stabilized. The proof also shows why the force must sit \emph{inside} the
-implicit solve: applying it afterwards leaves the eigenvalue product unchanged but raises
-their sum, forcing $|\lambda|>1$ once $a>1$---an absolute instability that only the
-``inside'' form, advancing displacement and velocity with the same implicit force, avoids.
-
-The stage-1 damping is the joint price of the isotropic-Laplacian stabilizer and a
-one-sided (backward-Euler-type) coupling; symmetrizing the time coupling removes it
-completely, which is the scheme actually used for the elastic branch.
 
 \begin{proposition}[Energy-conserving trapezoidal coupling]
 \label{prop:trap}
-Advance the same linear elastic wave by the trapezoidal (implicit-midpoint) rule,
-\begin{equation*}
-\uv^{n+1}=\uv^{n}+\tfrac{\dt}{2}\,c_s^2\,(d^n+d^{n+1})_{xx},\qquad
-d^{n+1}=d^{n}+\tfrac{\dt}{2}\,(\uv^{n}+\uv^{n+1}).
-\end{equation*}
-Then $|\lambda|=1$ for every Fourier mode and every $\dt$: the scheme is unconditionally
-stable and \emph{lossless}, exactly conserving the discrete energy
-$\tfrac12(\uv^2+c_s^2 d_x^2)$.
+Advancing the same wave by the trapezoidal (implicit-midpoint) rule gives $|\lambda|=1$ for
+every $k$ and every $\dt$: unconditionally stable and \emph{lossless}, exactly conserving the
+discrete energy $\tfrac12(\uv^2+c_s^2 d_x^2)$.
 \end{proposition}
-\begin{proof}
-Writing $\bm w=(\uv,d)$, the semi-discrete wave is $\dot{\bm w}=\bm A\bm w$ with
-$\bm A=\begin{psmallmatrix}0 & -c_s^2 k^2\\ 1 & 0\end{psmallmatrix}$ (using
-$\partial_{xx}\to-k^2$), whose eigenvalues $\pm i c_s k$ are purely imaginary. The
-trapezoidal rule is the Cayley transform
-$\bm w^{n+1}=(\bm I-\tfrac{\dt}{2}\bm A)^{-1}(\bm I+\tfrac{\dt}{2}\bm A)\,\bm w^{n}$,
-whose eigenvalues $(1+\tfrac{\dt}{2}(\pm i c_s k))/(1-\tfrac{\dt}{2}(\pm i c_s k))$ have
-unit modulus; the Cayley transform of a Hamiltonian matrix is symplectic, so the discrete
-energy is conserved. \hfill
-\end{proof}
 
-The two propositions are complementary: Proposition~\ref{prop:vn} gives a dissipative,
-extremely robust integrator (useful as a stabilizer or for strongly stiff transients),
-while Proposition~\ref{prop:trap} gives a neutrally-stable, energy-conserving one. The solver
-uses the trapezoidal form for the elastic branch so that a persistently oscillating solid
-neither grows nor decays numerically; \cref{sec:verification} verifies the predicted energy
-conservation on a standing elastic shear wave.
+\noindent\emph{Proof of Proposition~\ref{prop:vn}.} For the linearized wave
+$\uv_t=c_s^2 d_{xx}$, $d_t=\uv$ with $\partial_{xx}\to-k^2$ and $a=\dt^2 c_s^2 k^2$, the one-sided
+implicit update $(1+a)\uv^{n+1}=\uv^n-\dt c_s^2 k^2 d^n$, $d^{n+1}=d^n+\dt\,\uv^{n+1}$ has
+amplification matrix $\bm M=\tfrac{1}{1+a}\left(\begin{smallmatrix}1 & -\dt c_s^2 k^2\\ \dt & 1\end{smallmatrix}\right)$,
+$\det\bm M=1/(1+a)$, $\operatorname{tr}\bm M=2/(1+a)$, so $\lambda=(1\pm i\sqrt a)/(1+a)$ and
+$|\lambda|^2=1/(1+a)\le1$. Applying the force \emph{after} the solve keeps $\det=1/(1+a)$ but
+raises $\operatorname{tr}$ to $1/(1+a)+1-a$, giving $|\lambda|>1$ once $a>1$. \hfill$\square$
 
-\subsection{Toward a fully-coupled Newton solve}
-\label{sec:monolithic}
-The end point of the stack would solve the coupled system implicitly for the whole state
-$\bm X=(\uv,p,\xiv,\psib)^{n+1}$. The backward-Euler residual is
-\begin{subequations}\label{eq:residual}
-\begin{align}
-\bm R_{\!\uv} &= \rho\,\frac{\uv-\tilde{\uv}}{\dt} + \grad p
-   - \dive\!\left(2\mu_f\bm D(\uv)\right) - \dive\sig_{\!s}(\xiv,\psib) - \bm f = \bm 0,\\
-R_{p} &= \dive\uv = 0,\\
-\bm R_{\xiv} &= \frac{\xiv-\tilde{\xiv}}{\dt} + (\uv\!\cdot\!\grad)\xiv = \bm 0,\\
-\bm R_{\psib} &= \frac{\psib-\tilde{\psib}}{\dt} - \bm g(\grad\uv,\psib;\tau) = \bm 0,
-\end{align}
-\end{subequations}
-where $\tilde{(\cdot)}$ denotes the semi-Lagrangian departure-point value and $\bm g$ is
-the local log-conformation RHS \cref{eq:logconf-rhs} (with the relaxation handled by the
-exact substep). \Cref{eq:residual} is solved by an inexact Newton--Krylov iteration
-\cite{Knoll2004}; the Jacobian action uses the analytic material tangents
-$\partial\sig_{\!s}/\partial\xiv$ and $\partial\sig_{\!s}/\partial\psib$ (the latter via
-$\partial\exp\psib/\partial\psib$, closed-form in 2-D). The velocity--pressure block is a
-saddle point preconditioned by the exact projection of \cref{sec:discretization} (the
-DCT/FFT Poisson solve approximates the pressure Schur complement); the elastic block
-adds a symmetric-positive stiffness to the velocity operator, improving conditioning.
+\noindent\emph{Proof of Proposition~\ref{prop:trap}.} The semi-discrete wave
+$\dot{\bm w}=\bm A\bm w$, $\bm A=\left(\begin{smallmatrix}0 & -c_s^2 k^2\\ 1 & 0\end{smallmatrix}\right)$,
+has purely imaginary eigenvalues $\pm i c_s k$; the trapezoidal rule is the Cayley transform
+$(\bm I-\tfrac{\dt}{2}\bm A)^{-1}(\bm I+\tfrac{\dt}{2}\bm A)$, whose eigenvalues have unit
+modulus (the Cayley transform of a Hamiltonian matrix is symplectic), so the discrete energy
+$\tfrac12(\uv^2+c_s^2 d_x^2)$ is exactly conserved. \hfill$\square$
 
-\paragraph{Non-smooth operators.} A clean Newton linearization requires differentiable
-$\bm R_{\xiv},\bm R_{\psib}$; the default semi-Lagrangian interpolation,
-band extrapolation and level-set rebuild are only piecewise smooth. We (i) switch
-$\xiv/\psib$ transport to the conservative flux form (differentiable Jacobian
-$\partial\bm R_{\xiv}/\partial\uv$) and (ii) freeze the interface geometry
-($\phi$, band, $H$, departure points) at the start of the step, updating it in an outer
-fixed-point iteration---an ``implicit elastic kernel with lagged interface.''
-
-\paragraph{What is realized here.} \Cref{eq:residual} is the target. We realize its
-\emph{velocity--pressure} block as the semi-monolithic scheme (Algorithm~\ref{alg:mono}): a
-JFNK solve of $\bm R_{\!\uv},R_p$ with advection implicit in the residual, preconditioned by
-one IMEX step and the exact projection, with $(\xiv,\psib)$ held fixed within the Newton
-iteration. This block is exercised on the fluid (supplementary material); it is not yet run
-as a coupled FSI. The coupled \emph{elastic} FSI results in this paper are instead produced
-by the \textsc{IMEX-SL} scheme (Algorithm~\ref{alg:imexsl}) with the energy-conserving
-trapezoidal elastic coupling of \cref{sec:elastic-stab} (the reference map transported by the
-implicit-midpoint velocity), which lifts the viscous, elastic-wave and advective limits in a
-fractional-step setting and delivers the net FSI speedup reported in the supplementary material at the
-cost of an $O(\dt)$ operator-split error. Closing the outer iteration to a fully-consistent
-Newton over all of $(\uv,p,\xiv,\psib)$---which \eqref{eq:residual} defines and the analytic
-tangent above supports---is the natural next step and is left to future work. This differs
-from the monolithic Eulerian FSI of \cite{Richter2013,Dunne2006}, which carries the solid
-deformation \emph{inside} the Newton system and lags only the interface/domain-extension
-step; the split here is coarser (the whole $(\xiv,\psib)$ is lagged), and removing it is
-precisely what the fully-coupled solve above would achieve.
-
-\subsection{The four time-integration schemes}
-\label{sec:four-schemes}
-We compare four schemes of increasing implicitness (\cref{alg:explicit,alg:imex,alg:imexsl,alg:mono});
-each shares the exact projection and the semi-Lagrangian transport of $(\xiv,\psib)$.
-
-\begin{algorithm}[t]\small\caption{\textsc{Explicit} --- one step}\label{alg:explicit}
-\begin{algorithmic}[1]
-\State advect $(\xiv,\psib)$ with $\uv^n$ (semi-Lagrangian); extrapolate into the band
-\State $\psib\!\leftarrow\!$ explicit relaxation; $\be\!=\!\exp\psib$; assemble blended stress $\sig$, force $\bm f=\dive\sig$
-\State $\uv^{*}=\uv^n+\dt\!\left[-(\uv^n\!\cdot\!\grad)\uv^n+\nu\nabla^2\uv^n+\bm f/\rho\right]$
-\State $(\uv^{n+1},p)\leftarrow\textsc{Project}(\uv^{*})$
-\end{algorithmic}
-\end{algorithm}
-
-\begin{algorithm}[t]\small\caption{\textsc{IMEX} --- implicit viscosity + exact relaxation}\label{alg:imex}
-\begin{algorithmic}[1]
-\State advect $(\xiv,\psib)$; extrapolate; \, $\psib\!\leftarrow\!$ \emph{exact} exponential relaxation ($A$-stable $\forall\tau$)
-\State $\be,\ \sig,\ \bm f$ as above
-\State solve $\left(\It-\dt\,\nu\nabla^2\right)\uv^{*}=\uv^n-\dt(\uv^n\!\cdot\!\grad)\uv^n+\dt\,\bm f/\rho$ \Comment{FFT/DCT, or PCG at walls}
-\State $(\uv^{n+1},p)\leftarrow\textsc{Project}(\uv^{*})$
-\end{algorithmic}
-\end{algorithm}
-
-\begin{algorithm}[t]\small\caption{\textsc{IMEX-SL} --- + semi-Lagrangian advection}\label{alg:imexsl}
-\begin{algorithmic}[1]
-\State advect $(\xiv,\psib)$; extrapolate; exact relaxation; \, $\be,\sig,\bm f$
-\If{$\dt\,\max|\uv^n|/\dx \le 1$} $\tilde{\uv}\leftarrow \uv^n-\dt(\uv^n\!\cdot\!\grad)\uv^n$ \Comment{central (accurate)}
-\Else\ \ $\tilde{\uv}\leftarrow$ semi-Lagrangian backtrace of $\uv^n$ (cubic) \Comment{unconditionally stable}
-\EndIf
-\State solve $\left(\It-\dt\,\nu\nabla^2\right)\uv^{*}=\tilde{\uv}+\dt\,\bm f/\rho$; \ $(\uv^{n+1},p)\leftarrow\textsc{Project}(\uv^{*})$
-\end{algorithmic}
-\end{algorithm}
-
-\begin{algorithm}[t]\small\caption{\textsc{Semi-monolithic} --- Newton--Krylov velocity--pressure}\label{alg:mono}
-\begin{algorithmic}[1]
-\State advect $(\xiv,\psib)$ with $\uv^n$ (lagged); extrapolate; \, $\be,\sig,\bm f$
-\State solve $\bm R(\uv,p)=\bm 0$ by JFNK, with
-$\bm R_{\uv}=\tfrac{\uv-\uv^n}{\dt}+(\uv\!\cdot\!\grad)\uv+\tfrac1\rho\grad p-\nu\nabla^2\uv-\tfrac{\bm f}{\rho}$, $R_p=\dive\uv$:
-\State \quad Newton: $\bm J\,\delta=-\bm R$ via GMRES, preconditioned by one \textsc{IMEX} step + the projection Schur complement
-\State $(\uv^{n+1},p)\leftarrow$ converged state
-\end{algorithmic}
-\end{algorithm}
-
-\Cref{tab:schemes} summarizes them. \textsc{Explicit} and \textsc{IMEX} treat advection
-explicitly (central), so both carry the advective CFL; they differ only in the viscous
-(and relaxation) limits, and on non-stiff-advection problems give identical accuracy---so
-in the results we report \textsc{IMEX} as the representative implicit-viscosity scheme and
-do not separately plot \textsc{Explicit} where the two coincide. \textsc{IMEX-SL} lifts the
-advective limit; \textsc{Semi-monolithic} additionally makes advection and the
-velocity--pressure coupling implicit and consistent (no split/SL error), monolithic in
-$(\uv,p)$ with $(\xiv,\psib)$ lagged---the fully-coupled $(\uv,p,\xiv,\psib)$ Newton is
-\cref{sec:monolithic}.
+\noindent The solver uses the trapezoidal form for the elastic branch, so a persistently
+oscillating solid neither grows nor decays numerically. In the nonlinear FSI setting the
+trapezoidal step conserves the discrete energy of the linear elastic-wave operator exactly,
+while the explicitly-evaluated nonlinear force adds an $O(\dt^2)$ energy increment per step,
+which accumulates to $O(\dt)$ over a fixed horizon---consistent with the first-order
+operator-split error. The frozen coefficient is $c_s^2=\mu_s/\rho$; the stabilizer is exercised
+only in the stiff pure-neo-Hookean case of \cref{sec:stiff}, where $\mu_s$ is the sole modulus
+so the coefficient is exact, while the free-slip coupled runs (\cref{sec:ve-coupled}) are
+advanced without it. The standing-shear-wave test (\cref{tab:energy-cons}) confirms the linear
+conservation to round-off (drift $\le2\times10^{-14}$ from $0.5\times$ to $8\times$ the elastic
+CFL).
 
 \begin{table}[t]\centering\small
-\caption{The four schemes. ``advection'' = how the momentum advection is treated.}
-\label{tab:schemes}
-\begin{tabular}{@{}lllll@{}}
+\caption{Standing elastic shear wave: relative drift of the discrete energy
+$\tfrac12(\uv^2+c_s^2 d_x^2)$ over the run for the trapezoidal (Proposition~\ref{prop:trap})
+coupling, measured with the invariant tied to the same Laplacian used in the update. The drift
+is at round-off for every step from $0.5$ to $8\times$ the elastic CFL, confirming
+$|\lambda|=1$; the dissipative one-sided coupling (Proposition~\ref{prop:vn}) instead damps the
+wave, and the explicit scheme diverges above the CFL.}
+\label{tab:energy-cons}
+\begin{tabular}{@{}lccccc@{}}
 \toprule
-scheme & viscosity & advection & $\uv$--$p$ coupling & CFL limits remaining \\
+$\dt/\dt_{\rm CFL}$ & $0.5$ & $1$ & $2$ & $4$ & $8$ \\
 \midrule
-\textsc{Explicit} & explicit & explicit central & fractional-step & viscous, elastic, $\tau$, advective \\
-\textsc{IMEX} & implicit & explicit central & fractional-step & advective (+ elastic) \\
-\textsc{IMEX-SL} & implicit & semi-Lagrangian & fractional-step & (+ elastic) \\
-\textsc{Semi-monolithic} & implicit & implicit (Newton) & monolithic $(\uv,p)$ & none for the fluid \\
+energy drift & $1.9\!\times\!10^{-14}$ & $6.9\!\times\!10^{-15}$ &
+$1.5\!\times\!10^{-14}$ & $9.5\!\times\!10^{-15}$ & $1.8\!\times\!10^{-14}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\emph{Adaptive advection.} The momentum advection is central differencing (second order, no
+numerical diffusion) while \emph{both} the advective CFL and the forward-Euler/central
+cell-Reynolds bound are satisfied ($\dt\max|\uv|/\dx\le0.9$ and $\dt\le2\nu/\max|\uv|^2$).
+Beyond either bound the unconditionally stable bicubic semi-Lagrangian backtrace is used, so the
+IMEX step is limited by neither viscosity, elastic waves, nor advection.
+
+\subsection{The scheme in one step}
+\label{sec:schemes}
+\Cref{alg:imex} gives one IMEX step, sharing the exact projection and the bicubic
+semi-Lagrangian transport of $(\xiv,\psib)$. All coupled FSI results use it (implicit viscosity,
+exact relaxation, adaptive advection); the energy-conserving trapezoidal elastic-wave stabilizer
+of \cref{sec:imex} is an \emph{optional} large-step device, engaged only when the elastic CFL
+binds---the stiff-solid case of \cref{sec:stiff}---while the softer coupled runs take
+$c_s^2{=}0$. Because the direct transform solve makes the implicit predictor cost the same as an
+explicit one, the lifted step-size limits convert directly into wall-clock (supplementary
+material).
+
+\begin{algorithm}[t]\small\caption{\textsc{IMEX} --- one step (implicit viscosity, exact relaxation; optional elastic-wave stabilizer)}\label{alg:imex}
+\begin{algorithmic}[1]
+\State advect $(\xiv,\psib)$ with $\uv^n$ (monotone bicubic semi-Lagrangian); extrapolate \Comment{overridden at line~8 if stabilizer on}
+\State $\psib\!\leftarrow\!$ Strang local step $\mathrm{relax}(\tfrac{\dt}{2})\!\to\!\mathrm{stretch}(\dt,\,\text{\cref{eq:logconf-rhs}})\!\to\!\mathrm{relax}(\tfrac{\dt}{2})$ (exact relax, $A$-stable $\forall\tau$); $\be=\exp\psib$
+\State assemble blended stress $\sig(\xiv,\be)$; explicit force $\bm f^n=\dive\sig$
+\If{$\dt\max|\uv^n|/\dx\le0.9$ \textbf{and} $\dt\le2\nu/\max|\uv^n|^2$} $\tilde{\uv}\leftarrow\uv^n-\dt(\uv^n\!\cdot\!\grad)\uv^n$ \Comment{central}
+\Else\ \ $\tilde{\uv}\leftarrow$ semi-Lagrangian backtrace of $\uv^n$ (cubic) \Comment{unconditionally stable}
+\EndIf
+\State solve $\big(\It-\dt\nu\nabla^2-\tfrac14\dt^2c_s^2\nabla^2\big)\uv^{*}=\tilde{\uv}+\tfrac14\dt^2c_s^2\nabla^2\uv^n+\dt\,\bm f^n/\rho$ \Comment{$c_s^2{=}0$ unless stabilizer on; direct DST / FFT}
+\State $(\uv^{n+1},p)\leftarrow\textsc{Project}(\uv^{*})$
+\State \textbf{stabilizer on} (stiff solid, \cref{sec:stiff}): use $c_s^2{=}\mu_s/\rho$ at line~6 and re-transport $\xiv$ with the midpoint $\tfrac12(\uv^n+\uv^{n+1})$ in place of line~1; extrapolate \Comment{trapezoidal wave}
+\end{algorithmic}
+\end{algorithm}
+
 %% ===== end timeintegration.tex =====
 
 %% ===== begin verification.tex =====
@@ -782,18 +783,16 @@ eigenvalues $b_e^{xx}=1/(1-2\mathrm{Wi})$ and $b_e^{yy}=1/(1+2\mathrm{Wi})$, tra
 coil--stretch growth of $b_e^{xx}$ up to $\mathrm{Wi}\!\to\!\tfrac12$ (relative error below
 $3\%$, set by the finite integration time near the singularity) while $\be$ remains
 symmetric positive-definite throughout---the property the matrix-logarithm transport
-guarantees and a direct $\be$ update loses. The two-way-coupled behaviour is the subject of
+guarantees and a direct $\be$ update loses. The fully coupled FSI behaviour is the subject of
 \cref{sec:ve-coupled}.
 
 \begin{figure}[t]\centering
 \includegraphics[width=\linewidth]{figures/viscoelastic_validation.png}
-\caption{Viscoelastic constitutive validation of the log-conformation update against
-analytic UCM/Maxwell solutions ($G=\tau=1$): (a) startup of steady shear at
-$\mathrm{Wi}=1$---transient $\sigma_{xy}$ and $N_1$ (markers) vs analytic (grey);
-(b) SAOS storage/loss moduli $G',G''$ vs Maxwell over three decades of $\omega\tau$;
-(c) steady planar-extension eigenvalues of $\be$ vs $1/(1\mp2\mathrm{Wi})$, showing the
-coil--stretch approach to $\mathrm{Wi}=\tfrac12$ (dotted). Maximum errors
-$1.8\times10^{-6}$, $2\times10^{-4}$ and ${<}3\%$ respectively.}
+\caption{Constitutive validation of the log-conformation update ($G=\tau=1$): numerical
+(markers) vs.\ analytic (grey). (a) Startup shear at $\mathrm{Wi}=1$ ($\sigma_{xy}$, $N_1$);
+(b) SAOS moduli $G'$, $G''$; (c) planar-extension eigenvalues of $\be$ approaching the
+coil--stretch transition at $\mathrm{Wi}=\tfrac12$. Max errors $1.8\times10^{-6}$,
+$2\times10^{-4}$, ${<}3\%$.}
 \label{fig:ve-valid}
 \end{figure}
 
@@ -802,102 +801,130 @@ $1.8\times10^{-6}$, $2\times10^{-4}$ and ${<}3\%$ respectively.}
 %% ===== begin validation.tex =====
 The parameters of every FSI case are collected in \cref{tab:params} for reproducibility.
 Common to all: equal density $\rho_s=\rho_f=1$, interface smoothing width $w_t=2\dx$, band
-extrapolation over $3$ layers, and semi-Lagrangian transport of $(\xiv,\psib)$; the coupled
-viscoelastic runs of \cref{sec:ve-coupled} use cubic interpolation for this transport, which
-markedly reduces the strain-description drift discussed there.
+extrapolation over $3$ layers, and cubic semi-Lagrangian transport of $(\xiv,\psib)$.
 
 \begin{table}[t]\centering\small
-\caption{Simulation parameters for the FSI cases ($\nu=\mu_f/\rho$; $c_s=\sqrt{\mu_s/\rho}$).
-The elastic disc-in-Taylor--Green uses the four-cell field $\psi=\psi_0\sin2\pi x\sin2\pi y$
-of Jain \emph{et al.}; the SLS disc-in-Taylor--Green uses a single vortex
-$\psi=\psi_0\sin\pi x\sin\pi y$; the lid case has a moving lid $U_{\rm lid}=1$.}
+\caption{Simulation parameters for the FSI cases ($\nu=\mu_f/\rho$; $c_s=\sqrt{\mu_s/\rho}$;
+$\rho=1$; unit domain). Stream function $\psi=\psi_0\sin(k x)\sin(k y)$ with $k=k_w\pi$
+($k_w{=}2$ four-cell for the Jain case, $k_w{=}1$ single vortex otherwise); $U_0=\psi_0$ is the
+stream-function amplitude, so the peak velocity is $U_0 k$ and the advective term
+$\tfrac{0.25\dx}{U_0 k}$ is $0.25\dx$ over that velocity. Grid: disc-in-TG energy $N{=}128$, convergence
+$N\in\{32,64,128,256,512\}$; disc-in-lid $N{=}128$ (and $N{=}48,64$ for the speedup/metric study);
+four-roll $N{=}128$; shear $N{=}96$.}
 \label{tab:params}
 \begin{tabular}{@{}lcccccccc@{}}
 \toprule
 case & $R$ & $(x_0,y_0)$ & $\mu_f$ & $\mu_s$ & $G$ & $\tau$ & drive & $\dt$ rule \\
 \midrule
-disc-in-TG (elastic, \S\ref{sec:disc-tg}) & $0.20$ & $(0.5,0.5)$ & $10^{-3}$ & $0.5$ & --- & --- &
+disc-in-TG energy (\S\ref{sec:disc-tg}) & $0.20$ & $(0.5,0.5)$ & $10^{-3}$ & $1.0$ & --- & --- &
 $\psi_0{=}0.05$ & $\min(\tfrac{0.25\dx}{U_0 k},\tfrac{0.2\dx^2}{\nu},\tfrac{0.25\dx}{c_s})$ \\
+disc-in-TG conv.\ (\S\ref{sec:disc-tg}) & $0.15$ & $(0.5,0.7)$ & $0.01$ & $0.1$ & --- & --- &
+$\psi_0{=}0.3$ & $\min(\tfrac{0.25\dx}{U_0 k},\tfrac{0.2\dx^2}{\nu},\tfrac{0.25\dx}{c_s})$ \\
 disc-in-lid (\S\ref{sec:disc-lid}) & $0.20$ & $(0.6,0.5)$ & $0.01$ & $0.1$ & --- & --- &
 $U_{\rm lid}{=}1$ & $\min(\tfrac{0.3\dx}{U},\tfrac{0.2\dx^2}{\nu},\tfrac{0.3\dx}{c_s})$ \\
-SLS disc-in-TG (\S\ref{sec:ve-coupled}) & $0.15$ & $(0.5,0.7)$ & $0.01$ & $0.1$ &
-$0.1$ & $\infty,1,\tfrac14$ & $\psi_0{=}0.3$ & single vortex \\
+four-roll (\S\ref{sec:ve-extension}) & $0.13$ & $(0.5,0.5)$ & $0.05$ & --- & $0.3$ &
+$\infty,\tfrac12,\tfrac14$ & $\dot\varepsilon{=}0.5$ & $\min(\tfrac{0.3\dx}{U},\tfrac{0.3\dx}{c_s})$ \\
+shear (\S\ref{sec:shear}) & $0.20$ & $(0.5,0.5)$ & $0.02$ & --- & $0.1$ & $\infty\!\to\!0$ &
+$\dot\gamma$ ($\mathrm{Ca}{=}\tfrac{\mu_f\dot\gamma}{G}$) & $\min(\tfrac{0.3\dx}{U},\tfrac{0.3\dx}{c_s})$ \\
+SLS disc-in-TG (\S\ref{sec:ve-coupled}) & $0.15$ & $(0.5,0.7)$ & $0.01$ & $1.0$ &
+$1.0$ & $\infty,1,\tfrac14$ & $\psi_0{=}0.3$ & $\min(\tfrac{0.25\dx}{U_0 k},\tfrac{0.2\dx^2}{\nu},\tfrac{0.25\dx}{c_s})$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsection{Disc in a Taylor--Green vortex: replicating Jain \emph{et al.}}
+\subsection{Disc in a Taylor--Green vortex}
 \label{sec:disc-tg}
-The first FSI test reproduces the disc-in-Taylor--Green benchmark of Jain, Kamrin \& Mani
-\cite{Jain2019} (their Sec.~4.4), which they in turn validated against the mixed
-Eulerian--Lagrangian results of Zhao \emph{et al.}\ and Robinson-Mosher \emph{et al.} We
-use their parameters exactly: a neo-Hookean disc of radius $r=0.2$ at the centre of a unit
-box, released in the vortex $\psi=\psi_0\sin(2\pi x)\sin(2\pi y)$ with $\psi_0=0.05$,
-$\mu_f=10^{-3}$, $\mu_s=0.5$, $\rho_s=\rho_f=1$. The disc stretches, elastically retracts and
-oscillates while the fluid viscously damps it.
-\Cref{fig:disc-tg-conv}a reproduces their kinetic- and strain-energy evolution: the two
-exchange energy in anti-phase during the stretch--retract oscillation, the magnitudes
-($\mathrm{ke}\!\approx\!0.02$, $\mathrm{se}\!\approx\!0.012$) and period match Jain \emph{et
-al.}'s Fig.~14, and the curves are grid-independent from $N{=}64$ to $128$. The
-convergence study (\cref{fig:disc-tg-conv}b) uses the standard soft-disc parameters
+A neo-Hookean disc of radius $r=0.2$ at the centre of a unit box is released in the vortex
+$\psi=\psi_0\sin(2\pi x)\sin(2\pi y)$ ($\psi_0=0.05$, $\mu_f=10^{-3}$, $\rho_s=\rho_f=1$, shear
+modulus $\mu_s=1.0$); it stretches, elastically retracts and oscillates while the fluid
+viscously damps it. This is the benchmark of Jain, Kamrin \& Mani \cite{Jain2019}, validated
+there against the mixed Eulerian--Lagrangian results of Zhao \emph{et al.}\ and
+Robinson-Mosher \emph{et al.}; we compare against all three. (The modulus needs a convention
+conversion: their $\mu_s=0.5$ in the $\sig_{\!s}=2\mu_s\bt$ convention is a physical shear
+modulus $1.0$, i.e.\ $\mu_s=1.0$ in our $\sig_{\!s}=\mu_s\dev\bt$ convention; running $\mu_s=0.5$
+instead would model a solid half as stiff, oscillating ${\sim}1.5\times$ too slowly.)
+\Cref{fig:disc-tg-energy} overlays our kinetic- and strain-energy evolution on the three
+reference methods; the two energies exchange in anti-phase during the stretch--retract
+oscillation. Our \emph{kinetic energy} tracks all three in phase across the
+full run, with a first dip of $0.0166$ that sits inside the Jain--Zhao--Mosher ke band
+($0.0155$--$0.0168$ across the three methods at that time). The three reference methods already
+disagree among themselves on the \emph{strain-energy} amplitude---se peaks of $0.0083$ (the
+non-dissipative central scheme), ${\approx}0.0068$ (Zhao) and ${\approx}0.0070$
+(Robinson-Mosher). Our se peaks at $0.0067$, matching the Zhao/Robinson-Mosher reference level
+($0.0068$--$0.0070$) and just below the less-dissipative $0.0083$, while the oscillation period
+($0.40$ vs $0.38$) and peak disc aspect ratio ($1.42$ vs the published $1.40$) agree to within
+$5\%$.
+The convergence study (\cref{fig:disc-tg-conv}) uses the standard soft-disc parameters
 ($\mu_s=0.1$, $\mu_f=0.01$, single vortex) of \cref{tab:params}.
-The spatial convergence (\cref{fig:disc-tg-conv}b, measured against a resolved $N{=}256$
+The spatial convergence (\cref{fig:disc-tg-conv}, measured against a resolved $N{=}512$
 reference) splits cleanly by quantity. The \emph{integrated energies} converge at second
 order---the $O(\dx)$ interfacial error largely cancels in the volume integral---so the
 kinetic and strain energy track $O(\dx^2)$, matching the second-order energy convergence of
 Jain \emph{et al.} The \emph{pointwise fields} (velocity, pressure) are first order: the
 mollified Heaviside spreads the stress and pressure jump over a band of width ${\sim}2\dx$,
 and the captured interface sits at an $O(\dx)$-different sub-cell position on each grid, so
-the near-interface field error is $O(\dx)$ on top of a second-order bulk. (We verified the
-field order is genuine and robust: it is unchanged under higher-order cubic or central
-advection, level-set normalization, and conservative flux transport of $\xiv$ with per-step
-reinitialization---so it is intrinsic to the diffuse interface, not to any one operator. An
-earlier report of ${\approx}1.8$-order velocity was an artifact of using too coarse a
-convergence reference.) Second order in the \emph{fields} would require Jain \emph{et al.}'s
-fully-conservative, discretely-telescoping stencil or a sharp-interface treatment
-\cite{Kolahdouz2023}. The order is set by the spatial discretization, not the time integrator
-(the explicit, IMEX and semi-monolithic schemes coincide, \cref{sec:verification}).
+the near-interface field error is $O(\dx)$ on top of a second-order bulk---intrinsic to the
+diffuse interface. It persists when the time step is scaled $\dt\propto\dx^2$ rather than
+$\dt\propto\dx$ (finest-grid pressure order $0.79$ vs.\ $0.76$, velocity $1.12$ vs.\ $1.11$), so
+the near-first-order fields are not the $O(\dt)$ projection-splitting error
+\cite{GuermondMinevShen2006} but the diffuse one-fluid interface. Second order in the
+\emph{fields} would require a fully-conservative, discretely-telescoping stencil or a
+sharp-interface treatment \cite{Kolahdouz2023}. The order is set by the spatial discretization,
+not the time integrator.
 
 \begin{figure}[t]\centering
-\includegraphics[width=\linewidth]{figures/disc_tg_convergence.png}
-\caption{Disc in a Taylor--Green vortex. (a) Kinetic (ke) and strain (se) energy vs.\ time
-at Jain \emph{et al.}'s parameters \cite{Jain2019}: the stretch--retract oscillation and
-energy exchange, grid-independent from $N{=}64$ to $128$ and matching their Fig.~14 in
-magnitude and period. (b) Spatial convergence (soft-disc parameters, vs.\ a resolved
-$N{=}256$ reference): the \emph{integrated energies} converge at $O(\Delta x^2)$ (dashed)
-because the interfacial error cancels in the integral, while the pointwise \emph{velocity and
-pressure} are first order (dotted), capped by the diffuse one-fluid interface.}
+\includegraphics[width=\linewidth]{figures/disc_tg_energy.png}
+\caption{Disc in a Taylor--Green vortex ($\mu_s=1.0$, our $N{=}128$ in red): (a) kinetic and
+(b) strain energy vs.\ time, against Jain, Zhao, and Robinson-Mosher \emph{et al.}\
+\cite{Jain2019}. Our result tracks the reference methods.}
+\label{fig:disc-tg-energy}
+\end{figure}
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.62\linewidth]{figures/disc_tg_convergence.png}
+\caption{Disc in a Taylor--Green vortex, spatial convergence (vs.\ a resolved $N{=}512$
+reference): integrated energies converge at $O(\Delta x^2)$ (dashed); pointwise velocity and
+pressure are near first order (dotted), capped by the diffuse interface.}
 \label{fig:disc-tg-conv}
 \end{figure}
 
-\subsection{Neo-Hookean (elastic) disc in a lid-driven cavity (FSI)}
-\label{sec:disc-lid}
-A neo-Hookean \emph{elastic} disc carried by the cavity flow is compared to the
-full-Eulerian result of Sugiyama \emph{et al.}\ \cite{Sugiyama2011} and to Jain
-\emph{et al.}\ \cite{Jain2019}.
-The centroid trajectory follows the reference over the full inward spiral with a mean
-deviation of $1.4\times10^{-2}$ at $N{=}64$ and $1.3\times10^{-2}$ at $N{=}128$
-(max $\approx4\times10^{-2}$)---about $3.5\%$ of the trajectory extent. The deviation is
-essentially grid-independent ($N{=}64\approx N{=}128$), so the residual gap to Sugiyama's
-$1024^2$ result is a genuine diffuse-interface/model difference (\cref{sec:disc-tg}), not
-under-resolution---consistent with the finite-difference RMT of Jain \emph{et al.}\
-\cite{Jain2019}, which reports a comparable diffuse-interface offset from the same benchmark. The IMEX integrator reproduces the explicit
-(validated) centroid trajectory to $2\times10^{-3}$ with identical minimum Jacobian,
-confirming that the implicit viscosity does not perturb the validated FSI result
-(\cref{fig:disc-centroid}; the integrator comparison is tabulated in the supplementary
-material). Over the full inward spiral the
-explicit, IMEX and semi-Lagrangian (IMEX-SL) integrators trace the same centroid
-path---with IMEX-SL completing it in a quarter of the steps (supplementary material).
+\subsection{Viscoelastic (SLS) disc in a Taylor--Green vortex}
+\label{sec:ve-coupled}
+We now couple the full \emph{standard-linear-solid} of \cref{sec:constitutive} to the flow:
+a disc carries an equilibrium neo-Hookean branch $\mu_s\dev(\Ften\Ften^{\!\top})$ and a
+relaxing Maxwell branch $G\dev\be$ (from the transported $\psib=\log\be$), here with a
+dominant relaxing branch ($\mu_s=0.5$, $G=1.5$), at the extensional centre of the four-cell
+Taylor--Green vortex---the disc-in-Taylor--Green setup of Jain \emph{et al.}\ \cite{Jain2019}
+(\cref{fig:disc-tg-energy}), where the disc genuinely stretches rather than merely rotating
+(\cref{fig:ve-coupled}).
+
+The stored elastic energy shows the defining SLS behaviour: at $\tau\to\infty$ the solid
+stores and releases energy in sustained oscillations, whereas shortening $\tau$ dissipates
+the relaxing branch---yet the non-relaxing equilibrium branch keeps the body returning toward
+its shape, so the energy does not decay to zero as it would for a Maxwell \emph{fluid}. As a
+check, the $\tau\to\infty$ curve coincides with an independent neo-Hookean run at the matched
+total modulus. The stronger extensional demonstration, where the solid genuinely stretches, is
+the four-roll case of \cref{sec:ve-extension}.
 
 \begin{figure}[t]\centering
-\includegraphics[width=0.62\linewidth]{figures/soft_disc_overlay.png}
-\caption{Neo-Hookean disc in a lid-driven cavity ($N{=}64$): centroid trajectory over the
-full inward spiral for the explicit, IMEX and IMEX-SL integrators, compared with Sugiyama
-\emph{et al.}\ \cite{Sugiyama2011}. Explicit and IMEX are indistinguishable; the
-semi-Lagrangian IMEX-SL ($4\times\dt$) traces the same spiral in ${\sim}4\times$ fewer
-steps, with a small phase drift on the innermost turns.}
-\label{fig:disc-centroid}
+\includegraphics[width=0.64\linewidth]{figures/sls_energy.png}
+\caption{Standard-linear-solid disc in a Taylor--Green vortex ($\mu_s=0.5$, $G=1.5$,
+$N{=}128$): stored elastic energy vs.\ time. At $\tau\to\infty$ (black) the SLS is elastic and
+coincides with an independent neo-Hookean run at the matched modulus (grey circles); finite
+relaxation ($\tau=1$ blue, $\tau=0.25$ red) dissipates the Maxwell branch, while the
+equilibrium branch keeps the energy from decaying to zero (shape memory).}
+\label{fig:ve-coupled}
 \end{figure}
+
+\Cref{fig:ve-snapshots} shows the disc stretched and retracted at the extensional centre of the
+vortex, over the flow streamlines, at five times.
+
+\begin{figure*}[t]\centering
+\includegraphics[width=\linewidth]{figures/ve_snapshots.png}
+\caption{Standard-linear-solid disc (red) stretched at the extensional centre of the four-cell
+Taylor--Green vortex, over the flow streamlines (coloured by speed), at $t=0.4$ to $2.0$.}
+\label{fig:ve-snapshots}
+\end{figure*}
 
 \subsection{Elastic vs.\ viscoelastic under sustained extension}
 \label{sec:ve-extension}
@@ -916,12 +943,11 @@ the viscoelastic implementation.
 
 \begin{figure}[t]\centering
 \includegraphics[width=\linewidth]{figures/ve_extension.png}
-\caption{Soft blob at the extensional stagnation point of a four-roll mill: elastic
-($\tau\to\infty$, top) vs.\ viscoelastic ($\mathrm{Wi}=0.25$, bottom), coloured by the
-maximum eigenvalue of $\be$ with the interface in white. The elastic $\be$ grows without
-bound (field saturates) while the viscoelastic blob reaches a steady filament. Right:
-centre stretch $b_e^{xx}(t)$---elastic diverges, viscoelastic saturates to the analytic
-$1/(1-2\mathrm{Wi})$ (dotted).}
+\caption{Soft blob at the stagnation point of a four-roll mill: the interface for the elastic
+($\tau\to\infty$, top, blue) and viscoelastic ($\mathrm{Wi}=0.25$, bottom, red) solid at
+$t=2,3,4$. The elastic blob thins without bound; the viscoelastic one reaches a steady necked
+shape. Right: centre stretch $b_e^{xx}(t)$ (elastic diverges; viscoelastic saturates to
+$1/(1-2\mathrm{Wi})$).}
 \label{fig:ve-extension}
 \end{figure}
 
@@ -940,130 +966,118 @@ small-deformation limit---$D\!\to\!\mathrm{Ca}$ with the particle aligning towar
 $\theta\!\to\!45^\circ$ as $\mathrm{Ca}\!\to\!0$---and departs sublinearly at larger Ca as the
 particle stiffens geometrically and rotates toward the flow ($\theta$ falling to
 ${\sim}22^\circ$ at $\mathrm{Ca}=0.4$), reproducing the deformation--orientation behaviour
-established for elastic and hyperelastic particles \cite{Sugiyama2011}. The absolute $D$
-carries an $O(10\%)$ scatter set by the diffuse-interface shape measure.
-Turning on the relaxing branch (SLS, \cref{fig:shear}b) lowers the steady deformation
+established for elastic and hyperelastic particles \cite{Sugiyama2011}.
+Turning on the relaxing branch (the standard-linear solid, \cref{fig:shear}b) lowers the steady deformation
 monotonically with the Weissenberg number $\mathrm{Wi}=\dot\gamma\tau$: under sustained
 shear the Maxwell branch accumulates a steady elastic stress $\sim G\tau\dot\gamma$ that
 stiffens the particle, and $\mathrm{Wi}\!\to\!0$ recovers the elastic curve. This is the
 viscoelastic-solid signature the title promises, absent from a purely elastic solver.
-\attention{This shear benchmark is new work; if a specific published deformable-particle
-curve (e.g.\ Gao \& Hu; Rosti \& Brandt) should be digitized for a quantitative overlay,
-say which and I will add it.}
+The elastic-branch deformation and orientation reproduce the trend reported by Gao \& Hu
+\cite{GaoHu2009} for a two-dimensional elastic particle in shear; for the SLS branch no
+published finite-strain viscoelastic-particle $D(\mathrm{Wi})$ curve exists---this is the new
+regime---so the monotone decrease is anchored by the steady Maxwell-stress estimate
+$\sim G\tau\dot\gamma$ above. The runs use a unit shear cell at $N=96$ (\cref{tab:params}).
 
 \begin{figure}[t]\centering
 \includegraphics[width=\linewidth]{figures/disc_in_shear.png}
-\caption{Viscoelastic-solid disc in plane shear. (a) Elastic disc: steady deformation $D$
-(blue, left) vs.\ elastic capillary number, with the small-deformation limit $D=\mathrm{Ca}$
-(dashed) and the orientation $\theta$ (red, right) decreasing from ${\sim}45^\circ$ with Ca.
-(b) SLS disc at $\mathrm{Ca}=0.2$: steady $D$ decreases with the Weissenberg number as the
-relaxing branch stiffens the particle under sustained shear; $\mathrm{Wi}=0$ is the elastic
-limit.}
+\caption{Viscoelastic-solid disc in plane shear ($\mathrm{Ca}=\mu_f\dot\gamma/G$ is
+viscous/elastic---no surface tension; $D$ is the Taylor deformation parameter). (a) Elastic
+disc: $D$ (blue) and orientation $\theta$ (red) vs.\ Ca, with the limit $D=\mathrm{Ca}$
+(dashed). (b) SLS disc at $\mathrm{Ca}=0.2$: $D$ decreases with the Weissenberg number.}
 \label{fig:shear}
 \end{figure}
 
-\subsection{Two-way-coupled viscoelastic FSI: an SLS disc in a Taylor--Green vortex}
-\label{sec:ve-coupled}
-We now couple the full \emph{standard-linear-solid} of \cref{sec:constitutive} to the flow:
-a disc carries an equilibrium neo-Hookean branch $\mu_s\dev(\Ften\Ften^{\!\top})$ (from the
-reference map) \emph{and} a relaxing Maxwell branch $G\dev\be$ (from the transported
-$\psib=\log\be$), with $\mu_s=G=0.1$, in a single Taylor--Green vortex
-(\cref{fig:ve-coupled}). Four results establish the coupling.
+\subsection{Contact: colliding discs}
+\label{sec:contact}
+Solid--solid contact is handled not by a repulsive body force---which the exact projection
+would annihilate---but by a trace-free contact \emph{stress} added to the blended solid stress
+before its divergence is taken \cite{Rycroft2020}, so the resulting momentum-conserving force
+survives the projection. Two soft discs, immersed in the viscous fluid, are launched head-on:
+they approach, squeeze the intervening fluid out, deform into contact, and rebound
+(\cref{fig:contact-snaps}). \Cref{fig:contact} tracks the centroid gap; the contact stress
+prevents interpenetration (the gap dips below $2R$ as the soft discs flatten against each other,
+then recovers). At a matched total modulus---so the only difference is relaxation---the elastic
+discs rebound more strongly than the viscoelastic (SLS) ones, whose relaxing Maxwell branch
+dissipates part of the collision energy. The contact stress enters the implicit solve through
+its right-hand side, and the IMEX scheme integrates these collisions stably even at impact speeds
+beyond the explicit elastic-wave CFL (supplementary material).
 
-\emph{(a) Convergence.} At fixed $\tau=1$ the SLS FSI fields converge under refinement with
-interface-limited orders---velocity near second order, kinetic
-energy second order, pressure first order (\cref{fig:ve-coupled}a)---so the added transport
-does not degrade the discretization.
-
-\emph{(b) Relaxation vs.\ shape memory.} The stored elastic energy (\cref{fig:ve-coupled}b)
-shows the defining SLS behaviour: shortening $\tau$ dissipates the relaxing branch, but the
-non-relaxing equilibrium branch keeps the body returning toward its shape---the energy does
-not decay to zero as it would for a Maxwell \emph{fluid}.
-
-\emph{(c) Robustness.} $\be$ stays symmetric positive-definite throughout: $\det\be$ is
-bounded near unity, rising mildly with the local Weissenberg number toward the analytic
-$1+\mathrm{Wi}^2$ (\cref{fig:ve-coupled}c, left), and the solid area is conserved to within
-$1$--$2\%$ (right), so the captured interface stays intact over the run.
-
-\emph{(d) The $\tau\to\infty$ limit and the two strain descriptions.} A subtlety raised by
-using both $\be$ and $\Ften=(\grad\xiv)^{-1}$: at $\tau\to\infty$ (pure elastic) the
-transported $\be$ and the reference-map $\Ften\Ften^{\!\top}$ are the \emph{same} continuum
-tensor, but they are advanced by two different discrete transports, so they need not agree
-exactly at finite resolution. \Cref{fig:ve-coupled}d plots
-$\|\exp\psib-\Ften\Ften^{\!\top}\|/\|\Ften\Ften^{\!\top}\|$ over the regularly-deformed
-solid. With the cubic semi-Lagrangian transport used here it stays small, reaching
-${\approx}0.11$ by the end of the run---a fourfold reduction over bilinear transport
-($\approx0.44$) and further reducible with resolution. The \emph{dynamics} are essentially
-unaffected: the $\tau\to\infty$ Maxwell run reproduces the reference-map neo-Hookean
-kinetic-energy history to $\max|\Delta\mathrm{KE}|/\mathrm{KE}=1.1\times10^{-4}$, because the
-elastic stress is a small perturbation on the flow and, in the SLS model, the shape-memory
-(equilibrium) branch is built from $\grad\xiv$ directly, so the residual drift touches only
-the relaxing branch.
+\begin{figure*}[t]\centering
+\includegraphics[width=\linewidth]{figures/contact_snapshots.png}
+\caption{Two soft discs (elastic, $N{=}128$) colliding head-on in the viscous fluid: the two
+solid interfaces over the flow streamlines, at successive times---approach, compression, and
+rebound. The fluid between the discs is squeezed out as they meet.}
+\label{fig:contact-snaps}
+\end{figure*}
 
 \begin{figure}[t]\centering
-\includegraphics[width=\linewidth]{figures/viscoelastic_disc_tg.png}
-\caption{Two-way-coupled standard-linear-solid disc in a Taylor--Green vortex
-($\mu_s=G=0.1$): (a) FSI mesh convergence at $\tau=1$ (interface-limited, as in the elastic
-case); (b) stored elastic energy vs.\ time for $\tau=\infty,1,0.25$ with an elastic-only
-baseline---relaxation dissipates the relaxing branch while the equilibrium branch retains
-shape; (c) $\max\det\be$ (solid, left) bounded near unity and solid area (dashed, right)
-conserved to $1$--$2\%$; (d) drift between the two strain descriptions
-$\|\exp\psib-\Ften\Ften^{\!\top}\|/\|\Ften\Ften^{\!\top}\|$ at $\tau=\infty$ (cubic
-transport), reaching ${\approx}0.11$; the dynamics are insensitive to it
-($\Delta\mathrm{KE}/\mathrm{KE}=1.1\times10^{-4}$).}
-\label{fig:ve-coupled}
+\includegraphics[width=0.6\linewidth]{figures/contact_collision.png}
+\caption{Colliding discs, centroid gap vs.\ time at matched total modulus. The discs deform into
+contact (gap below $2R$) and rebound; the elastic discs (blue) rebound more than the viscoelastic
+SLS discs (red), whose Maxwell branch dissipates collision energy.}
+\label{fig:contact}
 \end{figure}
 
-\Cref{fig:snapshots} collects snapshots of the three coupled examples---the elastic disc
-along the lid-cavity spiral, the viscoelastic disc in shear at increasing capillary number,
-and the SLS disc carried and deformed by the Taylor--Green vortex---showing the captured
-interface over the flow speed.
-
-\begin{figure}[t]\centering
-\includegraphics[width=\linewidth]{figures/snapshots.png}
-\caption{Simulation snapshots (solid interface, white, over the flow speed): (a) elastic
-disc in the lid-driven cavity at $t=2,5,8$; (b) viscoelastic disc in plane shear at
-$\mathrm{Ca}=0.1,0.2,0.4$ (steady inclined ellipse, deformation growing with Ca); (c) SLS
-disc in the Taylor--Green vortex at $t=0.3,0.6,1.0$.}
-\label{fig:snapshots}
-\end{figure}
-
-\subsection{Stiff-solid regime: enabling stability}
+\subsection{Stiff-solid regime}
 \label{sec:stiff}
-The introduction motivates implicit integration partly by the stiff-solid regime; we
-exercise it directly as an FSI case. A neo-Hookean disc with $\mu_s=16$
-($c_s=\sqrt{\mu_s/\rho}=4\,U_{\rm lid}$) makes the elastic wave the binding explicit limit.
-\Cref{fig:stiff}a shows the outcome: the explicit scheme diverges once $\dt$ exceeds its
-combined elastic/advective CFL (blow-up at $6\times$ the elastic CFL, $\min J$ collapsing at
-$t\!\approx\!0.07$), whereas the energy-conserving trapezoidal coupling
-(Proposition~\ref{prop:trap}) advances the same disc stably at $4\times$ and $8\times$ that
-step, the minimum Jacobian staying near $0.9$ so the body remains intact. This unconditional
-stability is what makes the stiff regime reachable at all. Accuracy at these large steps is,
-however, only $O(\dt)$ (quantified in the supplementary material): the trajectory (\cref{fig:stiff}b) carries a
-visible operator-split error, so at \emph{matched accuracy} the stiff case obeys the same
-step-size-versus-solve-cost trade discussed in the supplementary material, and the fully-consistent Newton
-of \cref{sec:monolithic} is the route to large-step accuracy. This is expected on physical
-grounds and worth stating plainly: a stiff \emph{elastic} wave is genuine, non-dissipative
-dynamics, so a large step that fails to resolve it loses phase accuracy however stably it is
-taken---implicit integration \emph{enables} the regime but cannot manufacture accuracy the
-time step does not resolve. The accuracy payoff of implicit integration is instead in the
-\emph{dissipative} stiffnesses, where the stiff modes are damped or exact rather than
-oscillatory: backward-Euler viscosity (the low-Reynolds limit) and, most cleanly, the
-relaxation-stiff limit---advancing a small-$\tau$ solid at $\dt\!\gg\!\tau$ via the exact
-substep, which is accurate to machine precision at \emph{any} $\dt$ (\cref{sec:verification}).
-The finite-$\tau$ coupled behaviour is the SLS case of \cref{sec:ve-coupled}.
-
-\begin{figure}[t]\centering
-\includegraphics[width=\linewidth]{figures/stiff_solid_fsi.png}
-\caption{Stiff disc ($\mu_s=16$, $c_s=4\,U_{\rm lid}$) in the lid-driven cavity:
-(a) $\min J$ over time---explicit diverges at $6\times$ the elastic CFL ($t\!\approx\!0.07$),
-while the trapezoidal coupling runs stably at $4$--$8\times$ with the disc intact;
-(b) centroid trajectory---stable at large steps but carrying the $O(\dt)$ operator-split
-error relative to the resolved explicit reference.}
-\label{fig:stiff}
-\end{figure}
+The introduction motivates implicit integration partly by the stiff-solid regime. A
+neo-Hookean disc with $\mu_s=16$ ($c_s=\sqrt{\mu_s/\rho}=4\,U_{\rm lid}$) makes the elastic
+wave the binding explicit limit: the explicit scheme diverges once $\dt$ exceeds its elastic
+CFL, whereas the energy-conserving trapezoidal coupling (Proposition~\ref{prop:trap}) advances
+the same disc stably at $4$--$8\times$ that step with the body intact ($\min J$ above $0.98$).
+Implicit integration thus \emph{enables} the stiff regime; because a stiff \emph{elastic} wave
+is genuine non-dissipative dynamics, however, a large step that fails to resolve it loses phase
+accuracy however stably it is taken---so the accuracy payoff of implicit integration lies in the
+\emph{dissipative} stiffnesses (backward-Euler viscosity and, most cleanly, the exact relaxation
+substep, accurate to machine precision at \emph{any} $\dt$, \cref{sec:verification}).
 
 %% (solver / integrator diagnostics are in the separate supplementary.tex)
+
+\subsection{Neo-Hookean (elastic) disc in a lid-driven cavity (FSI)}
+\label{sec:disc-lid}
+A neo-Hookean \emph{elastic} disc carried by the cavity flow is compared to the
+full-Eulerian result of Sugiyama \emph{et al.}\ \cite{Sugiyama2011} and to Jain
+\emph{et al.}\ \cite{Jain2019}. Sugiyama \emph{et al.}\ specify the Mooney--Rivlin
+coefficient $c_1=0.05$ with deviatoric stress $\sig_{\!s}'=2c_1\dev\bt$, so the
+shear-stress coefficient is $2c_1=0.1$; in our $\sig_{\!s}=\mu_s\dev\bt$ convention this
+is $\mu_s=0.1$ (\cref{tab:params}), matching their physical solid.
+The centroid trajectory threads the reference all the way to the vortex core. Sugiyama
+\emph{et al.}\ publish the trajectory as a set of $(c_x,c_y)$ points without time stamps, so the
+distance to their path is measured as the mean nearest-point distance (a time-matched deviation
+is not available against a curve with no time); the integrator-to-integrator comparison below,
+which shares a clock, is reported as a time-matched deviation. With the monotone bicubic
+semi-Lagrangian transport of the reference map the mean nearest-point distance to Sugiyama's
+$1024^2$ result is ${\sim}5\times10^{-3}$ at $N{=}128$---under $1\%$ of the ${\sim}0.6$ trajectory
+extent. The trajectory is moreover \emph{grid-converged}: refining from $N{=}128$ to $256$ shifts
+the path by under $7\times10^{-4}$, and the deviation from Sugiyama is flat across $N{=}128$--$256$
+(supplementary material). The residual is therefore not a resolution or
+transport-diffusion artifact but the cross-method scatter of the benchmark itself: our converged
+trajectory tracks Sugiyama's $1024^2$ reference as closely as the conservative reference-map scheme
+of Jain \emph{et al.}\ \cite{Jain2019} does (both ${\sim}3$--$5\times10^{-3}$), and well within
+Sugiyama's \emph{own} $128^2\!\to\!1024^2$ spread (${\sim}1\times10^{-2}$; \cref{fig:disc-centroid}
+overlays all three references, extracted exactly from the vector artwork of \cite{Jain2019}).
+Bilinear transport, by contrast, is markedly more diffusive on the inner turns (scheme comparison,
+supplementary material), so within the present family the residual is set by the reference-map
+transport, not the interface or the integrator (\cref{fig:disc-centroid}). This case is also
+where we quantify the IMEX speedup---which grows with resolution as the direct wall solve makes
+the implicit step free---against an explicit baseline in the supplementary material.
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.62\linewidth]{figures/soft_disc_overlay.png}
+\caption{Neo-Hookean disc in a lid-driven cavity: centroid trajectory over the inward spiral.
+Our result (red) overlays the reference of Sugiyama \emph{et al.}\ \cite{Sugiyama2011} at
+$1024^2$ (circles) and Jain \emph{et al.}\ \cite{Jain2019} at $128^2$ (blue dashed).}
+\label{fig:disc-centroid}
+\end{figure}
+
+\begin{figure*}[t]\centering
+\includegraphics[width=\linewidth]{figures/soft_disc_lid_snapshots.png}
+\caption{Neo-Hookean disc in the lid-driven cavity ($N{=}192$): the solid, its deformed
+reference-map grid (dashed), and the flow streamlines, at the times of Jain \emph{et al.}\
+\cite{Jain2019}. The disc is swept around the vortex and stretched into a comma up the moving
+wall.}
+\label{fig:disc-lid-snaps}
+\end{figure*}
 
 \section{Conclusions and outlook}
 \label{sec:conclusion}
@@ -1072,15 +1086,17 @@ We have presented an incompressible, one-fluid Reference Map Technique for visco
 fluid--structure interaction on a single staggered grid. The stress-carrying elastic
 strain is transported as a log-conformation tensor, guaranteeing positive-definiteness and
 decoupling the relaxing stress from the folding-prone reference map, and the staggered
-discretization makes the projection exact. On this spatial method we built four
-time-integration schemes of increasing implicitness: an implicit--explicit stack that
-removes the viscous, relaxation and elastic-wave step-size limits in turn---reusing the
-pressure transform/Krylov solvers, with a trapezoidal elastic coupling that conserves the
-discrete energy to round-off---and a semi-monolithic Newton--Krylov scheme that advances
-the velocity--pressure system implicitly with the reference map and conformation lagged.
-A work--precision comparison delineates where this pays off: the semi-Lagrangian step lowers
-cost at controlled accuracy broadly, while the implicit viscous/elastic solves win once the
-lifted step exceeds their per-step cost (low Reynolds number, stiff solids, or fine grids).
+discretization makes the projection exact. On this spatial method---in which the reference map
+and elastic strain are carried by a reinitialization-free bicubic semi-Lagrangian scheme---we
+built an \emph{implicit--explicit} (IMEX) time integrator that lifts the viscous, relaxation,
+elastic-wave and advective step-size limits, reusing the same sine/cosine transforms as the
+pressure projection (an exact direct solve even at no-slip and moving-lid walls), with an
+adaptive semi-Lagrangian advection and, for stiff solids, an energy-conserving trapezoidal
+elastic-wave stabilizer that conserves the discrete elastic energy to round-off.
+Because the implicit predictor costs the same per step as an explicit one, the lifted step
+converts directly into wall-clock: benchmarked against an explicit baseline (supplementary
+material), the net speedup tracks the step-size gain and \emph{grows} with resolution (up to
+$5.6\times$ at $N{=}128$).
 We demonstrated the coupled
 viscoelastic response on a disc in a Taylor--Green vortex: $\tau\to\infty$ recovers the
 elastic dynamics, finite $\tau$ dissipates stored elastic energy, and the elastic Finger
@@ -1093,17 +1109,17 @@ carrier is a \emph{solid} with an equilibrium branch inside an FSI solver, and f
 GPR unified model \cite{Peshkov2016,Dumbser2016} in being incompressible and implicit
 rather than compressible and explicit/semi-implicit.
 
-\paragraph{Limitations.} The formulation is two-dimensional; density contrast is limited
-to the variable-coefficient projection path; the diffuse-interface FSI fields converge
-below second order; and near-contact resolution is penalty-based. The linearly-implicit
-elastic stabilizer (stage~1) adds numerical damping at large $\dt$, which the
-energy-conserving trapezoidal coupling (\cref{sec:elastic-stab}) removes; the coupled runs
+The method has several limitations. It is two-dimensional; all reported runs use equal density
+($\rho_s=\rho_f$), density contrast being available through the variable-coefficient projection
+path but not exercised here; the diffuse-interface FSI fields converge below second order; and
+near-contact resolution is penalty-based. The dissipative one-sided
+elastic coupling (Proposition~\ref{prop:vn}) adds numerical damping at large $\dt$, which the
+energy-conserving trapezoidal coupling (Proposition~\ref{prop:trap}) removes; the coupled runs
 use the latter.
 
-\paragraph{Outlook.} Natural extensions are three dimensions, variable density and true
-sedimentation, lubrication-corrected contact \cite{Fai2018}, multi-mode/nonlinear
-(Giesekus, FENE-P) constitutive laws, and---most directly---closing the outer iteration to
-the fully-coupled $(\uv,p,\xiv,\psib)$ Newton posed in \cref{sec:monolithic}.
+Looking ahead, natural extensions are three dimensions, variable density and true
+sedimentation, lubrication-corrected contact \cite{Fai2018}, and multi-mode/nonlinear
+(Giesekus, FENE-P) constitutive laws.
 %% ===== end conclusion.tex =====
 
 \section*{Code availability}

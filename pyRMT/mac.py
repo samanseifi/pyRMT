@@ -286,6 +286,52 @@ def _dst_helmholtz_eigs(shp, dx, dy):
     return ly[:, None] + lx[None, :]
 
 
+# ── Direct DST Helmholtz solve (constant viscosity) — #14.5 net-speedup ───────
+# For constant coef the staggered wall Helmholtz (I - coef*Lap_hom) diagonalises
+# EXACTLY under a tensor product of sine transforms (verified to 3e-16): the DOF
+# that is Dirichlet at faces (u in x, v in y) uses DST-I on the interior faces; the
+# DOF that is cell-centred with a reflect ghost (u in y, v in x) uses DST-II. This
+# replaces the preconditioned CG (~5 iters, 2 transforms/iter) with a single
+# forward+inverse transform pair -- the IMEX viscous solve becomes as cheap as the
+# DCT pressure projection, which is what makes IMEX-SL net-faster than explicit at
+# the wall. (The PCG path below is retained for the variable-viscosity generalisation.)
+from functools import lru_cache
+
+
+@lru_cache(maxsize=64)
+def _dst_eigs_u(Ny, Nx, dx, dy):
+    lx = -2.0 * (1.0 - np.cos(np.pi * (np.arange(Nx - 1) + 1) / Nx)) / dx**2  # DST-I x-faces
+    ly = -2.0 * (1.0 - np.cos(np.pi * (np.arange(Ny) + 1) / Ny)) / dy**2      # DST-II y-cells
+    return ly[:, None] + lx[None, :]
+
+
+@lru_cache(maxsize=64)
+def _dst_eigs_v(Ny, Nx, dx, dy):
+    ly = -2.0 * (1.0 - np.cos(np.pi * (np.arange(Ny - 1) + 1) / Ny)) / dy**2  # DST-I y-faces
+    lx = -2.0 * (1.0 - np.cos(np.pi * (np.arange(Nx) + 1) / Nx)) / dx**2      # DST-II x-cells
+    return ly[:, None] + lx[None, :]
+
+
+def _dst_solve_u(rhs, coef, dx, dy):
+    """Direct exact solve of (I - coef*Lap_u_hom) x = rhs on interior u-DOFs (Ny,Nx-1)."""
+    from scipy.fft import dst, idst
+    Ny, Nxm1 = rhs.shape
+    eig = _dst_eigs_u(Ny, Nxm1 + 1, dx, dy)
+    rhat = dst(dst(rhs, type=2, axis=0, norm='ortho'), type=1, axis=1, norm='ortho')
+    xhat = rhat / (1.0 - coef * eig)
+    return idst(idst(xhat, type=1, axis=1, norm='ortho'), type=2, axis=0, norm='ortho')
+
+
+def _dst_solve_v(rhs, coef, dx, dy):
+    """Direct exact solve of (I - coef*Lap_v_hom) x = rhs on interior v-DOFs (Ny-1,Nx)."""
+    from scipy.fft import dst, idst
+    Nym1, Nx = rhs.shape
+    eig = _dst_eigs_v(Nym1 + 1, Nx, dx, dy)
+    rhat = dst(dst(rhs, type=1, axis=0, norm='ortho'), type=2, axis=1, norm='ortho')
+    xhat = rhat / (1.0 - coef * eig)
+    return idst(idst(xhat, type=2, axis=1, norm='ortho'), type=1, axis=0, norm='ortho')
+
+
 def _pcg_helmholtz(rhs_int, apply_lap_hom, embed, coef, dx, dy,
                    rtol=1e-8, maxiter=500, count=None):
     """Preconditioned CG for (I - coef*Lap_hom) x = rhs_int. The constant-coefficient
@@ -319,7 +365,7 @@ def _pcg_helmholtz(rhs_int, apply_lap_hom, embed, coef, dx, dy,
 
 
 def momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None,
-                                rho=1.0, rtol=1e-8, cs2=0.0):
+                                rho=1.0, rtol=1e-8, cs2=0.0, U_bot=0.0):
     """IMEX predictor for the lid-driven cavity: explicit central advection + face
     forces, implicit (backward-Euler) viscous diffusion solved by preconditioned CG
     (DST spectral preconditioner -> a handful of iterations, independent of N). Same
@@ -334,7 +380,7 @@ def momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None,
     stabilizer. The constant-coefficient form keeps the fast PCG solve; the O(dt^2)
     elastic term in the fluid is a harmless, consistent perturbation. Returns u*, v*."""
     Ny, Nxp1 = u.shape; Nx = Nxp1 - 1
-    up = _u_ghost_y(u, U_lid); vp = _v_ghost_x(v)
+    up = _u_ghost_y(u, U_lid, U_bot); vp = _v_ghost_x(v)
     c_el = 0.25 * dt * dt * cs2
     coef = dt * nu + c_el
 
@@ -348,10 +394,9 @@ def momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None,
         rhs_u = rhs_u + dt * fu[:, 1:-1] / rho
     if c_el > 0.0:
         rhs_u = rhs_u + c_el * _lap_u_lid_hom(u, dx, dy)   # trapezoidal term (u^n)
-    rhs_u[-1, :] += coef * (2.0 * U_lid / dy**2)           # lid inhomogeneity -> RHS
-    embed_u = lambda x: np.pad(x, ((0, 0), (1, 1)))        # walls (i=0,Nx) = 0
-    sol_u = _pcg_helmholtz(rhs_u, lambda w: _lap_u_lid_hom(w, dx, dy), embed_u,
-                           coef, dx, dy, rtol)
+    rhs_u[-1, :] += coef * (2.0 * U_lid / dy**2)           # top-wall inhomogeneity -> RHS
+    rhs_u[0, :]  += coef * (2.0 * U_bot / dy**2)           # bottom-wall (counter-shear) -> RHS
+    sol_u = _dst_solve_u(rhs_u, coef, dx, dy)              # exact direct DST solve
     ustar = u.copy(); ustar[:, 1:-1] = sol_u; ustar[:, 0] = 0.0; ustar[:, -1] = 0.0
 
     # --- v: explicit advection + force (+ trapezoidal elastic RHS) -> PCG solve ---
@@ -364,9 +409,7 @@ def momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None,
         rhs_v = rhs_v + dt * fv[1:-1, :] / rho
     if c_el > 0.0:
         rhs_v = rhs_v + c_el * _lap_v_lid_hom(v, dx, dy)
-    embed_v = lambda x: np.pad(x, ((1, 1), (0, 0)))        # walls (j=0,Ny) = 0
-    sol_v = _pcg_helmholtz(rhs_v, lambda w: _lap_v_lid_hom(w, dx, dy), embed_v,
-                           coef, dx, dy, rtol)
+    sol_v = _dst_solve_v(rhs_v, coef, dx, dy)              # exact direct DST solve
     vstar = v.copy(); vstar[1:-1, :] = sol_v; vstar[0, :] = 0.0; vstar[-1, :] = 0.0
     return ustar, vstar
 
@@ -383,11 +426,16 @@ def _interp_clamp(f, iq, jq):
 def momentum_predictor_lid_semilag(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None,
                                    rho=1.0, cs2=0.0, rtol=1e-8, cfl_switch=0.9):
     """Unconditionally-stable lid-cavity predictor with implicit viscosity (+ optional
-    trapezoidal elastic cs2), solved by preconditioned CG. Advection is ADAPTIVE: central
-    differencing while the advective CFL is satisfied (accurate), semi-Lagrangian (cubic)
-    backtrace beyond it (unconditionally stable, mildly diffusive). Returns u*, v*."""
-    cfl = dt * max(np.max(np.abs(u)) / dx, np.max(np.abs(v)) / dy)
-    if cfl <= cfl_switch:
+    trapezoidal elastic cs2), solved by a direct DST Helmholtz. Advection is ADAPTIVE: central
+    differencing while BOTH the advective CFL and the forward-Euler/central cell-Reynolds bound
+    dt <= 2 nu / |u|^2 are satisfied (accurate), semi-Lagrangian (cubic) backtrace beyond either
+    (unconditionally stable, mildly diffusive). The cell-Reynolds guard matters at low viscosity
+    / coarse grids, where the advective CFL alone would admit an unstable central branch (central
+    FE advection is stabilized by diffusion, not by the CFL). Returns u*, v*."""
+    vmax = max(np.max(np.abs(u)), np.max(np.abs(v)))
+    cfl = dt * vmax / min(dx, dy)
+    cell_re = dt * vmax * vmax / (2.0 * nu) if nu > 0.0 else np.inf
+    if cfl <= cfl_switch and cell_re <= 1.0:
         return momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U_lid, fu=fu, fv=fv,
                                            rho=rho, rtol=rtol, cs2=cs2)
     Ny, Nxp1 = u.shape; Nx = Nxp1 - 1
@@ -428,8 +476,7 @@ def momentum_predictor_lid_semilag(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None
     if c_el > 0.0:
         rhs_u = rhs_u + c_el * _lap_u_lid_hom(u, dx, dy)
     rhs_u[-1, :] += coef * (2.0 * U_lid / dy**2)
-    embed_u = lambda x: np.pad(x, ((0, 0), (1, 1)))
-    sol_u = _pcg_helmholtz(rhs_u, lambda w: _lap_u_lid_hom(w, dx, dy), embed_u, coef, dx, dy, rtol)
+    sol_u = _dst_solve_u(rhs_u, coef, dx, dy)             # exact direct DST solve
     ustar = u.copy(); ustar[:, 1:-1] = sol_u; ustar[:, 0] = 0.0; ustar[:, -1] = 0.0
 
     vc = v_adv[1:-1, :]
@@ -438,8 +485,7 @@ def momentum_predictor_lid_semilag(u, v, nu, dx, dy, dt, U_lid, fu=None, fv=None
         rhs_v = rhs_v + dt * fv[1:-1, :] / rho
     if c_el > 0.0:
         rhs_v = rhs_v + c_el * _lap_v_lid_hom(v, dx, dy)
-    embed_v = lambda x: np.pad(x, ((1, 1), (0, 0)))
-    sol_v = _pcg_helmholtz(rhs_v, lambda w: _lap_v_lid_hom(w, dx, dy), embed_v, coef, dx, dy, rtol)
+    sol_v = _dst_solve_v(rhs_v, coef, dx, dy)             # exact direct DST solve
     vstar = v.copy(); vstar[1:-1, :] = sol_v; vstar[0, :] = 0.0; vstar[-1, :] = 0.0
     return ustar, vstar
 
@@ -635,20 +681,25 @@ def momentum_predictor_periodic_semilag(u, v, nu, dx, dy, dt, lap_eig, cfl_switc
     return ustar, vstar
 
 
-def momentum_predictor_periodic(u, v, nu, dx, dy, dt):
+def momentum_predictor_periodic(u, v, nu, dx, dy, dt, fu=None, fv=None, rho=1.0):
     """Forward-Euler predictor (central advection + diffusion) on the periodic
-    staggered grid. Returns u*, v*."""
+    staggered grid, plus optional face body forces fu/fv (e.g.\ solid + contact
+    stress divergence). Returns u*, v*."""
     dudx = (np.roll(u, -1, 1) - np.roll(u, 1, 1)) / (2 * dx)
     dudy = (np.roll(u, -1, 0) - np.roll(u, 1, 0)) / (2 * dy)
     lapu = ((np.roll(u, -1, 1) - 2 * u + np.roll(u, 1, 1)) / dx**2
             + (np.roll(u, -1, 0) - 2 * u + np.roll(u, 1, 0)) / dy**2)
     ru = -(u * dudx + _v_at_u_per(v) * dudy) + nu * lapu
+    if fu is not None:
+        ru = ru + fu / rho
 
     dvdx = (np.roll(v, -1, 1) - np.roll(v, 1, 1)) / (2 * dx)
     dvdy = (np.roll(v, -1, 0) - np.roll(v, 1, 0)) / (2 * dy)
     lapv = ((np.roll(v, -1, 1) - 2 * v + np.roll(v, 1, 1)) / dx**2
             + (np.roll(v, -1, 0) - 2 * v + np.roll(v, 1, 0)) / dy**2)
     rv = -(_u_at_v_per(u) * dvdx + v * dvdy) + nu * lapv
+    if fv is not None:
+        rv = rv + fv / rho
     return u + dt * ru, v + dt * rv
 
 
@@ -688,6 +739,60 @@ def momentum_predictor_freeslip(u, v, nu, dx, dy, dt, fu=None, fv=None, rho=1.0)
         rhs_v = rhs_v + fv[1:-1, :] / rho
     vstar = v.copy(); vstar[1:-1, :] = vc + dt * rhs_v
     vstar[0, :] = 0.0; vstar[-1, :] = 0.0
+    return ustar, vstar
+
+
+def momentum_predictor_freeslip_imex(u, v, nu, dx, dy, dt, fu=None, fv=None, rho=1.0,
+                                     rtol=1e-9):
+    """IMEX predictor on the free-slip box: explicit central advection + face forces,
+    implicit (backward-Euler) viscosity. Same BCs as momentum_predictor_freeslip (normal
+    velocity zero at walls, tangential zero-gradient), but the viscous CFL is removed.
+    The constant-coefficient Helmholtz (I - dt*nu*Lap) is solved matrix-free by CG on the
+    identical free-slip stencil (well-conditioned; a few iterations). Returns u*, v*."""
+    from scipy.sparse.linalg import cg, LinearOperator
+    coef = dt * nu
+    Ny, Nxp1 = u.shape; Nx = Nxp1 - 1
+    Nyp1 = v.shape[0]
+
+    # --- u: explicit advection + force -> RHS on interior x-faces ---
+    up = np.empty((Ny + 2, Nxp1)); up[1:-1] = u; up[0] = u[0]; up[-1] = u[-1]
+    uc = u[:, 1:-1]
+    dudx = (u[:, 2:] - u[:, :-2]) / (2 * dx)
+    dudy = (up[2:, 1:-1] - up[:-2, 1:-1]) / (2 * dy)
+    rhs_u = uc + dt * (-(uc * dudx + _v_at_u(v) * dudy))
+    if fu is not None:
+        rhs_u = rhs_u + dt * fu[:, 1:-1] / rho
+
+    def A_u(xflat):
+        x = xflat.reshape(Ny, Nx - 1)
+        uf = np.zeros((Ny, Nxp1)); uf[:, 1:-1] = x          # Dirichlet u=0 at x-walls
+        ufp = np.empty((Ny + 2, Nxp1)); ufp[1:-1] = uf; ufp[0] = uf[0]; ufp[-1] = uf[-1]
+        lap = ((uf[:, 2:] - 2 * x + uf[:, :-2]) / dx**2
+               + (ufp[2:, 1:-1] - 2 * ufp[1:-1, 1:-1] + ufp[:-2, 1:-1]) / dy**2)
+        return (x - coef * lap).ravel()
+    Lu = LinearOperator((Ny * (Nx - 1),) * 2, matvec=A_u)
+    su, _ = cg(Lu, rhs_u.ravel(), rtol=rtol, x0=uc.ravel())
+    ustar = u.copy(); ustar[:, 1:-1] = su.reshape(Ny, Nx - 1); ustar[:, 0] = 0.0; ustar[:, -1] = 0.0
+
+    # --- v: explicit advection + force -> RHS on interior y-faces ---
+    vp = np.empty((Nyp1, Nx + 2)); vp[:, 1:-1] = v; vp[:, 0] = v[:, 0]; vp[:, -1] = v[:, -1]
+    vc = v[1:-1, :]
+    dvdy = (v[2:, :] - v[:-2, :]) / (2 * dy)
+    dvdx = (vp[1:-1, 2:] - vp[1:-1, :-2]) / (2 * dx)
+    rhs_v = vc + dt * (-(_u_at_v(u) * dvdx + vc * dvdy))
+    if fv is not None:
+        rhs_v = rhs_v + dt * fv[1:-1, :] / rho
+
+    def A_v(xflat):
+        x = xflat.reshape(Nyp1 - 2, Nx)
+        vf = np.zeros((Nyp1, Nx)); vf[1:-1, :] = x          # Dirichlet v=0 at y-walls
+        vfp = np.empty((Nyp1, Nx + 2)); vfp[:, 1:-1] = vf; vfp[:, 0] = vf[:, 0]; vfp[:, -1] = vf[:, -1]
+        lap = ((vfp[1:-1, 2:] - 2 * vfp[1:-1, 1:-1] + vfp[1:-1, :-2]) / dx**2
+               + (vf[2:, :] - 2 * x + vf[:-2, :]) / dy**2)
+        return (x - coef * lap).ravel()
+    Lv = LinearOperator(((Nyp1 - 2) * Nx,) * 2, matvec=A_v)
+    sv, _ = cg(Lv, rhs_v.ravel(), rtol=rtol, x0=vc.ravel())
+    vstar = v.copy(); vstar[1:-1, :] = sv.reshape(Nyp1 - 2, Nx); vstar[0, :] = 0.0; vstar[-1, :] = 0.0
     return ustar, vstar
 
 

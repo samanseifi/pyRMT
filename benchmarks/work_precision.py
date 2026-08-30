@@ -71,7 +71,7 @@ def main():
                     label=f"{scheme}, $N={N}$")
     ax.set_xscale("log"); ax.set_yscale("log")
     ax.set_xlabel("wall-clock time (s)"); ax.set_ylabel("max centroid error vs fine reference")
-    ax.legend(ncol=2, fontsize=9); ax.grid(True, which="both", alpha=0.2)
+    ax.legend(ncol=2, fontsize=9)
     fig.tight_layout()
     data = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
     os.makedirs(data, exist_ok=True)

@@ -174,7 +174,7 @@ def run(scheme='semilagrangian', grids=(32, 64, 128, 256), N_ref=512, t_end=0.25
         plt.loglog(dxs, ref_line, "k--", label="O(dx^2)")
         plt.xlabel("dx"); plt.ylabel("L2 / scalar error vs ref")
         plt.title(f"Disc-in-TG spatial convergence ({scheme}, ref N={N_ref})")
-        plt.legend(fontsize=8); plt.grid(True, which="both", alpha=0.3); plt.tight_layout()
+        plt.legend(fontsize=8); plt.tight_layout()
         fig = os.path.join(out_dir, "convergence.png")
         plt.savefig(fig, dpi=140); print(f"  saved {fig}")
     except Exception as e:

@@ -18,7 +18,7 @@ def apply():
         "font.size": 12,
         "axes.labelsize": 13,
         "axes.titlesize": 13,
-        "legend.fontsize": 11,
+        "legend.fontsize": 13,
         "xtick.labelsize": 11,
         "ytick.labelsize": 11,
         "axes.linewidth": 0.8,
@@ -30,6 +30,7 @@ def apply():
         "xtick.minor.size": 2.3, "ytick.minor.size": 2.3,
         "figure.dpi": 120, "savefig.dpi": 300, "savefig.bbox": "tight",
         "legend.frameon": False,
+        "axes.grid": False,
     }
     if _usetex_ok():
         base.update({

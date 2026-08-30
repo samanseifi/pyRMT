@@ -103,30 +103,30 @@ def main():
 
     # (a) startup of shear (normalized by steady-state values)
     g = G * TAU * 1.0
-    ax[0].plot(ts, sxy_an / g, "-", color="0.6", lw=3.0, label="UCM analytic")
-    ax[0].plot(ts, N1_an / (2 * G * TAU**2), "-", color="0.6", lw=3.0)
-    ax[0].plot(ts[::25], sxy[::25] / g, "o", ms=4.5, color="C0",
+    ax[0].plot(ts, sxy_an / g, "--", color="k", lw=1.4, label="UCM analytic")
+    ax[0].plot(ts, N1_an / (2 * G * TAU**2), "--", color="k", lw=1.4)
+    ax[0].plot(ts[::25], sxy[::25] / g, "o", ms=4.5, color="b",
                label=r"$\sigma_{xy}/G\tau\dot\gamma$")
-    ax[0].plot(ts[::25], N1[::25] / (2 * G * TAU**2), "s", ms=4.5, color="C3",
+    ax[0].plot(ts[::25], N1[::25] / (2 * G * TAU**2), "s", ms=4.5, color="r",
                label=r"$N_1/2G\tau^2\dot\gamma^2$")
     ax[0].set_xlabel(r"$t/\tau$"); ax[0].set_ylabel("normalized stress")
     ax[0].set_title(r"(a) startup of steady shear ($\mathrm{Wi}=1$)")
     ax[0].legend(loc="lower right"); ax[0].set_xlim(0, ts[-1])
 
     # (b) SAOS moduli
-    ax[1].loglog(wtau, Gp_an, "-", color="0.6", lw=3.0, label="Maxwell analytic")
-    ax[1].loglog(wtau, Gpp_an, "-", color="0.6", lw=3.0)
-    ax[1].loglog(wtau, Gp, "o", ms=5, color="C0", label=r"$G'(\omega)/G$")
-    ax[1].loglog(wtau, Gpp, "s", ms=5, color="C3", label=r"$G''(\omega)/G$")
+    ax[1].loglog(wtau, Gp_an, "--", color="k", lw=1.4, label="Maxwell analytic")
+    ax[1].loglog(wtau, Gpp_an, "--", color="k", lw=1.4)
+    ax[1].loglog(wtau, Gp, "o", ms=5, color="b", label=r"$G'(\omega)/G$")
+    ax[1].loglog(wtau, Gpp, "s", ms=5, color="r", label=r"$G''(\omega)/G$")
     ax[1].set_xlabel(r"$\omega\tau$"); ax[1].set_ylabel(r"$G',\,G''\ /\ G$")
     ax[1].set_title("(b) oscillatory shear (SAOS)")
     ax[1].legend(loc="lower right")
 
     # (c) planar extension
-    ax[2].plot(Wi, bxx_an, "-", color="0.6", lw=3.0, label="UCM analytic")
-    ax[2].plot(Wi, byy_an, "-", color="0.6", lw=3.0)
-    ax[2].plot(Wi, bxx, "o", ms=5, color="C0", label=r"$b_e^{xx}$")
-    ax[2].plot(Wi, byy, "s", ms=5, color="C3", label=r"$b_e^{yy}$")
+    ax[2].plot(Wi, bxx_an, "--", color="k", lw=1.4, label="UCM analytic")
+    ax[2].plot(Wi, byy_an, "--", color="k", lw=1.4)
+    ax[2].plot(Wi, bxx, "o", ms=5, color="b", label=r"$b_e^{xx}$")
+    ax[2].plot(Wi, byy, "s", ms=5, color="r", label=r"$b_e^{yy}$")
     ax[2].axvline(0.5, ls=":", color="0.5", lw=1.2)
     ax[2].set_yscale("log")
     ax[2].set_xlabel(r"$\mathrm{Wi}=\dot\varepsilon\,\tau$")

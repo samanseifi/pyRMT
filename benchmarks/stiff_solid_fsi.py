@@ -18,7 +18,12 @@ N, MU_S, T_END = 48, 16.0, 3.0
 
 def _run(dt_fac, integ):
     dx = 1.0 / N; cs = np.sqrt(MU_S); dt_el = 0.3 * dx / cs
-    return run(N=N, t_end=T_END, dt=dt_fac * dt_el, integrator=integ, mu_s=MU_S, write=False)
+    # isochoric=True: deviatoric neo-Hookean sigma=mu_s J^{-2} dev(b). At mu_s=16 the plain
+    # sigma=mu_s b leaks its isotropic part as spurious solenoidal velocity (the wide-stencil
+    # force is not in the range of the compact projection gradient) and injects ~170% energy;
+    # the deviatoric form is trace-free and removes it.
+    return run(N=N, t_end=T_END, dt=dt_fac * dt_el, integrator=integ, mu_s=MU_S,
+               isochoric=True, write=False)
 
 
 def main():

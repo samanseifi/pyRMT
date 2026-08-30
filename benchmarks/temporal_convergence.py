@@ -49,7 +49,7 @@ def main():
     ax.loglog(dte, ee[0] * (dte / dte[0])**2, "k:", lw=1, label="$O(\\Delta t^2)$")
     ax.set_xlabel(r"$\Delta t$"); ax.set_ylabel("max centroid error vs fine-$\\Delta t$ reference")
     ax.set_title(f"Temporal convergence, soft disc in lid ($N={N}$)")
-    ax.legend(fontsize=9); ax.grid(True, which="both", alpha=0.2)
+    ax.legend(fontsize=9)
     fig.tight_layout()
     data = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
     os.makedirs(data, exist_ok=True)

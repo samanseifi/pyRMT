@@ -88,7 +88,7 @@ def _plot(Ns, res):
         e0 = np.array(res["imex"][key])
         ax.loglog(h, e0[0] * (h / h[0]) ** 2, "k--", lw=1.0, label=r"2nd order")
         ax.loglog(h, e0[0] * (h / h[0]) ** 1, "k:", lw=1.0, label=r"1st order")
-        ax.set_xlabel(r"$h = 1/N$"); ax.set_ylabel(ttl); ax.grid(True, which="both", alpha=0.25)
+        ax.set_xlabel(r"$h = 1/N$"); ax.set_ylabel(ttl)
         ax.invert_xaxis()
     axes[0].legend(frameon=False, fontsize=9)
     fig.suptitle("Taylor-Green spatial convergence: explicit / IMEX / monolithic", y=1.02)

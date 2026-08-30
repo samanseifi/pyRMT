@@ -61,6 +61,34 @@ def test_imex_lid_reproduces_ghia_and_lifts_cfl():
     assert rms_imex_big < rms_exp + 5e-3, "IMEX at 5x dt drifted from Ghia"
 
 
+def test_dst_direct_solve_exact_and_matches_cg():
+    """The direct DST wall-Helmholtz solve is EXACT for constant viscosity (machine-precision
+    operator residual) and agrees with the CG fallback. A rectangular grid (Nx != Ny) guards
+    against an axis / transform-type mix-up (u: DST-I in x, DST-II in y; v: swapped)."""
+    from pyRMT.mac import (_dst_solve_u, _dst_solve_v, _pcg_helmholtz,
+                           _lap_u_lid_hom, _lap_v_lid_hom)
+    rng = np.random.default_rng(7)
+    for (Ny, Nx) in ((32, 32), (48, 64)):
+        dx, dy = 1.0 / Nx, 1.0 / Ny
+        coef = 3.7e-2                                    # dt*nu (+ elastic), constant
+        # u-component: interior faces (Ny, Nx-1); walls i=0,Nx zeroed
+        rhs_u = rng.standard_normal((Ny, Nx - 1))
+        emb_u = lambda x: np.pad(x, ((0, 0), (1, 1)))
+        xu = _dst_solve_u(rhs_u, coef, dx, dy)
+        res_u = xu - coef * _lap_u_lid_hom(emb_u(xu), dx, dy) - rhs_u
+        assert np.abs(res_u).max() / np.abs(rhs_u).max() < 1e-10   # exact
+        xu_cg = _pcg_helmholtz(rhs_u, lambda w: _lap_u_lid_hom(w, dx, dy), emb_u, coef, dx, dy)
+        assert np.abs(xu - xu_cg).max() < 1e-6                     # matches CG fallback
+        # v-component: interior faces (Ny-1, Nx); walls j=0,Ny zeroed
+        rhs_v = rng.standard_normal((Ny - 1, Nx))
+        emb_v = lambda x: np.pad(x, ((1, 1), (0, 0)))
+        xv = _dst_solve_v(rhs_v, coef, dx, dy)
+        res_v = xv - coef * _lap_v_lid_hom(emb_v(xv), dx, dy) - rhs_v
+        assert np.abs(res_v).max() / np.abs(rhs_v).max() < 1e-10
+        xv_cg = _pcg_helmholtz(rhs_v, lambda w: _lap_v_lid_hom(w, dx, dy), emb_v, coef, dx, dy)
+        assert np.abs(xv - xv_cg).max() < 1e-6
+
+
 def test_imex_softdisc_reproduces_explicit_centroid():
     """REGRESSION: IMEX reproduces the explicit soft-disc-in-lid centroid trajectory
     (the Sugiyama-validated FSI result) to within grid accuracy."""

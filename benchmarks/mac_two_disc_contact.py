@@ -110,7 +110,7 @@ def compare(N=64, t_end=3.0, V0=0.5, etas=(0.0, 1.5), **kw):
     ax.axhline(2 * R, color="r", ls="--", lw=1, label=f"2R={2*R:.2f} (touching)")
     ax.set_xlabel("t"); ax.set_ylabel("centroid gap")
     ax.set_title(f"Two-disc collision: gap vs time (V0={V0}, N={N})")
-    ax.legend(); ax.grid(True, alpha=.3); fig.tight_layout()
+    ax.legend(); fig.tight_layout()
     fig.savefig(os.path.join(out_dir, "collision_gap.png"), dpi=140)
     print(f"  saved {out_dir}/collision_gap.png")
 

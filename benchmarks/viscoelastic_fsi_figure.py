@@ -31,7 +31,7 @@ def make(N=64, t_end=8.0):
                  label=lbl, alpha=0.9)
     plt.xlabel("centroid $x$"); plt.ylabel("centroid $y$"); plt.axis("equal")
     plt.title(f"Viscoelastic disc in lid-driven cavity (N={N})")
-    plt.legend(frameon=False, fontsize=9); plt.grid(alpha=0.3); plt.tight_layout()
+    plt.legend(frameon=False, fontsize=9); plt.tight_layout()
     p = os.path.join(OUT, "viscoelastic_fsi.png"); plt.savefig(p, dpi=150); plt.close()
     print(f"saved {p}")
     for lbl, (tr, _s) in runs.items():

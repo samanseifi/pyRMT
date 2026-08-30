@@ -22,15 +22,21 @@ def _frame(tag, idx):
     return np.load(os.path.join(D, f"frames_{tag}", f"f{idx:04d}.npz"))
 
 
-def _panel(ax, fr, title):
-    lam = fr["lam"]; phi = fr["phi"]; N = lam.shape[0]
-    ext = [0, 1, 0, 1]
-    ax.imshow(lam, origin="lower", extent=ext, cmap="magma",
-              vmin=1.0, vmax=6.0, aspect="equal")
+def _panel(ax, fr, title, color="b"):
+    # white background: four-roll streamlines (the flow) + blob OUTLINE (the particle)
+    phi = fr["phi"]; N = phi.shape[0]
     xc = (np.arange(N) + 0.5) / N; X, Y = np.meshgrid(xc, xc)
-    ax.contour(X, Y, phi, levels=[0.0], colors="w", linewidths=1.4)
-    ax.set_xlim(0.2, 0.8); ax.set_ylim(0.2, 0.8)
+    ax.set_facecolor("white")
+    # four-roll mill velocity: u_mill = U0(sin kx cos ky, -cos kx sin ky), k = 2 pi
+    k = 2.0 * np.pi
+    U = np.sin(k * X) * np.cos(k * Y); V = -np.cos(k * X) * np.sin(k * Y)
+    ax.streamplot(xc, xc, U, V, color="0.72", linewidth=0.5, density=0.7,
+                  arrowsize=0.6, arrowstyle="->")
+    ax.contour(X, Y, phi, levels=[0.0], colors=color, linewidths=2.0)
+    ax.set_xlim(0.0, 1.0); ax.set_ylim(0.0, 1.0); ax.set_aspect("equal")
     ax.set_xticks([]); ax.set_yticks([])
+    for s in ax.spines.values():
+        s.set_edgecolor("0.7")
     if title:
         ax.set_title(title, fontsize=10)
 
@@ -41,22 +47,24 @@ def main():
     import matplotlib.pyplot as plt
     from matplotlib.gridspec import GridSpec
 
-    times = [2.0, 5.0, 9.0]
+    # times chosen before the (fast-elongating) viscoelastic blob reaches the domain walls,
+    # so no spurious boundary deformation is shown
+    times = [2.0, 3.0, 4.0]
     idx = [int(round(t / 0.15)) for t in times]
 
     fig = plt.figure(figsize=(13.2, 5.2))
     gs = GridSpec(2, 4, width_ratios=[1, 1, 1, 1.5], wspace=0.32, hspace=0.12)
     for j, (i, t) in enumerate(zip(idx, times)):
         _panel(fig.add_subplot(gs[0, j]), _frame("elastic", i),
-               r"$t=%.0f$" % t if True else "")
-        _panel(fig.add_subplot(gs[1, j]), _frame("tau0.5", i), "")
+               r"$t=%.0f$" % t, color="b")
+        _panel(fig.add_subplot(gs[1, j]), _frame("tau0.5", i), "", color="r")
     # row labels
     fig.text(0.065, 0.72, "elastic\n($\\tau\\!\\to\\!\\infty$)", ha="center", va="center", fontsize=10)
     fig.text(0.065, 0.30, "viscoelastic\n($\\mathrm{Wi}=0.25$)", ha="center", va="center", fontsize=10)
 
     # b_e^xx(t) at the centre: elastic diverges, viscoelastic saturates to 1/(1-2Wi)
     ax = fig.add_subplot(gs[:, 3])
-    cols = {"elastic": "C0", "tau0.25": "C1", "tau0.5": "C3"}
+    cols = {"elastic": "b", "tau0.25": "g", "tau0.5": "r"}
     labs = {"elastic": r"elastic ($\mathrm{Wi}=\infty$)",
             "tau0.25": r"$\mathrm{Wi}=0.125$", "tau0.5": r"$\mathrm{Wi}=0.25$"}
     for tag in ("elastic", "tau0.25", "tau0.5"):
@@ -67,7 +75,7 @@ def main():
             ax.axhline(ba, ls=":", color=cols[tag], lw=1.0)
     ax.set_xlabel("time $t$"); ax.set_ylabel(r"$b_e^{xx}$ at blob centre")
     ax.set_title(r"elastic diverges; viscoelastic $\to 1/(1-2\mathrm{Wi})$", fontsize=10)
-    ax.legend(loc="center right", fontsize=9)
+    ax.legend(loc="center right")
     ax.text(0.5, 0.9, r"dotted: analytic $1/(1-2\mathrm{Wi})$",
             transform=ax.transAxes, ha="center", fontsize=8.5, color="0.4")
 

@@ -21,7 +21,8 @@ import os, sys
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pyRMT.mac import (mac_grid, momentum_predictor_freeslip, project,
+from pyRMT.mac import (mac_grid, momentum_predictor_freeslip,
+                       momentum_predictor_freeslip_imex, project,
                        poisson_eigs_neumann, divergence)
 from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
     rebuild_phi_from_reference_map, solid_cauchy_stress, smoothed_heaviside,
@@ -49,7 +50,7 @@ def _FFt_from_xi(X1, X2, dx, dy):
 
 def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
             mu_f=0.01, U0=0.3, rho=1.0, scheme="semilagrangian_cubic", w_cut_fac=4.0,
-            model="maxwell", history=False, snap_times=None):
+            model="maxwell", history=False, snap_times=None, kw=1, integrator="explicit"):
     """One disc-in-Taylor-Green FSI run. ``model`` selects the solid constitution:
         "elastic" -- reference-map neo-Hookean, sigma = mu_s dev(F F^T)  (Sec. 8.2)
         "maxwell" -- pure Maxwell branch,       sigma = G dev(b_e)       (fluid drop)
@@ -63,8 +64,9 @@ def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
     xf = np.arange(N + 1) * dx
     Xu, Yu = np.meshgrid(xf, xc); Xv, Yv = np.meshgrid(xc, xf)
 
-    u = U0 * np.pi * np.sin(np.pi * Xu) * np.cos(np.pi * Yu)
-    v = -U0 * np.pi * np.cos(np.pi * Xv) * np.sin(np.pi * Yv)
+    k = kw * np.pi   # kw=1 single vortex (disc orbits); kw=2 four-cell (disc strains at centre)
+    u = U0 * k * np.sin(k * Xu) * np.cos(k * Yu)
+    v = -U0 * k * np.cos(k * Xv) * np.sin(k * Yv)
     u[:, 0] = 0.0; u[:, -1] = 0.0; v[0, :] = 0.0; v[-1, :] = 0.0
 
     phi_init = lambda X, Y: np.sqrt((X - x0)**2 + (Y - y0)**2) - R
@@ -73,7 +75,11 @@ def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
     p11 = np.zeros((N, N)); p12 = np.zeros((N, N)); p22 = np.zeros((N, N))  # psi=log I=0
     w_t = 2.0 * dx; nu = mu_f / rho; cs = np.sqrt(mu_s / rho)
     eig = poisson_eigs_neumann(N, N, dx, dy)
-    dt = min(0.25 * dx / (U0 * np.pi), 0.2 * dx * dx / nu, 0.25 * dx / (cs + 1e-9))
+    imex = (integrator == "imex")
+    _lim = [0.25 * dx / (U0 * k), 0.25 * dx / (cs + 1e-9)]
+    if not imex:                       # explicit also bound by the viscous CFL
+        _lim.append(0.2 * dx * dx / nu)
+    dt = min(_lim)
     p = np.zeros((N, N))
 
     area0 = float(np.sum(phi <= 0) * dx * dy)
@@ -125,13 +131,17 @@ def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
         divy = grad_central_x_2nd(Sxy, dx) + grad_central_y_2nd(Syy, dy)
         fu = np.zeros((N, N + 1)); fu[:, 1:-1] = 0.5 * (divx[:, 1:] + divx[:, :-1])
         fv = np.zeros((N + 1, N)); fv[1:-1, :] = 0.5 * (divy[1:, :] + divy[:-1, :])
-        us, vs = momentum_predictor_freeslip(u, v, nu, dx, dy, dt, fu=fu, fv=fv, rho=rho)
+        if imex:
+            us, vs = momentum_predictor_freeslip_imex(u, v, nu, dx, dy, dt, fu=fu, fv=fv, rho=rho)
+        else:
+            us, vs = momentum_predictor_freeslip(u, v, nu, dx, dy, dt, fu=fu, fv=fv, rho=rho)
         u, v, p = project(us, vs, dx, dy, dt, rho, eig)
         t += dt
 
         while snap_q and t >= snap_q[0]:
             uc2 = 0.5 * (u[:, :-1] + u[:, 1:]); vc2 = 0.5 * (v[:-1, :] + v[1:, :])
             snaps.append(dict(t=t, phi=phi.copy(), speed=np.sqrt(uc2**2 + vc2**2),
+                              uc=uc2.copy(), vc=vc2.copy(),
                               field=(np.exp(p11 + p22) if has_maxwell else J).copy(),
                               Xc=Xc, Yc=Yc)); snap_q.pop(0)
 
@@ -196,7 +206,7 @@ def main():
     import matplotlib.pyplot as plt
 
     # (a) mesh convergence of the SLS model at fixed finite tau
-    NS = (32, 48, 64, 96, 128); tau_c = 1.0; tconv = 0.6
+    NS = (32, 64, 128, 256); tau_c = 1.0; tconv = 0.6
     conv = {N: run_one(N, tconv, tau=tau_c, model="sls") for N in NS}
     g = conv[NS[-1]]["xc"]; ref = NS[-1]; coarse = list(NS[:-1])
     spref = _sample(conv[ref]["xc"], conv[ref]["speed"], g)
@@ -219,31 +229,38 @@ def main():
     drift = mw_inf["bevsF"][-1]
     print(f"maxwell(tau=inf) vs elastic: max|dKE|/KE = {rec:.2e}, final ||exp psi - FF^T||/||FF^T|| = {drift:.2e}")
 
-    fig, ax = plt.subplots(2, 2, figsize=(10.4, 7.6))
     labels = {np.inf: r"$\tau=\infty$", 1.0: r"$\tau=1$", 0.25: r"$\tau=0.25$"}
     cols = {np.inf: "C0", 1.0: "C1", 0.25: "C3"}
     h = np.array([1.0 / N for N in coarse])
+    data = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+    os.makedirs(data, exist_ok=True)
 
+    # ===== MAIN figure: the two physics panels =====
+    fig, ax = plt.subplots(1, 2, figsize=(11.0, 4.4))
     # (a) mesh convergence
-    a = ax[0, 0]
+    a = ax[0]
     a.loglog(h, verr, "o-", label="velocity"); a.loglog(h, perr, "s-", label="pressure")
     a.loglog(h, keerr, "^-", label="kinetic energy")
     a.loglog(h, verr[0]*(h/h[0])**2, "k--", lw=1, label="2nd order")
     a.loglog(h, perr[0]*(h/h[0])**1, "k:", lw=1, label="1st order")
     a.invert_xaxis(); a.set_xlabel("$h=1/N$"); a.set_ylabel("$L_2$ error vs finest")
     a.set_title(r"(a) SLS mesh convergence ($\tau=1$)")
-    a.legend(ncol=2, loc="upper left", fontsize=9); a.grid(True, which="both", alpha=0.2)
-
+    a.legend(ncol=2, loc="upper left", fontsize=9)
     # (b) stored elastic energy: SLS relaxing branch dissipates, equilibrium persists
-    a = ax[0, 1]
+    a = ax[1]
     for tau in taus:
         a.plot(sls[tau]["t"], sls[tau]["Eel"], "-", color=cols[tau], label="SLS "+labels[tau])
     a.plot(base["t"], base["Eel"], "k--", lw=1.3, label="elastic only")
     a.set_xlabel("time $t$"); a.set_ylabel("stored elastic energy")
     a.set_title("(b) SLS: relaxation vs shape memory"); a.legend(loc="upper left", fontsize=9)
+    fig.tight_layout()
+    out = os.path.join(data, "viscoelastic_disc_tg.png"); fig.savefig(out); print("saved", out)
+    plt.close(fig)
 
-    # (c) robustness: det b_e bounded and solid area preserved (interface integrity)
-    a = ax[1, 0]
+    # ===== SUPPLEMENTARY figure: solver diagnostics =====
+    figd, axd = plt.subplots(1, 2, figsize=(11.0, 4.4))
+    # (a) det b_e bounded and solid area preserved (interface integrity)
+    a = axd[0]
     for tau in taus:
         a.plot(sls[tau]["t"], sls[tau]["detbe_max"], "-", color=cols[tau], label=labels[tau])
     a.axhline(1.0, ls=":", color="0.6", lw=1)
@@ -252,26 +269,21 @@ def main():
     for tau in taus:
         ar.plot(sls[tau]["t"], sls[tau]["area"], "--", color=cols[tau], lw=1.1, alpha=0.8)
     ar.set_ylabel("solid area / initial (dashed)"); ar.set_ylim(0.8, 1.2)
-    a.set_title(r"(c) SLS: $\det b_e$ and solid area"); a.legend(loc="upper left", fontsize=9)
-
-    # (d) strain-description drift at tau=inf, where exp(psi) should equal F F^T:
-    # quantifies the two discrete representations of the same tensor (item raised in review)
-    a = ax[1, 1]
+    a.set_title(r"(a) $\det b_e$ and solid area"); a.legend(loc="upper left", fontsize=9)
+    # (b) strain-description drift at tau=inf, where exp(psi) should equal F F^T
+    a = axd[1]
     a.plot(mw_inf["t"], mw_inf["bevsF"], "-", color="C0", lw=2)
     a.set_xlabel("time $t$")
     a.set_ylabel(r"$\|\exp\psi - FF^\top\|/\|FF^\top\|$ (solid interior)")
-    a.set_title(r"(d) strain-description drift ($\tau=\infty$)")
+    a.set_title(r"(b) strain-description drift ($\tau=\infty$)")
     a.text(0.5, 0.5, "transported $b_e$ vs reference-map $FF^\\top$:\n"
            "same tensor, two discretizations.\n"
-           r"Dynamics still agree to $%.1f\times10^{-4}$ (KE)." % (rec * 1e4),
+           r"dynamics still agree to $%.1f\times10^{-4}$ (KE)." % (rec * 1e4),
            transform=a.transAxes, ha="center", va="center", fontsize=9,
            bbox=dict(boxstyle="round", fc="0.95", ec="0.8"))
-
-    fig.tight_layout()
-    data = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
-    os.makedirs(data, exist_ok=True)
-    out = os.path.join(data, "viscoelastic_disc_tg.png")
-    fig.savefig(out); print("saved", out)
+    figd.tight_layout()
+    outd = os.path.join(data, "viscoelastic_disc_tg_diag.png"); figd.savefig(outd); print("saved", outd)
+    plt.close(figd)
     return dict(verr=verr, perr=perr, keerr=keerr, coarse=coarse, recovery=rec, drift=drift)
 
 

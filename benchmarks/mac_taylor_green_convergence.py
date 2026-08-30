@@ -99,7 +99,7 @@ def run(out_root="outputs"):
             plt.annotate(f"N={N}", (hh, e), textcoords="offset points", xytext=(6, 6), fontsize=8)
         plt.xlabel("h = 1/N"); plt.ylabel("L2 error in u vs exact Taylor-Green")
         plt.title("Pure-fluid Taylor-Green decay: MAC spatial convergence (2nd order)")
-        plt.legend(); plt.grid(True, which="both", alpha=.3); plt.tight_layout()
+        plt.legend(); plt.tight_layout()
         plt.savefig(os.path.join(out_dir, "convergence.png"), dpi=130)
         print(f"  saved {out_dir}/convergence.png")
     except Exception as e:

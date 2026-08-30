@@ -38,9 +38,15 @@ def compute_kinetic_energy(a, b, rho_f, rho_s, phi, w_t, dx, dy):
 
     return ke_total
 
-def compute_strain_energy(X1, X2, phi, mu_s, dx, dy, kappa=0.0):
+def compute_strain_energy(X1, X2, phi, mu_s, dx, dy, kappa=0.0, isochoric=False):
     """
     Compute elastic strain energy: SE = ∫ μ_s * (tr(F^T F) - 2) dA
+
+    isochoric=True uses the incompressible-consistent density (mu_s/2)(I1 - 2J)
+    = (mu_s/2)(lambda1 - lambda2)^2 >= 0, i.e. the shear strain energy with the
+    spurious volumetric drift (J != 1) of the diffuse reference map removed. It
+    equals the standard (mu_s/2)(I1 - 2) when J = 1, but never goes negative when
+    a few near-interface cells drift to J < 1 (which makes I1 - 2 < 0).
 
     For Neo-Hookean solid: W = (μ_s/2) * (I_1 - 2)
     where I_1 = tr(F^T F) = tr(C) with C = F^T F (right Cauchy-Green tensor)
@@ -125,7 +131,8 @@ def compute_strain_energy(X1, X2, phi, mu_s, dx, dy, kappa=0.0):
             # Jain et al. (2019) Eq. 38 strain energy.
             J_vals = np.ones_like(detG)
             J_vals[good] = 1.0 / detG[good]
-            se_density[good] = (0.5 * mu_s * (I1[good] - 2.0)
+            base = (I1[good] - 2.0 * np.abs(J_vals[good])) if isochoric else (I1[good] - 2.0)
+            se_density[good] = (0.5 * mu_s * base
                                 + 0.5 * kappa * (J_vals[good] - 1.0)**2)
 
     # Integrate over solid domain

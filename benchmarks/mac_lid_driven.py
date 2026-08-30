@@ -18,7 +18,7 @@ from pyRMT.mac import (mac_grid, momentum_predictor, momentum_predictor_lid_imex
 
 
 def run(Re=100.0, N=128, max_steps=120000, steady_tol=2e-6, out_root="outputs",
-        imex=False, dt_fac=1.0, integrator=None):
+        imex=False, dt_fac=1.0, integrator=None, return_fields=False):
     Lx = Ly = 1.0
     U_lid = 1.0
     dx, dy = mac_grid(N, N, Lx, Ly)
@@ -63,6 +63,9 @@ def run(Re=100.0, N=128, max_steps=120000, steady_tol=2e-6, out_root="outputs",
     os.makedirs(out_dir, exist_ok=True)
     np.savetxt(os.path.join(out_dir, "centerline_u_vs_y.csv"),
                np.column_stack([yc, u_line]), delimiter=",", header="y,u", comments="")
+
+    if return_fields:
+        return dict(u=u, v=v, dx=dx, dy=dy, N=N, Re=Re)
 
     ghia = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "data", f"plot_u_y_Ghia{int(Re)}.csv")

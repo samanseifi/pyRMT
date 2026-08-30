@@ -208,10 +208,134 @@ here `ψ=log b_e` carries stress, decoupled from a geometry-only ξ).
       (`tests/test_elastic_imex_fsi.py`). **This is the net-speedup result the whole
       implicit program targeted** — every explicit CFL (viscous, relaxation, elastic wave,
       advection) is now lifted, and the PCG keeps the implicit solve cheap.
-    - **Stage 2d (future) — fully-consistent JFNK** over `(u,p,ξ,ψ)` with the analytic
-      material tangent + implicit (Crank-Nicolson) central advection would remove the SL
-      numerical diffusion and the ~6% large-dt drift, giving 2nd-order accuracy at large dt.
-      The present 2a–2c scheme is the linearly-implicit / operator-split realization.
+    - **Stage 2d — FULLY MONOLITHIC Newton–Krylov. ✅ IMPLEMENTED** (`pyRMT/monolithic.py`,
+      `tests/test_monolithic.py`, `benchmarks/monolithic_disc_tg.py`; the numerical
+      realization of `paper/monolithic_aml.tex`). The reference map is **eliminated**, not
+      carried as an unknown: an *implicit* semi-Lagrangian step `ξ(x)=ξ̂ⁿ(x−Δt·uⁿ⁺¹(x))`
+      with a **C¹ (unclamped Catmull–Rom)** interpolant makes ξ — hence `F=(∇ξ)⁻¹`, σ_s and
+      the interface `φ=φ₀∘ξ` — a differentiable function of the velocity, so one
+      `(u,p)` Newton solve advances the whole state with no CFL of any kind.
+      - **Three enablers.** (i) The C¹ interpolant: `interpolators.bicubic_interpolate`
+        clamps to the stencil min/max, and min/max is not differentiable — that limiter
+        would break Newton exactly at the interface. (ii) **`extrapolate_reference_map`
+        made differentiable**: its layer flags + weighted LSQ plane fit are frozen at φⁿ
+        into an explicit linear "plan" (`ExtrapPlan`), so the band extrapolation is a fixed
+        sparse *linear* map on ξ (verified linear to 1e-15). It is also now deterministic —
+        the original reads *and writes* `known_flag` inside a `prange` loop. (iii) The
+        interface needs **no lagging**: `smoothed_heaviside` is C¹ and φ₀∘ξ analytic, so
+        `H(φ(ξ(u)))` differentiates through.
+      - **Preconditioner.** On the free-slip box the velocity block is *exactly* separable
+        (Dirichlet across the wall-normal direction, Neumann along it) → **DST-I ⊗ DCT-II**
+        for u and the transpose for v, machine-exact. With the DCT pressure Poisson this is
+        an exact projection preconditioner + a Cahouet–Chabard Schur term. Krylov is a
+        hand-rolled **FGMRES** (Givens rotations); it beat `scipy.gmres` ~2.5× on matvecs.
+      - **Verified.** Newton converges **quadratically** (`|R|` 2.3e-1 → 4.1e-5 → 8.0e-13);
+        the **closed-form tangent** (draft Eqs. 9–10) matches a central FD to round-off;
+        at **40× the elastic-wave CFL** (N=48, μ_s=100) it runs with `min det(∇ξ)=1.001`
+        and **0.66%** velocity error vs a resolved explicit reference, where the explicit
+        scheme **diverges at 10×** and yields `det=−128` (folded) at 40×. 13 tests.
+      - **Honest gaps (both measured, both open):**
+        1. **Order in dt is 1, not 2.** The velocity–pressure kernel *is* second-order-capable
+           — θ=½ + Eulerian advection with no solid gives order **2.00** at ~1e-9 error — but
+           the reference-map band (masked/extrapolated field on a cell-quantized solid region)
+           caps the coupled scheme at first order. The outer interface fixed point
+           (`n_outer`) buys ~2.5× in the constant, not the order. **The draft's
+           second-order claim is not supported as written.**
+        2. **NET SPEEDUP ACHIEVED at resolution — the regime matters.** Which explicit
+           limit binds decides everything, and the two routes behave *oppositely*:
+           - *Elastic/advective route*: both scale as dx, so `dt_mono/dt_exp ~ c_s/U` is
+             **resolution-independent**. Worse, chasing stiffness raises `mu_s*dt`, exactly
+             what degrades conditioning, so the bigger step is eaten by extra iterations.
+             **No crossover in stiffness found up to mu_s=1e5.**
+           - *Viscous route*: `dt_visc ~ dx^2`, so refining makes it bind (N>75 here) and the
+             gain grows **∝ N** while leaving `mu_s*dt` alone, so the Krylov count stays
+             bounded. **This is where the method pays.** Measured (disc-in-TG, mu_s=0.1,
+             T=0.1, both timed in one process so the ratio is machine-independent):
+
+             | N | binds | expl steps/wall | mono steps/matvec | speedup | rel err |
+             |---|---|---|---|---|---|
+             | 32 | adv | 13 / 0.46 s | 13 / 10 | 0.27x | 1.8e-3 |
+             | 64 | adv | 25 / 1.70 s | 25 / 9 | 0.29x | 9.3e-4 |
+             | 128 | **visc** | 82 / 26.2 s | 49 / 7 | **1.11x** | 4.6e-4 |
+             | 192 | **visc** | 185 / 130.7 s | 73 / 6 | **1.77x** | 3.1e-4 |
+             | 256 | **visc** | 328 / 387.5 s | 97 / 6 | **2.40x** | 2.3e-4 |
+
+             Step gain tracks the predicted `nu/(U dx)` to two digits (1.67 vs 1.70, 2.53 vs
+             2.55, 3.38 vs 3.40) and **matvecs FALL with N (10→6)** — the preconditioner is at
+             least mesh-independent. Not saturating at N=256.
+           - *Caveat*: this is vs a **fully explicit** solver (as all published RMT solvers
+             are). A fractional-step scheme with implicit viscosity would also remove the
+             viscous limit; against that, the advantage would have to come from the elastic
+             wave, which is still preconditioner-limited.
+
+        2b. **The old "no win" finding, for reference (soft lid cavity, advection-limited).** On the **lid-driven
+           cavity** (N=64, T=2, matched deviatoric stress, serial, threads pinned) the
+           monolithic solver is **5–200× slower** than the explicit driver, and slower than
+           the repo's own `imex-elastic-sl` (which reaches 1.3–3.4×). Two independent causes:
+           - *Iteration count grows with dt* — **largely FIXED (L3).** The projection
+             preconditioner did not contain the elastic stiffness K (11 matvecs at 1× the
+             elastic CFL → 202 at 10× → 2211 at 40×). Linearizing the elastic force for a
+             near-undeformed map gives `d(sigma_s) ~ 2 mu_s dt dev(D(du))` — an extra
+             viscosity `mu_s*dt` inside the solid — so `pc_mode='sparse'` assembles that
+             variable-coefficient block (~5 nnz/row) and factors it with `splu`.
+             **Measured (N=48, mu_s=100): matvecs at 40× 2211→522, Newton 8.0→2.7, wall
+             49.4→13.7 s (3.6×), identical errors, and cost per unit simulated time now
+             FLAT in dt** (25.6, 14.4, 12.9, 13.2, 13.7 s for 1×…40×). Below
+             `mu_s*dt ~ mu_f` the sparse block needs *more* iterations than the exact
+             transform solve (16 vs 11), so `pc_mode='auto'` (default) switches on that
+             criterion. Lid supported (no-slip ghost `-u` contributes `2*mu` at wall rows).
+           - *The remaining gap is the constant.* Even with the Krylov growth tamed the
+             scheme is **~25× slower than explicit** at its largest stable step, and **no
+             crossover was found up to mu_s = 1e5** (at mu_s ≥ 1e4 the solve fails when
+             pushed to the advective step). The isotropic proxy captures only part of K —
+             missing: the **deviatoric tensor structure** (u–v coupling of `dev D`), the
+             wider bicubic+extrapolation stencil, and the interface term. **A more
+             faithful assembled K is the next step.**
+           - *Constant-factor work is not the answer* (tried and measured): fused numba
+             kernels for stress/tangent/force-assembly, precomputed constant-offset
+             staggered stencils (`ShiftInterp`), and shared kinematics cut the residual
+             **2.8×** and the Jacobian **1.7×** — yet the **step** cost fell only **~1.15×**.
+             Rejected on measurement: `pc_simple` (halves transforms, nearly triples the
+             Krylov count at large dt) and `extrapolate_guess` (no Newton-count reduction).
+           - *Timing hygiene*: this machine varies by >2× between sessions (explicit @1×
+             on the lid case measured 2.07 s and 4.39 s for identical work). **Always
+             normalise wall-clock against an explicit run measured in the same session.**
+           **What it does buy:** the monolithic error is nearly *independent of dt* — at
+           μ_s=0.1 the cavity centroid error moves only 8.6e-4 → 1.05e-3 while dt grows 8×,
+           where the explicit scheme diverges past 1×. **An elastic-aware saddle-point
+           preconditioner + a lower constant in the tangent is the open problem.**
+        3. **Unresolved:** at μ_s=100 on the cavity, monolithic and explicit centroids differ
+           by 2.5%, *flat in dt* — a **spatial** band difference (monolithic uses central
+           stencils throughout the blend region; the explicit driver uses one-sided stencils
+           on φ≤0 only), not a time error. Which is closer to the converged answer is not
+           settled. Needs a grid-refinement study.
+
+      - **Boundary conditions.** Both the free-slip box (disc-in-Taylor-Green) and the
+        lid-driven cavity are supported, and *both are exactly separable*: a velocity
+        component is Dirichlet across the walls it is normal to (DST-I) and, along the other
+        pair, mirrors for free slip (Neumann → DCT-II) or reflects with a sign flip for
+        no-slip (cell-centred Dirichlet → **DST-II**). So the preconditioner's velocity block
+        is a direct transform solve in both cases (verified machine-exact). Gotcha pinned by
+        a test: the lid enters the residual as a *constant* ghost `2·U_lid − u`, so a
+        **perturbation** must be padded with `−δu`; using the inhomogeneous ghost in the
+        tangent left it wrong by 7e-3 and cost Newton its quadratic rate.
+
+### 16. Non-deviatoric solid stress creates energy for stiff solids (P1, small) — *found via #14.4/2d*
+`solid_cauchy_stress(..., isochoric=False)` returns the Rycroft-convention `σ = μ_s b`,
+whose isotropic part `μ_s tr(b)/2` is meant to be absorbed by the pressure. It is not:
+`∇·[(1−H)qI]` is discretized with the **wide 2Δ central stencil + face averaging**, which
+is *not* the consistent partner of the **compact face gradient** used for the pressure, so
+the isotropic part is not in the range of the discrete pressure gradient and survives the
+exact projection. **Measured:** a purely isotropic solid stress `qI` leaves **6.4% of its
+magnitude as spurious solenoidal velocity** after projection, scaling linearly with `q`.
+Consequence on the disc-in-Taylor-Green benchmark at N=48, T=0.05: with `σ=μ_s b` the total
+energy goes `0.2221 → 0.5048` (**+127%**, `min J → 0.84`) at μ_s=100, at *any* dt; with the
+deviatoric `μ_s dev(b)` it is `0.2173` (correct viscous decay). Invisible at the μ_s≈0.1 of
+the standard benchmarks, fatal for stiff solids.
+**Fix:** use the deviatoric (or `isochoric=True`, which already subtracts the trace) form by
+default. `benchmarks/mac_disc_in_tg_convergence.py` defaults to `isochoric=False` and is
+affected. Cross-check whether this also explains part of the 1st-order field convergence
+reported in `paper/main.tex`.
 
 ### 15. Promote viscoelastic loop to a first-class solver routine (P1, small) — *follow-up to #1*
 The log-conformation FSI loop is currently hand-rolled inside
