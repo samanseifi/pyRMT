@@ -1020,6 +1020,27 @@ coefficient of restitution.}
 \label{fig:contact}
 \end{figure}
 
+\emph{Coefficient of restitution.} Sweeping the impact speed, we extract a coefficient of
+restitution $e=v_{\rm sep}/v_{\rm app}$ (the centroid separation speed over the approach speed,
+from the gap trajectory) and plot it against the impact Stokes number $\mathrm{St}=\rho V_0
+R/\mu_f$ (\cref{fig:restitution}). The elastic discs reproduce the qualitative
+elastohydrodynamic-collision behaviour \cite{Davis1986}: $e$ rises with $\mathrm{St}$ out of the
+strongly-damped low-speed regime and plateaus. The viscoelastic (SLS) discs sit below the elastic
+curve---the Maxwell branch dissipates part of the impact---approaching it only at the highest
+speeds, where the collision is too brief for the branch to relax. This is a qualitative
+comparison: the penalty contact stress is not the lubrication-film physics of the
+elastohydrodynamic theory, and the diffuse-interface centroid limits the precision; but it
+confirms the expected restitution trend and the elastic-versus-viscoelastic ordering.
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.58\linewidth]{figures/contact_restitution.png}
+\caption{Coefficient of restitution $e$ vs.\ impact Stokes number $\mathrm{St}=\rho V_0 R/\mu_f$,
+for elastic (blue) and viscoelastic SLS (red) colliding discs. $e$ rises with $\mathrm{St}$ and
+plateaus (elastohydrodynamic behaviour \cite{Davis1986}); the viscoelastic discs rebound less,
+dissipating the impact in the relaxing branch.}
+\label{fig:restitution}
+\end{figure}
+
 \subsection{Stiff-solid regime}
 \label{sec:stiff}
 The introduction motivates implicit integration partly by the stiff-solid regime. A
