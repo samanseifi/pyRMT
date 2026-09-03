@@ -1097,6 +1097,22 @@ transport, not the interface or the integrator (\cref{fig:disc-centroid}). This 
 where we quantify the IMEX speedup---which grows with resolution as the direct wall solve makes
 the implicit step free---against an explicit baseline in the supplementary material.
 
+\emph{Viscoelastic reduction to elasticity.} The same lid-driven disc validates the viscoelastic
+model in its elastic limit. Running the SLS solid with its Maxwell modulus set to $\mu_s$ and no
+relaxation ($\tau\to\infty$)---so the elastic Finger tensor $\bt\to\bm F\bm F^{\!\top}$ and the
+stress $G\,\dev\bt\to\mu_s\dev\bm F\bm F^{\!\top}$---the log-conformation disc reproduces the pure
+neo-Hookean centroid trajectory to $1.1\times10^{-2}$ over the entire inward spiral
+(\cref{fig:lid-tauinf}), a direct confirmation that the elastic-strain transport carries the
+correct finite-strain elastic limit.
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.5\linewidth]{figures/lid_tauinf.png}
+\caption{Viscoelastic reduction to elasticity in the lid-driven cavity: with $\tau\to\infty$ and
+$G{=}\mu_s$ the SLS (log-conformation) disc (dashed) reproduces the neo-Hookean disc (solid).
+Centroid path over $t\in[0,24]$; maximum separation $1.1\times10^{-2}$.}
+\label{fig:lid-tauinf}
+\end{figure}
+
 \begin{figure}[t]\centering
 \includegraphics[width=0.62\linewidth]{figures/soft_disc_overlay.png}
 \caption{Neo-Hookean disc in a lid-driven cavity: centroid trajectory over the inward spiral.
@@ -1136,7 +1152,7 @@ We demonstrated the coupled
 viscoelastic response on a disc in a Taylor--Green vortex: $\tau\to\infty$ recovers the
 elastic dynamics, finite $\tau$ dissipates stored elastic energy, and the elastic Finger
 tensor remains positive-definite throughout. In the lid-driven cavity the $\tau\to\infty$
-limit reproduces the pure neo-Hookean disc directly (supplementary material).
+limit reproduces the pure neo-Hookean disc directly (\cref{fig:lid-tauinf}).
 
 Relative to the closest prior work, the method differs from explicit hyperelastic RMT
 \cite{Kamrin2012,Rycroft2020,Jain2019} in both the viscoelastic constitutive transport
