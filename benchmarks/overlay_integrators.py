@@ -107,9 +107,9 @@ def _render_soft_disc(runs, out_png):
     if os.path.isfile(npz):
         d = np.load(npz); neo, sls = d["neo"], d["sls"]
         plt.plot(neo[:, 1], neo[:, 2], "-", color="tab:red", lw=1.8,
-                 label="present, neo-Hookean", zorder=4)
+                 label=r"present, neo-Hookean $128^2$", zorder=4)
         plt.plot(sls[:, 1], sls[:, 2], "--", color="tab:green", lw=1.5,
-                 label=r"present, SLS $\tau\!\to\!\infty$", zorder=5)
+                 label=r"present, SLS $\tau\!\to\!\infty$ $128^2$", zorder=5)
     else:
         ex = runs["imex"]
         plt.plot(ex[:, 1], ex[:, 2], "-", color="tab:red", lw=1.8,
