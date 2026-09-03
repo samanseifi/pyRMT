@@ -998,9 +998,11 @@ they approach, squeeze the intervening fluid out, deform into contact, and rebou
 prevents interpenetration (the gap dips below $2R$ as the soft discs flatten against each other,
 then recovers). At a matched total modulus---so the only difference is relaxation---the elastic
 discs rebound more strongly than the viscoelastic (SLS) ones, whose relaxing Maxwell branch
-dissipates part of the collision energy. The contact stress enters the implicit solve through
-its right-hand side, and the IMEX scheme integrates these collisions stably even at impact speeds
-beyond the explicit elastic-wave CFL (supplementary material).
+dissipates part of the collision energy. The contact stress enters the momentum solve through its
+right-hand side. Because the rebound \emph{is} elastic-wave physics, these runs resolve the
+elastic wave directly---the elastic-wave stabilizer of \cref{alg:imex} is left off, as for every
+non-stiff solid, and engaged only in the stiff regime of \cref{sec:stiff}---so the collision is
+integrated without numerical damping of the bounce.
 
 \begin{figure*}[t]\centering
 \includegraphics[width=\linewidth]{figures/contact_snapshots.png}
@@ -1022,22 +1024,32 @@ coefficient of restitution.}
 
 \emph{Coefficient of restitution.} Sweeping the impact speed, we extract a coefficient of
 restitution $e=v_{\rm sep}/v_{\rm app}$ (the centroid separation speed over the approach speed,
-from the gap trajectory) and plot it against the impact Stokes number $\mathrm{St}=\rho V_0
-R/\mu_f$ (\cref{fig:restitution}). The elastic discs reproduce the qualitative
-elastohydrodynamic-collision behaviour \cite{Davis1986}: $e$ rises with $\mathrm{St}$ out of the
-strongly-damped low-speed regime and plateaus. The viscoelastic (SLS) discs sit below the elastic
-curve---the Maxwell branch dissipates part of the impact---approaching it only at the highest
-speeds, where the collision is too brief for the branch to relax. This is a qualitative
-comparison: the penalty contact stress is not the lubrication-film physics of the
-elastohydrodynamic theory, and the diffuse-interface centroid limits the precision; but it
-confirms the expected restitution trend and the elastic-versus-viscoelastic ordering.
+from the gap trajectory, using the smooth Heaviside-weighted centroid so the measurement is free
+of hard-mask staircase noise) and plot it against the impact Stokes number $\mathrm{St}=\rho V_0
+R/\mu_f$ (\cref{fig:restitution}a). This probes the two asymptotic limits of
+elastohydrodynamic-collision theory \cite{Davis1986}: a slow impact is strongly damped by the fluid
+($e\!\to\!0$ below a critical Stokes number), while a lossless elastic collision conserves kinetic
+energy ($e\!\to\!1$ as $\mathrm{St}\!\to\!\infty$, the fluid becoming negligible). The elastic
+discs reproduce this behaviour---$e$ rises monotonically with $\mathrm{St}$---and the viscoelastic
+(SLS) discs sit below the elastic curve at every speed, the Maxwell branch dissipating part of the
+impact. The measured restitution is grid-convergent (\cref{fig:restitution}b): at $N{=}128$ it is
+within a few percent of $N{=}160$, and it is only on the resolved grids that the elastic and
+viscoelastic curves separate---the physical dissipation difference is a resolved effect, not a
+coarse-grid artefact. The comparison is qualitative---the penalty contact stress is not the
+lubrication-film physics of the elastohydrodynamic theory, and the diffuse interface limits the
+precision---and within the accessible $\mathrm{St}$ window the absolute $e$ stays well below the
+inviscid ceiling because the fluid dissipation at these moderate Stokes numbers is genuinely large;
+what the test establishes is the trend, the elastic-versus-viscoelastic ordering, and the
+grid-independence of the number.
 
 \begin{figure}[t]\centering
-\includegraphics[width=0.58\linewidth]{figures/contact_restitution.png}
-\caption{Coefficient of restitution $e$ vs.\ impact Stokes number $\mathrm{St}=\rho V_0 R/\mu_f$,
-for elastic (blue) and viscoelastic SLS (red) colliding discs. $e$ rises with $\mathrm{St}$ and
-plateaus (elastohydrodynamic behaviour \cite{Davis1986}); the viscoelastic discs rebound less,
-dissipating the impact in the relaxing branch.}
+\includegraphics[width=0.92\linewidth]{figures/contact_restitution.png}
+\caption{Coefficient of restitution $e$ of the colliding discs, elastic (blue) vs.\ viscoelastic
+SLS (red). (a) $e$ vs.\ impact Stokes number $\mathrm{St}=\rho V_0 R/\mu_f$: $e$ rises with $\mathrm{St}$
+toward the lossless-elastic ceiling $e\!\to\!1$ (dashed, $\mathrm{St}\!\to\!\infty$) and is strongly
+fluid-damped at low $\mathrm{St}$; the viscoelastic discs rebound less, dissipating the impact in
+the relaxing branch \cite{Davis1986}. (b) Grid convergence at fixed impact ($\mathrm{St}{\approx}22$):
+$e$ converges with resolution, and the elastic/viscoelastic gap is resolved by $N{=}128$.}
 \label{fig:restitution}
 \end{figure}
 

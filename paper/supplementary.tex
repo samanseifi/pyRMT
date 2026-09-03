@@ -136,9 +136,14 @@ $N{=}128$ & $6\times$ & $\mathbf{5.6\times}$ & $1.1\times10^{-3}$ \\
 \end{tabular}
 \end{table}
 
-\emph{Contact.} The IMEX scheme also integrates the colliding-disc contact of the main text
-stably at impact speeds beyond the explicit elastic-wave CFL: at $V_0=1.6$ the explicit scheme
-diverges (its elastic force overwhelms the forward-Euler step) while IMEX completes the collision.
+\emph{Contact and the elastic-wave stabilizer.} At the colliding-disc parameters the advective and
+elastic-wave step limits nearly coincide, so the collisions of the main text are integrated with
+the elastic wave resolved (stabilizer off), which keeps the rebound---and hence the coefficient of
+restitution---free of numerical damping. Engaging the stabilizer trades that fidelity for
+robustness: it damps the under-resolved elastic wave, so IMEX then completes even violent impacts
+(e.g.\ $V_0=1.6$, where the forward-Euler elastic force diverges at the same step) but at a lower,
+stabilizer-dependent restitution. This is why the stabilizer is reserved for the genuinely stiff
+regime (the stiff-solid example of the main text), where stepping past the elastic-wave CFL is the point.
 
 \bibliographystyle{elsarticle-num}
 \bibliography{refs}

@@ -28,7 +28,7 @@ from pyRMT.viscoelastic import logconf_local_step_strang, sym_exp
 
 def run(N=128, t_end=2.4, V0=0.3, eta=2.0, mu_s=0.2, G_ve=0.6, tau=0.4,
         model="elastic", integrator="explicit", mu_f=0.02, rho=1.0, R=0.12, sep=0.34,
-        scheme="semilagrangian_cubic", history=True, dt=None, snap_times=None):
+        scheme="semilagrangian_cubic", history=True, dt=None, snap_times=None, stab=True):
     L = 1.0
     dx, dy = mac_grid(N, N)
     xc = (np.arange(N) + 0.5) * dx
@@ -138,7 +138,7 @@ def run(N=128, t_end=2.4, V0=0.3, eta=2.0, mu_s=0.2, G_ve=0.6, tau=0.4,
         if imex:
             chi_c = np.clip((1 - Ha) + (1 - Hb), 0.0, 1.0)
             ustar, vstar = momentum_predictor_periodic_imex_elastic(
-                u, v, nu, dx, dy, dt, leig, cs * cs, chi_c, fu, fv, rho=rho)
+                u, v, nu, dx, dy, dt, leig, (cs * cs if stab else 0.0), chi_c, fu, fv, rho=rho)
         else:
             ustar, vstar = momentum_predictor_periodic(u, v, nu, dx, dy, dt, fu=fu, fv=fv, rho=rho)
         u, v, _ = project_per(ustar, vstar, dx, dy, dt, rho, peig)
@@ -149,8 +149,12 @@ def run(N=128, t_end=2.4, V0=0.3, eta=2.0, mu_s=0.2, G_ve=0.6, tau=0.4,
             umc = 0.5 * (um + np.roll(um, -1, axis=1)); vmc = 0.5 * (vm + np.roll(vm, -1, axis=0))
             advance_solid(umc, vmc)
         t += dt
-        ca = Xc[pa <= 0].mean() if (pa <= 0).any() else np.nan
-        cb = Xc[pb <= 0].mean() if (pb <= 0).any() else np.nan
+        # smooth (Heaviside-weighted) centroids -- the staircase mean Xc[phi<=0] jumps
+        # by ~dx as cells flip in/out of the mask, which corrupts the gap-velocity (and
+        # hence the restitution); the smeared solid weight (1-H) gives a sub-cell-smooth gap
+        wa = 1 - smoothed_heaviside(pa, w_t); wb = 1 - smoothed_heaviside(pb, w_t)
+        ca = (wa * Xc).sum() / wa.sum() if wa.sum() > 1e-12 else np.nan
+        cb = (wb * Xc).sum() / wb.sum() if wb.sum() > 1e-12 else np.nan
         ke = 0.5 * rho * np.mean(u_c**2 + v_c**2)
         hist.append((t, ca, cb, cb - ca, ke))
         while snap_q and t >= snap_q[0]:

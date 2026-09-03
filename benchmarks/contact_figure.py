@@ -22,7 +22,10 @@ def main():
     from _plotstyle import apply as _style; _style()
     import matplotlib.pyplot as plt
 
-    common = dict(N=N, t_end=T, V0=V0, mu_f=MUF, eta=ETA, sep=SEP, R=R, integrator="imex")
+    # stabilizer OFF: for a collision the elastic wave IS the rebound physics, so it is
+    # resolved (not damped); the step here is at the elastic CFL so the stabilizer, which
+    # exists to step PAST it for stiff solids, is unnecessary and would only dissipate.
+    common = dict(N=N, t_end=T, V0=V0, mu_f=MUF, eta=ETA, sep=SEP, R=R, integrator="imex", stab=False)
     runs = {"elastic": run(**EL, **common), "sls": run(**VE, **common)}
     np.savez(os.path.join(ROOT, "outputs", "overlay", "contact_collision.npz"), **runs)
 
