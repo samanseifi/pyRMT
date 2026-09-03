@@ -1135,7 +1135,8 @@ $5.6\times$ at $N{=}128$).
 We demonstrated the coupled
 viscoelastic response on a disc in a Taylor--Green vortex: $\tau\to\infty$ recovers the
 elastic dynamics, finite $\tau$ dissipates stored elastic energy, and the elastic Finger
-tensor remains positive-definite throughout.
+tensor remains positive-definite throughout. In the lid-driven cavity the $\tau\to\infty$
+limit reproduces the pure neo-Hookean disc directly (supplementary material).
 
 Relative to the closest prior work, the method differs from explicit hyperelastic RMT
 \cite{Kamrin2012,Rycroft2020,Jain2019} in both the viscoelastic constitutive transport
@@ -1151,6 +1152,16 @@ near-contact resolution is penalty-based. The dissipative one-sided
 elastic coupling (Proposition~\ref{prop:vn}) adds numerical damping at large $\dt$, which the
 energy-conserving trapezoidal coupling (Proposition~\ref{prop:trap}) removes; the coupled runs
 use the latter.
+
+Between these two elastic couplings---the dissipative one that damps every elastic mode and the
+trapezoidal one that damps none---lies a tunable middle ground. A generalized-$\alpha$ coupling
+\cite{ChungHulbert1993} sets the amplitude factor of the infinite-frequency elastic mode to a
+single parameter $\rho_\infty\in[0,1]$, damping the unresolvable grid-scale elastic noise toward
+$|\lambda|=\rho_\infty$ while leaving the resolved deformation essentially undamped ($|\lambda|\to1$
+as $c_s k\,\dt\to0$), at second order and one constant-coefficient solve per step. On the linear
+elastic wave it is stable and near-energy-conserving well past the explicit elastic-wave CFL with
+frequency-selective dissipation; wiring it into the finite-strain FSI coupling is a natural next
+step for the stiff-solid regime.
 
 Looking ahead, natural extensions are three dimensions, variable density and true
 sedimentation, lubrication-corrected contact \cite{Fai2018}, and multi-mode/nonlinear

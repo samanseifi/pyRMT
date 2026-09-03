@@ -23,7 +23,8 @@ from pyRMT.viscoelastic import logconf_local_step_strang, sym_exp
 
 def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0,
         reinit=False, isochoric=False, out_root="outputs", imex=False, dt=None, write=True,
-        integrator=None, mu_s=0.1, viscoelastic=False, G_ve=None, tau=np.inf, snap_times=None):
+        integrator=None, mu_s=0.1, viscoelastic=False, G_ve=None, tau=np.inf, snap_times=None,
+        stab=True):
     dx, dy = mac_grid(N, N)
     xc = (np.arange(N) + 0.5) * dx
     Xc, Yc = np.meshgrid(xc, xc)
@@ -128,7 +129,7 @@ def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0
         fv = np.zeros((N + 1, N)); fv[1:-1, :] = 0.5 * (divy[1:, :] + divy[:-1, :])
 
         u_old, v_old = u, v
-        cs2_arg = cs * cs if use_elastic else 0.0
+        cs2_arg = cs * cs if (use_elastic and stab) else 0.0
         if use_semilag:
             # 2c: semi-Lagrangian advection (no advection CFL) + implicit viscosity
             # (+ trapezoidal elastic when use_elastic).

@@ -145,6 +145,28 @@ robustness: it damps the under-resolved elastic wave, so IMEX then completes eve
 stabilizer-dependent restitution. This is why the stabilizer is reserved for the genuinely stiff
 regime (the stiff-solid example of the main text), where stepping past the elastic-wave CFL is the point.
 
+\section{Model and scheme consistency}
+\label{sec:supp-consistency}
+Two checks on the lid-driven soft disc (Sugiyama parameters, $N{=}128$, bicubic
+semi-Lagrangian transport), \cref{fig:lid-consistency}. \emph{(a) The viscoelastic model
+reduces to finite-strain elasticity.} With the Maxwell modulus set equal to the neo-Hookean
+modulus and no relaxation ($\tau\to\infty$), the log-conformation SLS disc, whose stress is
+$G\,\mathrm{dev}(\bm b_e)$ with $\bm b_e\to\bm F\bm F^{\!\top}$, reproduces the pure
+neo-Hookean disc: the centroid paths agree to $1.1\times10^{-2}$ over the full inward spiral,
+a direct check that the elastic-strain transport carries the correct finite-strain limit.
+\emph{(b) The elastic-wave stabilizer does not distort the validation.} Resolving the elastic
+wave (stabilizer off, step below the elastic CFL) reproduces the stabilized run's centroid
+path to plotting precision, confirming the energy-conserving stabilizer is faithful where it
+is used.
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.92\linewidth]{figures/lid_tauinf.png}
+\caption{Lid-driven soft-disc consistency checks. (a) The $\tau\to\infty$ SLS limit
+(dashed) reproduces the neo-Hookean disc (solid); (b) the elastic-wave stabilizer off
+(dashed) reproduces the stabilized run (solid). Centroid path over $t\in[0,24]$.}
+\label{fig:lid-consistency}
+\end{figure}
+
 \bibliographystyle{elsarticle-num}
 \bibliography{refs}
 
