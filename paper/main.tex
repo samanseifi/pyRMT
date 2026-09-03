@@ -233,7 +233,7 @@ time integrators;
 and \cref{sec:verification} presents the numerical examples---constitutive verification
 against analytic limits; the disc-in-Taylor--Green benchmark and its viscoelastic (SLS)
 extension; the four-roll extension and shear benchmarks; colliding-disc contact in both
-regimes; the stiff-solid regime; and the neo-Hookean lid-driven cavity against Sugiyama
+regimes; the stiff-solid regime; and the elastic disc in a lid-driven cavity against Sugiyama
 \emph{et al.}---with the pure-fluid lid-cavity
 (Ghia) validation, the spatial-accuracy check, and the reference-map advection-scheme
 comparison collected in the supplementary material.
@@ -834,10 +834,13 @@ $1.0$ & $\infty,1,\tfrac14$ & $\psi_0{=}0.3$ & $\min(\tfrac{0.25\dx}{U_0 k},\tfr
 
 \subsection{Disc in a Taylor--Green vortex}
 \label{sec:disc-tg}
-A neo-Hookean disc of radius $r=0.2$ at the centre of a unit box is released in the vortex
+A soft disc of radius $r=0.2$ at the centre of a unit box is released in the vortex
 $\psi=\psi_0\sin(2\pi x)\sin(2\pi y)$ ($\psi_0=0.05$, $\mu_f=10^{-3}$, $\rho_s=\rho_f=1$, shear
 modulus $\mu_s=1.0$); it stretches, elastically retracts and oscillates while the fluid
-viscously damps it. This is the benchmark of Jain, Kamrin \& Mani \cite{Jain2019}, validated
+viscously damps it. We run it at the \emph{elastic limit of the viscoelastic model}
+($\tau\to\infty$, so the log-conformation branch is non-relaxing and $\be\to\Ften\Ften^{\!\top}$):
+this is the same benchmark that fixes the elastic response, now carried within the unified
+constitutive framework rather than by a separate neo-Hookean stress. This is the benchmark of Jain, Kamrin \& Mani \cite{Jain2019}, validated
 there against the mixed Eulerian--Lagrangian results of Zhao \emph{et al.}\ and
 Robinson-Mosher \emph{et al.}; we compare against all three. (The modulus needs a convention
 conversion: their $\mu_s=0.5$ in the $\sig_{\!s}=2\mu_s\bt$ convention is a physical shear
@@ -874,9 +877,10 @@ not the time integrator.
 
 \begin{figure}[t]\centering
 \includegraphics[width=\linewidth]{figures/disc_tg_energy.png}
-\caption{Disc in a Taylor--Green vortex ($\mu_s=1.0$, our $N{=}128$ in red): (a) kinetic and
-(b) strain energy vs.\ time, against Jain, Zhao, and Robinson-Mosher \emph{et al.}\
-\cite{Jain2019}. Our result tracks the reference methods.}
+\caption{Disc in a Taylor--Green vortex ($\mu_s=1.0$; present result at the $\tau\to\infty$
+elastic limit, $N{=}128$, red): (a) kinetic and (b) strain energy vs.\ time, against Jain, Zhao,
+and Robinson-Mosher \emph{et al.}\ \cite{Jain2019}. The $\tau\to\infty$ limit of the viscoelastic
+model tracks the reference methods, recovering the elastic benchmark.}
 \label{fig:disc-tg-energy}
 \end{figure}
 
@@ -1068,7 +1072,7 @@ substep, accurate to machine precision at \emph{any} $\dt$, \cref{sec:verificati
 
 %% (solver / integrator diagnostics are in the separate supplementary.tex)
 
-\subsection{Neo-Hookean (elastic) disc in a lid-driven cavity (FSI)}
+\subsection{Elastic disc in a lid-driven cavity (FSI)}
 \label{sec:disc-lid}
 A neo-Hookean \emph{elastic} disc carried by the cavity flow is compared to the
 full-Eulerian result of Sugiyama \emph{et al.}\ \cite{Sugiyama2011} and to Jain
@@ -1121,7 +1125,7 @@ $\tau\to\infty$ curve tracks Sugiyama slightly more closely on the inner spiral.
 
 \begin{figure*}[t]\centering
 \includegraphics[width=\linewidth]{figures/soft_disc_lid_snapshots.png}
-\caption{Neo-Hookean disc in the lid-driven cavity ($N{=}192$): the solid, its deformed
+\caption{Elastic disc in the lid-driven cavity ($N{=}192$): the solid, its deformed
 reference-map grid (dashed), and the flow streamlines, at the times of Jain \emph{et al.}\
 \cite{Jain2019}. The disc is swept around the vortex and stretched into a comma up the moving
 wall.}

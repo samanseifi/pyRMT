@@ -19,7 +19,14 @@ def main():
     import matplotlib.pyplot as plt
     from scipy.interpolate import PchipInterpolator
 
-    hist = run_one(128, 1.0, integrator="imex", **JAIN)["hist"]
+    # Present result = the model's tau->inf elastic limit, carried by the log-conformation
+    # branch (sigma = G dev(b_e), b_e -> F F^T as tau->inf). This recovers the elastic
+    # benchmark within the unified viscoelastic formulation (no separate neo-Hookean run).
+    from benchmarks.viscoelastic_disc_tg import run_one as run_ve
+    h = run_ve(128, 1.0, model="maxwell", G_ve=1.0, tau=np.inf, integrator="imex",
+               scheme="semilagrangian_cubic", R=0.2, x0=0.5, y0=0.5, mu_s=1.0,
+               mu_f=1e-3, U0=0.05, kw=2, history=True)["hist"]
+    hist = {"t": h["t"], "ke": h["KE"], "se": h["Eel"]}
     methods = _load_jain_methods()
 
     def smooth(t, y, n=400):
@@ -44,7 +51,8 @@ def main():
             key = f"{m}_{comp}"
             if methods is not None and key in methods:
                 ax[j].plot(*smooth(*methods[key]), color=c, ls=ls, lw=1.4, label=lab)
-        ax[j].plot(hist["t"], hist[comp], color="red", lw=2.2, label=r"ours ($N{=}128$)")
+        ax[j].plot(hist["t"], hist[comp], color="red", lw=2.2,
+                   label=r"present, $\tau\!\to\!\infty$ ($N{=}128$)")
         ax[j].set_xlabel("time $t$"); ax[j].set_xlim(0, 1)
     ax[0].set_ylabel("kinetic energy"); ax[0].set_ylim(0.010, 0.026)
     ax[0].set_title("(a) kinetic energy"); ax[0].legend(loc="upper right")
