@@ -43,9 +43,7 @@ def main():
 
     fig, ax = plt.subplots(figsize=(6.0, 4.4))
     ax.plot(t_sls_inf, E_sls_inf, "-", color="k", lw=2.0,
-            label=r"SLS $\tau\!\to\!\infty$")
-    ax.plot(t_neo, E_neo, "o", color="0.45", ms=4, markevery=max(1, len(t_neo)//25),
-            label=r"neo-Hookean (matched)")
+            label=r"$\tau\!\to\!\infty$ (elastic limit)")
     ax.plot(t_tau1, E_tau1, "-", color="blue", lw=1.7, label=r"SLS $\tau=1$")
     ax.plot(t_tau025, E_tau025, "-", color="red", lw=1.7, label=r"SLS $\tau=0.25$")
     ax.set_xlabel("time $t$"); ax.set_ylabel("stored elastic energy $E_{\\mathrm{el}}$")

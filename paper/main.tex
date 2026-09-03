@@ -294,7 +294,7 @@ with the velocity boundary condition (\cref{sec:discretization}).
 %% ===== end governing.tex =====
 
 %% ===== begin rmt.tex =====
-\section{The reference map and the elastic solid}
+\section{The reference map and the viscoelastic solid}
 \label{sec:rmt}
 
 \subsection{Reference map and deformation gradient}
@@ -380,42 +380,8 @@ two coincide only when a case sets them equal. In the purely hyperelastic limit 
 \cref{sec:constitutive}) this is the entire solid stress; the general viscoelastic solid
 adds a relaxing branch.
 
-\subsection{Level set, extrapolation, reinitialization}
-The solid occupies $\{\phi\le0\}$. The level set is reconstructed from the reference map
-each step (the material boundary is the image of the initial boundary under $\xiv$), and
-the reference map is extrapolated into a narrow band outside the solid so that the gradient in
-\cref{eq:F} and the interfacial forces have valid stencils. We use a direct constant-normal
-(velocity-)extrapolation of $\xiv$ into the band, following Kamrin \emph{et al.}\
-\cite{Kamrin2012} and Rycroft \emph{et al.}\ \cite{Rycroft2020}, rather than solving an
-auxiliary PDE (a Hamilton--Jacobi extrapolation equation) to fill it: the direct fill is cheaper
-and, because the transported map is already smooth, sufficient. Because the level set is rebuilt
-from this smooth reference map at every step and the monotone bicubic transport keeps the map
-sharp, the interface \emph{does not require level-set reinitialization}---none of the reported
-runs reinitializes.
-
-The reference map \cref{eq:xi-advect} (and the conformation $\psib$) is transported by a
-\emph{semi-Lagrangian} backtrace: each grid value is taken as the field interpolated at the
-departure point traced back along the flow (RK4 in the trace). Because the departure
-interpolation is unconditionally stable, semi-Lagrangian transport carries no advective CFL
-restriction---this is what allows the IMEX scheme (\cref{sec:time}) to take steps well
-above the explicit advective limit. The interpolation order matters: bilinear interpolation
-is only $C^0$ and strongly diffusive, smearing the reference-map gradients (hence $\Ften$ and
-the captured interface) over long runs, whereas a \emph{monotone bicubic} interpolant is
-$C^1$ and markedly less diffusive. The bicubic form is Catmull--Rom, with the interpolated
-value at each departure point clamped to the local minimum and maximum over its $4\times4$
-support (a discrete-maximum-principle limiter applied to the transported field $\xiv$ or $\psib$
-itself); this suppresses Catmull--Rom overshoot at the reference-map kink without any
-physical-quantity clamping. We use the bicubic form throughout; it is what keeps the interface
-sharp and the strain accurate on the sensitive parts of the flow (\cref{sec:disc-lid}). The
-velocity departure point in the semi-Lagrangian momentum branch (\cref{alg:imex}) uses plain
-cubic interpolation (no limiter is needed for the smooth velocity), a distinct stencil from the
-limited $(\xiv,\psib)$ transport.
-The semi-Lagrangian transport adopted here removes the advective step-size limit while keeping
-the map smooth.
-%% ===== end rmt.tex =====
-
 %% ===== begin constitutive.tex =====
-\section{Finite-strain viscoelasticity via log-conformation}
+\subsection{Finite-strain viscoelasticity: log-conformation}
 \label{sec:constitutive}
 
 \emph{Standard-linear-solid model.}
@@ -532,6 +498,39 @@ which is unconditionally stable for any $\tau$ and positive-definite-preserving,
 of two SPD tensors. The stretch substep uses \cref{eq:logconf-rhs} with $\tau\to\infty$
 (explicit, non-stiff, bounded by the velocity-gradient magnitude). For a step strain
 this scheme is exact at any $\dt$; the property is verified in \cref{sec:verification}.
+\subsection{Level set, extrapolation, reinitialization}
+The solid occupies $\{\phi\le0\}$. The level set is reconstructed from the reference map
+each step (the material boundary is the image of the initial boundary under $\xiv$), and
+the reference map is extrapolated into a narrow band outside the solid so that the gradient in
+\cref{eq:F} and the interfacial forces have valid stencils. We use a direct constant-normal
+(velocity-)extrapolation of $\xiv$ into the band, following Kamrin \emph{et al.}\
+\cite{Kamrin2012} and Rycroft \emph{et al.}\ \cite{Rycroft2020}, rather than solving an
+auxiliary PDE (a Hamilton--Jacobi extrapolation equation) to fill it: the direct fill is cheaper
+and, because the transported map is already smooth, sufficient. Because the level set is rebuilt
+from this smooth reference map at every step and the monotone bicubic transport keeps the map
+sharp, the interface \emph{does not require level-set reinitialization}---none of the reported
+runs reinitializes.
+
+The reference map \cref{eq:xi-advect} (and the conformation $\psib$) is transported by a
+\emph{semi-Lagrangian} backtrace: each grid value is taken as the field interpolated at the
+departure point traced back along the flow (RK4 in the trace). Because the departure
+interpolation is unconditionally stable, semi-Lagrangian transport carries no advective CFL
+restriction---this is what allows the IMEX scheme (\cref{sec:time}) to take steps well
+above the explicit advective limit. The interpolation order matters: bilinear interpolation
+is only $C^0$ and strongly diffusive, smearing the reference-map gradients (hence $\Ften$ and
+the captured interface) over long runs, whereas a \emph{monotone bicubic} interpolant is
+$C^1$ and markedly less diffusive. The bicubic form is Catmull--Rom, with the interpolated
+value at each departure point clamped to the local minimum and maximum over its $4\times4$
+support (a discrete-maximum-principle limiter applied to the transported field $\xiv$ or $\psib$
+itself); this suppresses Catmull--Rom overshoot at the reference-map kink without any
+physical-quantity clamping. We use the bicubic form throughout; it is what keeps the interface
+sharp and the strain accurate on the sensitive parts of the flow (\cref{sec:disc-lid}). The
+velocity departure point in the semi-Lagrangian momentum branch (\cref{alg:imex}) uses plain
+cubic interpolation (no limiter is needed for the smooth velocity), a distinct stencil from the
+limited $(\xiv,\psib)$ transport.
+The semi-Lagrangian transport adopted here removes the advective step-size limit while keeping
+the map smooth.
+
 %% ===== end constitutive.tex =====
 
 %% ===== begin discretization.tex =====
@@ -743,6 +742,128 @@ material).
 \section{Numerical examples}
 \label{sec:verification}
 
+\subsection{Disc in a Taylor--Green vortex}
+\label{sec:disc-tg}
+A soft disc of radius $r=0.2$ at the centre of a unit box is released in the vortex
+$\psi=\psi_0\sin(2\pi x)\sin(2\pi y)$ ($\psi_0=0.05$, $\mu_f=10^{-3}$, $\rho_s=\rho_f=1$, shear
+modulus $\mu_s=1.0$); it stretches, elastically retracts and oscillates while the fluid
+viscously damps it. We run it at the \emph{elastic limit of the viscoelastic model}
+($\tau\to\infty$, so the log-conformation branch is non-relaxing and $\be\to\Ften\Ften^{\!\top}$):
+this is the same benchmark that fixes the elastic response, now carried within the unified
+constitutive framework rather than by a separate neo-Hookean stress. This is the benchmark of Jain, Kamrin \& Mani \cite{Jain2019}, validated
+there against the mixed Eulerian--Lagrangian results of Zhao \emph{et al.}\ and
+Robinson-Mosher \emph{et al.}; we compare against all three. (The modulus needs a convention
+conversion: their $\mu_s=0.5$ in the $\sig_{\!s}=2\mu_s\bt$ convention is a physical shear
+modulus $1.0$, i.e.\ $\mu_s=1.0$ in our $\sig_{\!s}=\mu_s\dev\bt$ convention; running $\mu_s=0.5$
+instead would model a solid half as stiff, oscillating ${\sim}1.5\times$ too slowly.)
+\Cref{fig:disc-tg-energy} overlays our kinetic- and strain-energy evolution on the three
+reference methods; the two energies exchange in anti-phase during the stretch--retract
+oscillation. Our \emph{kinetic energy} tracks all three in phase across the
+full run, with a first dip of $0.0166$ that sits inside the Jain--Zhao--Mosher ke band
+($0.0155$--$0.0168$ across the three methods at that time). The three reference methods already
+disagree among themselves on the \emph{strain-energy} amplitude---se peaks of $0.0083$ (the
+non-dissipative central scheme), ${\approx}0.0068$ (Zhao) and ${\approx}0.0070$
+(Robinson-Mosher). Our se peaks at $0.0067$, matching the Zhao/Robinson-Mosher reference level
+($0.0068$--$0.0070$) and just below the less-dissipative $0.0083$, while the oscillation period
+($0.40$ vs $0.38$) and peak disc aspect ratio ($1.42$ vs the published $1.40$) agree to within
+$5\%$.
+The convergence study (\cref{fig:disc-tg-conv}) uses the standard soft-disc parameters
+($\mu_s=0.1$, $\mu_f=0.01$, single vortex) of \cref{tab:params}.
+The spatial convergence (\cref{fig:disc-tg-conv}, measured against a resolved $N{=}512$
+reference) splits cleanly by quantity. The \emph{integrated energies} converge at second
+order---the $O(\dx)$ interfacial error largely cancels in the volume integral---so the
+kinetic and strain energy track $O(\dx^2)$, matching the second-order energy convergence of
+Jain \emph{et al.} The \emph{pointwise fields} (velocity, pressure) are first order: the
+mollified Heaviside spreads the stress and pressure jump over a band of width ${\sim}2\dx$,
+and the captured interface sits at an $O(\dx)$-different sub-cell position on each grid, so
+the near-interface field error is $O(\dx)$ on top of a second-order bulk---intrinsic to the
+diffuse interface. It persists when the time step is scaled $\dt\propto\dx^2$ rather than
+$\dt\propto\dx$ (finest-grid pressure order $0.79$ vs.\ $0.76$, velocity $1.12$ vs.\ $1.11$), so
+the near-first-order fields are not the $O(\dt)$ projection-splitting error
+\cite{GuermondMinevShen2006} but the diffuse one-fluid interface. Second order in the
+\emph{fields} would require a fully-conservative, discretely-telescoping stencil or a
+sharp-interface treatment \cite{Kolahdouz2023}. The order is set by the spatial discretization,
+not the time integrator.
+
+\begin{figure}[t]\centering
+\includegraphics[width=\linewidth]{figures/disc_tg_energy.png}
+\caption{Disc in a Taylor--Green vortex ($\mu_s=1.0$; present result at the $\tau\to\infty$
+elastic limit, $N{=}128$, red): (a) kinetic and (b) strain energy vs.\ time, against Jain, Zhao,
+and Robinson-Mosher \emph{et al.}\ \cite{Jain2019}. The $\tau\to\infty$ limit of the viscoelastic
+model tracks the reference methods, recovering the elastic benchmark.}
+\label{fig:disc-tg-energy}
+\end{figure}
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.62\linewidth]{figures/disc_tg_convergence.png}
+\caption{Disc in a Taylor--Green vortex, spatial convergence (vs.\ a resolved $N{=}512$
+reference): integrated energies converge at $O(\Delta x^2)$ (dashed); pointwise velocity and
+pressure are near first order (dotted), capped by the diffuse interface.}
+\label{fig:disc-tg-conv}
+\end{figure}
+
+\subsection{Elastic disc in a lid-driven cavity (FSI)}
+\label{sec:disc-lid}
+An \emph{elastic} disc---the model's $\tau\to\infty$ limit, its strain carried by the
+log-conformation branch---carried by the cavity flow is compared to the
+full-Eulerian result of Sugiyama \emph{et al.}\ \cite{Sugiyama2011} and to Jain
+\emph{et al.}\ \cite{Jain2019}. Sugiyama \emph{et al.}\ specify the Mooney--Rivlin
+coefficient $c_1=0.05$ with deviatoric stress $\sig_{\!s}'=2c_1\dev\bt$, so the
+shear-stress coefficient is $2c_1=0.1$; in our $\sig_{\!s}=\mu_s\dev\bt$ convention this
+is $\mu_s=0.1$ (\cref{tab:params}), matching their physical solid.
+The centroid trajectory threads the reference all the way to the vortex core. Sugiyama
+\emph{et al.}\ publish the trajectory as a set of $(c_x,c_y)$ points without time stamps, so the
+distance to their path is measured as the mean nearest-point distance (a time-matched deviation
+is not available against a curve with no time); the integrator-to-integrator comparison below,
+which shares a clock, is reported as a time-matched deviation. With the monotone bicubic
+semi-Lagrangian transport the present ($\tau\to\infty$) trajectory tracks Sugiyama's $1024^2$
+result to a mean nearest-point distance of ${\sim}2.5\times10^{-3}$ at $N{=}128$---under $0.5\%$
+of the ${\sim}0.6$ trajectory extent---as closely as the conservative reference-map scheme of Jain
+\emph{et al.}\ \cite{Jain2019} (${\sim}3\times10^{-3}$) and well within Sugiyama's \emph{own}
+$128^2\!\to\!1024^2$ spread (${\sim}1\times10^{-2}$; \cref{fig:disc-centroid} overlays both
+references, extracted exactly from the vector artwork of \cite{Jain2019}). Carrying the elastic
+strain as the log-conformation Finger tensor---rather than reconstructing it by differentiating the
+reference map, which winds up as the disc orbits the vortex many times---is what keeps the strain,
+and hence the trajectory, accurate on the inner spiral (a direct neo-Hookean run reconstructed from
+$\xiv$ tracks Sugiyama slightly less closely there, ${\sim}3.1\times10^{-3}$); bilinear transport,
+by contrast, is markedly more diffusive on the inner turns (scheme comparison, supplementary
+material). This case is also where we quantify the IMEX speedup---which grows with resolution as the
+direct wall solve makes the implicit step free---against an explicit baseline in the supplementary
+material.
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.62\linewidth]{figures/soft_disc_overlay.png}
+\caption{Elastic disc (the model's $\tau\to\infty$ limit) in a lid-driven cavity: centroid
+trajectory over the inward spiral (red), overlaying the reference of Sugiyama \emph{et al.}\
+\cite{Sugiyama2011} at $1024^2$ (circles) and Jain \emph{et al.}\ \cite{Jain2019} at $128^2$
+(blue dashed). The trajectory threads the benchmark to the vortex core.}
+\label{fig:disc-centroid}
+\end{figure}
+
+\begin{figure*}[t]\centering
+\includegraphics[width=\linewidth]{figures/soft_disc_lid_snapshots.png}
+\caption{Elastic disc in the lid-driven cavity ($N{=}192$): the solid, its deformed
+reference-map grid (dashed), and the flow streamlines, at the times of Jain \emph{et al.}\
+\cite{Jain2019}. The disc is swept around the vortex and stretched into a comma up the moving
+wall.}
+\label{fig:disc-lid-snaps}
+\end{figure*}
+
+\subsection{Stiff-solid regime}
+\label{sec:stiff}
+The introduction motivates implicit integration partly by the stiff-solid regime. A
+neo-Hookean disc with $\mu_s=16$ ($c_s=\sqrt{\mu_s/\rho}=4\,U_{\rm lid}$) makes the elastic
+wave the binding explicit limit: the explicit scheme diverges once $\dt$ exceeds its elastic
+CFL, whereas the energy-conserving trapezoidal coupling (Proposition~\ref{prop:trap}) advances
+the same disc stably at $4$--$8\times$ that step with the body intact ($\min J$ above $0.98$).
+Implicit integration thus \emph{enables} the stiff regime; because a stiff \emph{elastic} wave
+is genuine non-dissipative dynamics, however, a large step that fails to resolve it loses phase
+accuracy however stably it is taken---so the accuracy payoff of implicit integration lies in the
+\emph{dissipative} stiffnesses (backward-Euler viscosity and, most cleanly, the exact relaxation
+substep, accurate to machine precision at \emph{any} $\dt$, \cref{sec:verification}).
+
+%% (solver / integrator diagnostics are in the separate supplementary.tex)
+
 \subsection{Constitutive verification}
 The log-conformation update is verified against the analytic viscometric limits of
 \cref{sec:constitutive}. Step-strain relaxation, steady simple shear (including the
@@ -831,66 +952,6 @@ $1.0$ & $\infty,1,\tfrac14$ & $\psi_0{=}0.3$ & $\min(\tfrac{0.25\dx}{U_0 k},\tfr
 \bottomrule
 \end{tabular}
 \end{table}
-
-\subsection{Disc in a Taylor--Green vortex}
-\label{sec:disc-tg}
-A soft disc of radius $r=0.2$ at the centre of a unit box is released in the vortex
-$\psi=\psi_0\sin(2\pi x)\sin(2\pi y)$ ($\psi_0=0.05$, $\mu_f=10^{-3}$, $\rho_s=\rho_f=1$, shear
-modulus $\mu_s=1.0$); it stretches, elastically retracts and oscillates while the fluid
-viscously damps it. We run it at the \emph{elastic limit of the viscoelastic model}
-($\tau\to\infty$, so the log-conformation branch is non-relaxing and $\be\to\Ften\Ften^{\!\top}$):
-this is the same benchmark that fixes the elastic response, now carried within the unified
-constitutive framework rather than by a separate neo-Hookean stress. This is the benchmark of Jain, Kamrin \& Mani \cite{Jain2019}, validated
-there against the mixed Eulerian--Lagrangian results of Zhao \emph{et al.}\ and
-Robinson-Mosher \emph{et al.}; we compare against all three. (The modulus needs a convention
-conversion: their $\mu_s=0.5$ in the $\sig_{\!s}=2\mu_s\bt$ convention is a physical shear
-modulus $1.0$, i.e.\ $\mu_s=1.0$ in our $\sig_{\!s}=\mu_s\dev\bt$ convention; running $\mu_s=0.5$
-instead would model a solid half as stiff, oscillating ${\sim}1.5\times$ too slowly.)
-\Cref{fig:disc-tg-energy} overlays our kinetic- and strain-energy evolution on the three
-reference methods; the two energies exchange in anti-phase during the stretch--retract
-oscillation. Our \emph{kinetic energy} tracks all three in phase across the
-full run, with a first dip of $0.0166$ that sits inside the Jain--Zhao--Mosher ke band
-($0.0155$--$0.0168$ across the three methods at that time). The three reference methods already
-disagree among themselves on the \emph{strain-energy} amplitude---se peaks of $0.0083$ (the
-non-dissipative central scheme), ${\approx}0.0068$ (Zhao) and ${\approx}0.0070$
-(Robinson-Mosher). Our se peaks at $0.0067$, matching the Zhao/Robinson-Mosher reference level
-($0.0068$--$0.0070$) and just below the less-dissipative $0.0083$, while the oscillation period
-($0.40$ vs $0.38$) and peak disc aspect ratio ($1.42$ vs the published $1.40$) agree to within
-$5\%$.
-The convergence study (\cref{fig:disc-tg-conv}) uses the standard soft-disc parameters
-($\mu_s=0.1$, $\mu_f=0.01$, single vortex) of \cref{tab:params}.
-The spatial convergence (\cref{fig:disc-tg-conv}, measured against a resolved $N{=}512$
-reference) splits cleanly by quantity. The \emph{integrated energies} converge at second
-order---the $O(\dx)$ interfacial error largely cancels in the volume integral---so the
-kinetic and strain energy track $O(\dx^2)$, matching the second-order energy convergence of
-Jain \emph{et al.} The \emph{pointwise fields} (velocity, pressure) are first order: the
-mollified Heaviside spreads the stress and pressure jump over a band of width ${\sim}2\dx$,
-and the captured interface sits at an $O(\dx)$-different sub-cell position on each grid, so
-the near-interface field error is $O(\dx)$ on top of a second-order bulk---intrinsic to the
-diffuse interface. It persists when the time step is scaled $\dt\propto\dx^2$ rather than
-$\dt\propto\dx$ (finest-grid pressure order $0.79$ vs.\ $0.76$, velocity $1.12$ vs.\ $1.11$), so
-the near-first-order fields are not the $O(\dt)$ projection-splitting error
-\cite{GuermondMinevShen2006} but the diffuse one-fluid interface. Second order in the
-\emph{fields} would require a fully-conservative, discretely-telescoping stencil or a
-sharp-interface treatment \cite{Kolahdouz2023}. The order is set by the spatial discretization,
-not the time integrator.
-
-\begin{figure}[t]\centering
-\includegraphics[width=\linewidth]{figures/disc_tg_energy.png}
-\caption{Disc in a Taylor--Green vortex ($\mu_s=1.0$; present result at the $\tau\to\infty$
-elastic limit, $N{=}128$, red): (a) kinetic and (b) strain energy vs.\ time, against Jain, Zhao,
-and Robinson-Mosher \emph{et al.}\ \cite{Jain2019}. The $\tau\to\infty$ limit of the viscoelastic
-model tracks the reference methods, recovering the elastic benchmark.}
-\label{fig:disc-tg-energy}
-\end{figure}
-
-\begin{figure}[t]\centering
-\includegraphics[width=0.62\linewidth]{figures/disc_tg_convergence.png}
-\caption{Disc in a Taylor--Green vortex, spatial convergence (vs.\ a resolved $N{=}512$
-reference): integrated energies converge at $O(\Delta x^2)$ (dashed); pointwise velocity and
-pressure are near first order (dotted), capped by the diffuse interface.}
-\label{fig:disc-tg-conv}
-\end{figure}
 
 \subsection{Viscoelastic (SLS) disc in a Taylor--Green vortex}
 \label{sec:ve-coupled}
@@ -1056,81 +1117,6 @@ the relaxing branch \cite{Davis1986}. (b) Grid convergence at fixed impact ($\ma
 $e$ converges with resolution, and the elastic/viscoelastic gap is resolved by $N{=}128$.}
 \label{fig:restitution}
 \end{figure}
-
-\subsection{Stiff-solid regime}
-\label{sec:stiff}
-The introduction motivates implicit integration partly by the stiff-solid regime. A
-neo-Hookean disc with $\mu_s=16$ ($c_s=\sqrt{\mu_s/\rho}=4\,U_{\rm lid}$) makes the elastic
-wave the binding explicit limit: the explicit scheme diverges once $\dt$ exceeds its elastic
-CFL, whereas the energy-conserving trapezoidal coupling (Proposition~\ref{prop:trap}) advances
-the same disc stably at $4$--$8\times$ that step with the body intact ($\min J$ above $0.98$).
-Implicit integration thus \emph{enables} the stiff regime; because a stiff \emph{elastic} wave
-is genuine non-dissipative dynamics, however, a large step that fails to resolve it loses phase
-accuracy however stably it is taken---so the accuracy payoff of implicit integration lies in the
-\emph{dissipative} stiffnesses (backward-Euler viscosity and, most cleanly, the exact relaxation
-substep, accurate to machine precision at \emph{any} $\dt$, \cref{sec:verification}).
-
-%% (solver / integrator diagnostics are in the separate supplementary.tex)
-
-\subsection{Elastic disc in a lid-driven cavity (FSI)}
-\label{sec:disc-lid}
-A neo-Hookean \emph{elastic} disc carried by the cavity flow is compared to the
-full-Eulerian result of Sugiyama \emph{et al.}\ \cite{Sugiyama2011} and to Jain
-\emph{et al.}\ \cite{Jain2019}. Sugiyama \emph{et al.}\ specify the Mooney--Rivlin
-coefficient $c_1=0.05$ with deviatoric stress $\sig_{\!s}'=2c_1\dev\bt$, so the
-shear-stress coefficient is $2c_1=0.1$; in our $\sig_{\!s}=\mu_s\dev\bt$ convention this
-is $\mu_s=0.1$ (\cref{tab:params}), matching their physical solid.
-The centroid trajectory threads the reference all the way to the vortex core. Sugiyama
-\emph{et al.}\ publish the trajectory as a set of $(c_x,c_y)$ points without time stamps, so the
-distance to their path is measured as the mean nearest-point distance (a time-matched deviation
-is not available against a curve with no time); the integrator-to-integrator comparison below,
-which shares a clock, is reported as a time-matched deviation. With the monotone bicubic
-semi-Lagrangian transport of the reference map the mean nearest-point distance to Sugiyama's
-$1024^2$ result is ${\sim}5\times10^{-3}$ at $N{=}128$---under $1\%$ of the ${\sim}0.6$ trajectory
-extent. The trajectory is moreover \emph{grid-converged}: refining from $N{=}128$ to $256$ shifts
-the path by under $7\times10^{-4}$, and the deviation from Sugiyama is flat across $N{=}128$--$256$
-(supplementary material). The residual is therefore not a resolution or
-transport-diffusion artifact but the cross-method scatter of the benchmark itself: our converged
-trajectory tracks Sugiyama's $1024^2$ reference as closely as the conservative reference-map scheme
-of Jain \emph{et al.}\ \cite{Jain2019} does (both ${\sim}3$--$5\times10^{-3}$), and well within
-Sugiyama's \emph{own} $128^2\!\to\!1024^2$ spread (${\sim}1\times10^{-2}$; \cref{fig:disc-centroid}
-overlays all three references, extracted exactly from the vector artwork of \cite{Jain2019}).
-Bilinear transport, by contrast, is markedly more diffusive on the inner turns (scheme comparison,
-supplementary material), so within the present family the residual is set by the reference-map
-transport, not the interface or the integrator (\cref{fig:disc-centroid}). This case is also
-where we quantify the IMEX speedup---which grows with resolution as the direct wall solve makes
-the implicit step free---against an explicit baseline in the supplementary material.
-
-\emph{Viscoelastic reduction to elasticity.} The same lid-driven disc also validates the
-viscoelastic model in its elastic limit. Running the SLS solid with its Maxwell modulus set to
-$\mu_s$ and no relaxation ($\tau\to\infty$)---so the elastic Finger tensor $\bt\to\bm F\bm F^{\!\top}$
-and the stress $G\,\dev\bt\to\mu_s\dev\bm F\bm F^{\!\top}$---reproduces the neo-Hookean trajectory
-(\cref{fig:disc-centroid}, green dashed), confirming that the elastic-strain transport carries the
-correct finite-strain elastic limit. Notably the $\tau\to\infty$ SLS tracks the Sugiyama reference on
-the inner spiral \emph{slightly more closely} than the direct neo-Hookean does (mean nearest-point
-distance $2.5\times10^{-3}$ vs.\ $3.1\times10^{-3}$): the neo-Hookean stress
-$\mu_s\dev(\bm F\bm F^{\!\top})$ is built by differentiating the reference map, which winds up under
-the strong inner-spiral rotation, whereas the log-conformation scheme transports the elastic Finger
-tensor directly and is more robust to that winding.
-
-\begin{figure}[t]\centering
-\includegraphics[width=0.62\linewidth]{figures/soft_disc_overlay.png}
-\caption{Neo-Hookean disc in a lid-driven cavity: centroid trajectory over the inward spiral.
-Our neo-Hookean result (red) and the SLS solid in its $\tau\to\infty$ elastic limit (green
-dashed) both overlay the reference of Sugiyama \emph{et al.}\ \cite{Sugiyama2011} at $1024^2$
-(circles) and Jain \emph{et al.}\ \cite{Jain2019} at $128^2$ (blue dashed); the log-conformation
-$\tau\to\infty$ curve tracks Sugiyama slightly more closely on the inner spiral.}
-\label{fig:disc-centroid}
-\end{figure}
-
-\begin{figure*}[t]\centering
-\includegraphics[width=\linewidth]{figures/soft_disc_lid_snapshots.png}
-\caption{Elastic disc in the lid-driven cavity ($N{=}192$): the solid, its deformed
-reference-map grid (dashed), and the flow streamlines, at the times of Jain \emph{et al.}\
-\cite{Jain2019}. The disc is swept around the vortex and stretched into a comma up the moving
-wall.}
-\label{fig:disc-lid-snaps}
-\end{figure*}
 
 \section{Conclusions and outlook}
 \label{sec:conclusion}
