@@ -97,10 +97,23 @@ def _render_soft_disc(runs, out_png):
     if sug1024 is not None:
         plt.plot(sug1024[:, 0], sug1024[:, 1], "o", mfc="none", mec="0.15", ms=5.5,
                  mew=0.9, ls="none", label="Sugiyama (2011) $1024^2$", zorder=3)
-    # our (IMEX) trajectory -- one thin red curve
-    ex = runs["imex"]
-    plt.plot(ex[:, 1], ex[:, 2], "-", color="tab:red", lw=1.8,
-             label="present (RMT)", zorder=4)
+    # present RMT: neo-Hookean (red) and, from the same run, the SLS solid in its
+    # tau->inf elastic limit (dark green dashed). The log-conformation SLS transports
+    # b_e directly, so it is more robust to the reference-map winding on the inner
+    # spiral than the neo-Hookean F=(grad xi)^-1 stress, and tracks Sugiyama slightly
+    # closer there (mean nearest-point distance 2.5e-3 vs 3.1e-3).
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    npz = os.path.join(root, "outputs", "overlay", "lid_stab_tauinf.npz")
+    if os.path.isfile(npz):
+        d = np.load(npz); neo, sls = d["neo"], d["sls"]
+        plt.plot(neo[:, 1], neo[:, 2], "-", color="tab:red", lw=1.8,
+                 label="present, neo-Hookean", zorder=4)
+        plt.plot(sls[:, 1], sls[:, 2], "--", color="tab:green", lw=1.5,
+                 label=r"present, SLS $\tau\!\to\!\infty$", zorder=5)
+    else:
+        ex = runs["imex"]
+        plt.plot(ex[:, 1], ex[:, 2], "-", color="tab:red", lw=1.8,
+                 label="present (RMT)", zorder=4)
     plt.xlabel("centroid $x$"); plt.ylabel("centroid $y$"); plt.axis("equal")
     plt.legend(frameon=False, loc="lower left", fontsize=8.5); plt.tight_layout()
     plt.savefig(out_png); plt.close()

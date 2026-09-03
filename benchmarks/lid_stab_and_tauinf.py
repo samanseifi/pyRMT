@@ -77,23 +77,16 @@ def main():
 
 
 def replot_split():
-    """Re-render two single-panel figures from the cached trajectories (no re-run):
-    figures/lid_tauinf.png  -- tau->inf vs neo-Hookean (main text)
-    figures/lid_staboff.png -- stabilizer off vs on      (supplementary)."""
+    """Re-render the supplementary stabilizer-faithfulness figure from the cached
+    trajectories (no re-run): figures/lid_staboff.png (stabilizer off vs on). The
+    tau->inf vs neo-Hookean comparison is drawn on the main-text benchmark figure
+    (fig:disc-centroid) directly from the same npz by overlay_integrators."""
     import matplotlib; matplotlib.use("Agg")
     sys.path.insert(0, os.path.join(ROOT, "benchmarks"))
     from _plotstyle import apply as _style; _style()
     import matplotlib.pyplot as plt
     d = np.load(os.path.join(ROOT, "outputs", "overlay", "lid_stab_tauinf.npz"))
-    neo, sls, off = d["neo"], d["sls"], d["off"]
-
-    fig, ax = plt.subplots(figsize=(5.4, 5.0))
-    ax.plot(neo[:, 1], neo[:, 2], "-", color="black", lw=2.4, label="neo-Hookean")
-    ax.plot(sls[:, 1], sls[:, 2], "--", color="red", lw=1.8, label=r"SLS, $\tau\!\to\!\infty$")
-    ax.set_xlabel("centroid $x$"); ax.set_ylabel("centroid $y$")
-    ax.set_aspect("equal"); ax.legend(loc="lower left"); fig.tight_layout()
-    fig.savefig(os.path.join(ROOT, "paper", "figures", "lid_tauinf.png"), dpi=200)
-    print("saved lid_tauinf.png  (max sep %.1e)" % maxsep(neo, sls))
+    neo, off = d["neo"], d["off"]
 
     fig, ax = plt.subplots(figsize=(5.4, 5.0))
     ax.plot(neo[:, 1], neo[:, 2], "-", color="black", lw=2.4, label="stabilizer on (imex-sl)")

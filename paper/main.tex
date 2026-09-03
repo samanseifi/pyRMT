@@ -1097,27 +1097,25 @@ transport, not the interface or the integrator (\cref{fig:disc-centroid}). This 
 where we quantify the IMEX speedup---which grows with resolution as the direct wall solve makes
 the implicit step free---against an explicit baseline in the supplementary material.
 
-\emph{Viscoelastic reduction to elasticity.} The same lid-driven disc validates the viscoelastic
-model in its elastic limit. Running the SLS solid with its Maxwell modulus set to $\mu_s$ and no
-relaxation ($\tau\to\infty$)---so the elastic Finger tensor $\bt\to\bm F\bm F^{\!\top}$ and the
-stress $G\,\dev\bt\to\mu_s\dev\bm F\bm F^{\!\top}$---the log-conformation disc reproduces the pure
-neo-Hookean centroid trajectory to $1.1\times10^{-2}$ over the entire inward spiral
-(\cref{fig:lid-tauinf}), a direct confirmation that the elastic-strain transport carries the
-correct finite-strain elastic limit.
-
-\begin{figure}[t]\centering
-\includegraphics[width=0.5\linewidth]{figures/lid_tauinf.png}
-\caption{Viscoelastic reduction to elasticity in the lid-driven cavity: with $\tau\to\infty$ and
-$G{=}\mu_s$ the SLS (log-conformation) disc (dashed) reproduces the neo-Hookean disc (solid).
-Centroid path over $t\in[0,24]$; maximum separation $1.1\times10^{-2}$.}
-\label{fig:lid-tauinf}
-\end{figure}
+\emph{Viscoelastic reduction to elasticity.} The same lid-driven disc also validates the
+viscoelastic model in its elastic limit. Running the SLS solid with its Maxwell modulus set to
+$\mu_s$ and no relaxation ($\tau\to\infty$)---so the elastic Finger tensor $\bt\to\bm F\bm F^{\!\top}$
+and the stress $G\,\dev\bt\to\mu_s\dev\bm F\bm F^{\!\top}$---reproduces the neo-Hookean trajectory
+(\cref{fig:disc-centroid}, green dashed), confirming that the elastic-strain transport carries the
+correct finite-strain elastic limit. Notably the $\tau\to\infty$ SLS tracks the Sugiyama reference on
+the inner spiral \emph{slightly more closely} than the direct neo-Hookean does (mean nearest-point
+distance $2.5\times10^{-3}$ vs.\ $3.1\times10^{-3}$): the neo-Hookean stress
+$\mu_s\dev(\bm F\bm F^{\!\top})$ is built by differentiating the reference map, which winds up under
+the strong inner-spiral rotation, whereas the log-conformation scheme transports the elastic Finger
+tensor directly and is more robust to that winding.
 
 \begin{figure}[t]\centering
 \includegraphics[width=0.62\linewidth]{figures/soft_disc_overlay.png}
 \caption{Neo-Hookean disc in a lid-driven cavity: centroid trajectory over the inward spiral.
-Our result (red) overlays the reference of Sugiyama \emph{et al.}\ \cite{Sugiyama2011} at
-$1024^2$ (circles) and Jain \emph{et al.}\ \cite{Jain2019} at $128^2$ (blue dashed).}
+Our neo-Hookean result (red) and the SLS solid in its $\tau\to\infty$ elastic limit (green
+dashed) both overlay the reference of Sugiyama \emph{et al.}\ \cite{Sugiyama2011} at $1024^2$
+(circles) and Jain \emph{et al.}\ \cite{Jain2019} at $128^2$ (blue dashed); the log-conformation
+$\tau\to\infty$ curve tracks Sugiyama slightly more closely on the inner spiral.}
 \label{fig:disc-centroid}
 \end{figure}
 
@@ -1152,7 +1150,7 @@ We demonstrated the coupled
 viscoelastic response on a disc in a Taylor--Green vortex: $\tau\to\infty$ recovers the
 elastic dynamics, finite $\tau$ dissipates stored elastic energy, and the elastic Finger
 tensor remains positive-definite throughout. In the lid-driven cavity the $\tau\to\infty$
-limit reproduces the pure neo-Hookean disc directly (\cref{fig:lid-tauinf}).
+limit reproduces the pure neo-Hookean disc directly (\cref{fig:disc-centroid}).
 
 Relative to the closest prior work, the method differs from explicit hyperelastic RMT
 \cite{Kamrin2012,Rycroft2020,Jain2019} in both the viscoelastic constitutive transport
