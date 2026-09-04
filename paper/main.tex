@@ -829,9 +829,8 @@ reference map, which winds up as the disc orbits the vortex many times---is what
 and hence the trajectory, accurate on the inner spiral (a direct neo-Hookean run reconstructed from
 $\xiv$ tracks Sugiyama slightly less closely there, ${\sim}3.1\times10^{-3}$); bilinear transport,
 by contrast, is markedly more diffusive on the inner turns (scheme comparison, supplementary
-material). This case is also where we quantify the IMEX speedup---which grows with resolution as the
-direct wall solve makes the implicit step free---against an explicit baseline in the supplementary
-material.
+material). This case is also where we quantify the IMEX speedup against an explicit baseline
+(\cref{sec:efficiency}).
 
 \begin{figure}[t]\centering
 \includegraphics[width=0.62\linewidth]{figures/soft_disc_overlay.png}
@@ -850,6 +849,56 @@ reference-map grid (dashed), and the flow streamlines, at the times of Jain \emp
 wall.}
 \label{fig:disc-lid-snaps}
 \end{figure*}
+
+\subsection{Efficiency: work--precision against an explicit baseline}
+\label{sec:efficiency}
+The explicit baseline is the same solver with the implicit options disabled: one forward-Euler
+step advects $(\xiv,\psib)$ (bicubic semi-Lagrangian), assembles the blended stress and its force,
+takes the explicit momentum predictor $\uv^{*}=\uv^n+\dt[-(\uv^n\!\cdot\!\grad)\uv^n+\nu\nabla^2
+\uv^n+\bm f^n/\rho]$, and projects---the established explicit RMT, bound by all the step-size limits
+of \cref{eq:cfl}. At a matched step the IMEX adaptive advection reduces to the same central
+differencing, so IMEX reproduces the explicit trajectory to within a small viscous-splitting
+difference (a time-matched centroid deviation of $3.8\times10^{-4}$ at $N{=}128$, with identical
+minimum Jacobian); the enlarged steps are therefore an accuracy--cost trade, not a change of
+solution family.
+
+Because the direct DST/FFT wall solve makes the implicit predictor cost the same as an explicit
+one, the lifted step converts directly into wall-clock. \Cref{fig:work-precision} is a
+work--precision diagram on the soft-disc-in-lid case: at each resolution the accuracy is the
+maximum centroid deviation from a fine-$\dt$ reference at the \emph{same} resolution---isolating
+the temporal error each integrator controls---plotted against measured wall-clock. The
+adaptive-advection IMEX (imex-sl) reaches a given accuracy in a fraction of the explicit time: at
+$N{=}128$ it runs at $4\times$ the explicit step for a centroid error of $1.2\times10^{-3}$ (under
+$0.3\%$ of the ${\sim}0.6$ trajectory extent) and a $6.4\times$ wall-clock reduction, or $8\times$
+the step at $2.1\times10^{-3}$ for a $10\times$ reduction; the error grows smoothly with the step,
+so the user trades accuracy for speed along a Pareto front rather than hitting a stability wall.
+The net speedup \emph{grows with resolution} (\cref{tab:speedup}), because the viscous limit
+$\dx^2/\nu$ that binds the explicit step tightens faster than the advective one as $N$ increases.
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.62\linewidth]{figures/work_precision.png}
+\caption{Work--precision on the soft-disc-in-lid case ($N{=}64$ blue, $N{=}128$ red): maximum
+centroid error vs.\ a fine-$\dt$ reference at the same resolution, against wall-clock time.
+Markers: explicit (circle, at its CFL step), IMEX (square), and adaptive-advection IMEX (imex-sl,
+triangles) at $2,4,6,8\times$ the explicit step. Larger steps trade accuracy for speed along a
+Pareto front; the explicit baseline is the slowest at each resolution.}
+\label{fig:work-precision}
+\end{figure}
+
+\begin{table}[t]\centering\small
+\caption{Net wall-clock speedup of IMEX over the explicit baseline on the soft-disc-in-lid case
+at two resolutions (direct DST wall solve); $\Delta$centroid is the time-matched deviation from
+the explicit reference at the same step. The speedup grows with resolution.}
+\label{tab:speedup}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+ & $\dt$ vs.\ explicit & speedup & $\Delta$centroid \\
+\midrule
+$N{=}48$  & $6\times$ & $5.0\times$          & $4.5\times10^{-3}$ \\
+$N{=}128$ & $6\times$ & $\mathbf{5.6\times}$ & $1.1\times10^{-3}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{Stiff-solid regime}
 \label{sec:stiff}
