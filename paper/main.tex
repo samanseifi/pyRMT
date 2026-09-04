@@ -425,8 +425,13 @@ relaxation; the equilibrium branch $\mu_s\dev(\Ften\Ften^{\!\top})$ is still bui
 $\Ften=(\grad\xiv)^{-1}$ and can fold under unbounded shear, so relaxation eliminates the
 folding sensitivity only in the Maxwell-fluid limit and mitigates it otherwise.
 \emph{(ii) Incompressibility of $\be$.} The relaxation toward $\It$ does not preserve
-$\det\be=1$ (as in Oldroyd-B); the trace is carried by the pressure, and $\det\be$ is
-monitored as a diagnostic.
+$\det\be=1$ (as in Oldroyd-B): in steady planar extension the model gives
+$\det\be=1/(1-4\mathrm{Wi}^2)$, so $\be$ genuinely dilates as it stretches. This does not affect
+the momentum balance---only the deviatoric part $G\dev\be$ enters the stress, and the isotropic
+part is carried by the pressure---but $\det\be$ is monitored as a diagnostic. In the coupled
+SLS-in-vortex runs it reaches $\det\be\approx1.3$ ($\tau=1$) to $1.5$ ($\tau=0.25$) at the
+strongest local stretch, consistent with the analytic extensional value at the local Weissenberg
+number.
 
 The model has closed-form viscometric limits, used later for verification
 (\cref{sec:verification}). For homogeneous simple shear
@@ -479,7 +484,8 @@ without iterative diagonalization; the code evaluates
 $\Omega_{12}=\big[(\ell_2-\ell_1)/(\lambda_2-\lambda_1)\big]\,(\lambda_2 M_{12}+\lambda_1 M_{21})$,
 replacing \emph{only the prefactor} by its limit $(\ell_2-\ell_1)/(\lambda_2-\lambda_1)\to
 \lambda_1^{-1}=e^{-\ell_1}$ while keeping the factor $\lambda_2 M_{12}+\lambda_1 M_{21}$ when
-$|\lambda_1-\lambda_2|<10^{-10}$, so the full product tends to the correct limit
+$|\lambda_1-\lambda_2|<10^{-10}$ (an absolute, dimensionless tolerance---the $\lambda_i$ are
+eigenvalues of the dimensionless $\be$), so the full product tends to the correct limit
 $M_{12}+M_{21}$ in both branches.
 
 \emph{Exact relaxation for stiff $\tau$.}
@@ -1122,7 +1128,9 @@ R/\mu_f$ (\cref{fig:restitution}a). This probes the two asymptotic limits of
 elastohydrodynamic-collision theory \cite{Davis1986}: a slow impact is strongly damped by the fluid
 ($e\!\to\!0$ below a critical Stokes number), while a lossless elastic collision conserves kinetic
 energy ($e\!\to\!1$ as $\mathrm{St}\!\to\!\infty$, the fluid becoming negligible). The elastic
-discs reproduce this behaviour---$e$ rises monotonically with $\mathrm{St}$---and the viscoelastic
+discs reproduce this behaviour---$e$ rises monotonically with $\mathrm{St}$; fitting
+$e=a(1-\mathrm{St}_c/\mathrm{St})$ gives a critical Stokes number $\mathrm{St}_c\approx3.4$, of the
+same order as the elastohydrodynamic prediction \cite{Davis1986}---and the viscoelastic
 (SLS) discs sit below the elastic curve at every speed, the Maxwell branch dissipating part of the
 impact. The measured restitution is grid-convergent (\cref{fig:restitution}b): at $N{=}128$ it is
 within a few percent of $N{=}160$, and it is only on the resolved grids that the elastic and
