@@ -37,6 +37,10 @@ def main():
             return None
         d = np.loadtxt(p, delimiter=",", skiprows=1)
         t, y = d[:, 0], d[:, 1]
+        if comp == "se":
+            # the SE csv is already a clean bin-median curve anchored at (0,0); smooth
+            # it directly (no re-binning, which would average the zero start away)
+            return smooth(t, y)
         bins = np.linspace(t.min(), t.max(), 61)
         idx = np.digitize(t, bins)
         tb, yb = [], []
