@@ -724,7 +724,7 @@ material).
 
 \begin{algorithm}[t]\small\caption{\textsc{IMEX} --- one step (implicit viscosity, exact relaxation; optional elastic-wave stabilizer)}\label{alg:imex}
 \begin{algorithmic}[1]
-\State advect $(\xiv,\psib)$ with $\uv^n$ (monotone bicubic semi-Lagrangian); extrapolate \Comment{overridden at line~8 if stabilizer on}
+\State advect $(\xiv,\psib)$ with $\uv^n$ (monotone bicubic semi-Lagrangian); extrapolate \Comment{$\xiv$ re-transported at the last step if stabilizer on}
 \State $\psib\!\leftarrow\!$ Strang local step $\mathrm{relax}(\tfrac{\dt}{2})\!\to\!\mathrm{stretch}(\dt,\,\text{\cref{eq:logconf-rhs}})\!\to\!\mathrm{relax}(\tfrac{\dt}{2})$ (exact relax, $A$-stable $\forall\tau$); $\be=\exp\psib$
 \State assemble blended stress $\sig(\xiv,\be)$; explicit force $\bm f^n=\dive\sig$
 \If{$\dt\max|\uv^n|/\dx\le0.9$ \textbf{and} $\dt\le2\nu/\max|\uv^n|^2$} $\tilde{\uv}\leftarrow\uv^n-\dt(\uv^n\!\cdot\!\grad)\uv^n$ \Comment{central}
@@ -732,7 +732,7 @@ material).
 \EndIf
 \State solve $\big(\It-\dt\nu\nabla^2-\tfrac14\dt^2c_s^2\nabla^2\big)\uv^{*}=\tilde{\uv}+\tfrac14\dt^2c_s^2\nabla^2\uv^n+\dt\,\bm f^n/\rho$ \Comment{$c_s^2{=}0$ unless stabilizer on; direct DST / FFT}
 \State $(\uv^{n+1},p)\leftarrow\textsc{Project}(\uv^{*})$
-\State \textbf{stabilizer on} (stiff solid, \cref{sec:stiff}): use $c_s^2{=}\mu_s/\rho$ at line~6 and re-transport $\xiv$ with the midpoint $\tfrac12(\uv^n+\uv^{n+1})$ in place of line~1; extrapolate \Comment{trapezoidal wave}
+\State \textbf{stabilizer on} (stiff solid, \cref{sec:stiff}): use $c_s^2{=}\mu_s/\rho$ in the momentum solve and re-transport $\xiv$ with the midpoint $\tfrac12(\uv^n+\uv^{n+1})$ in place of the initial advection; extrapolate \Comment{trapezoidal wave}
 \end{algorithmic}
 \end{algorithm}
 
