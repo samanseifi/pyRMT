@@ -107,13 +107,13 @@ def run(N=128, t_end=12.0, tau=0.5, eps_rate=0.5, G=0.3, mu_f=0.05, rho=1.0,
         phi = rebuild_phi_from_reference_map(X1, X2, pin); m = (phi <= 0).astype(float)
 
         # geometry
-        X1 = advect_reference_map(X1, u_c, v_c, Xg, Yg, dt, dx, dy, phi, 'semilagrangian', 0.0) * m
-        X2 = advect_reference_map(X2, u_c, v_c, Xg, Yg, dt, dx, dy, phi, 'semilagrangian', 0.0) * m
+        X1 = advect_reference_map(X1, u_c, v_c, Xg, Yg, dt, dx, dy, phi, 'semilagrangian_cubic', 0.0) * m
+        X2 = advect_reference_map(X2, u_c, v_c, Xg, Yg, dt, dx, dy, phi, 'semilagrangian_cubic', 0.0) * m
         X1, X2 = extrapolate_reference_map(X1, X2, phi, dx, dy, 3)
         # stress: advect psi=log(b_e), log-conformation stretch + relaxation
-        p11 = advect_reference_map(p11, u_c, v_c, Xg, Yg, dt, dx, dy, phi, 'semilagrangian', 0.0) * m
-        p12 = advect_reference_map(p12, u_c, v_c, Xg, Yg, dt, dx, dy, phi, 'semilagrangian', 0.0) * m
-        p22 = advect_reference_map(p22, u_c, v_c, Xg, Yg, dt, dx, dy, phi, 'semilagrangian', 0.0) * m
+        p11 = advect_reference_map(p11, u_c, v_c, Xg, Yg, dt, dx, dy, phi, 'semilagrangian_cubic', 0.0) * m
+        p12 = advect_reference_map(p12, u_c, v_c, Xg, Yg, dt, dx, dy, phi, 'semilagrangian_cubic', 0.0) * m
+        p22 = advect_reference_map(p22, u_c, v_c, Xg, Yg, dt, dx, dy, phi, 'semilagrangian_cubic', 0.0) * m
         p11, p12 = extrapolate_reference_map(p11, p12, phi, dx, dy, 3)
         p22, _ = extrapolate_reference_map(p22, np.zeros((N, N)), phi, dx, dy, 3)
         L11 = grad_central_x_2nd(u_c, dx); L12 = grad_central_y_2nd(u_c, dy)

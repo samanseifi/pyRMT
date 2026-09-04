@@ -27,7 +27,25 @@ def main():
                scheme="semilagrangian_cubic", R=0.2, x0=0.5, y0=0.5, mu_s=1.0,
                mu_f=1e-3, U0=0.05, kw=2, history=True)["hist"]
     hist = {"t": h["t"], "ke": h["KE"], "se": h["Eel"]}
-    methods = _load_jain_methods()
+    ddir = os.path.join(ROOT, "benchmarks", "data")
+
+    def refcurve(m, comp):
+        """Load the vector-extracted Jain-Fig-14b reference (both ke and se now digitized
+        directly from the source), sort, and bin-average the scattered dots to a clean curve."""
+        p = os.path.join(ddir, f"jain2019_fig14b_{m}_{comp}.csv")
+        if not os.path.isfile(p):
+            return None
+        d = np.loadtxt(p, delimiter=",", skiprows=1)
+        t, y = d[:, 0], d[:, 1]
+        bins = np.linspace(t.min(), t.max(), 61)
+        idx = np.digitize(t, bins)
+        tb, yb = [], []
+        for b in range(1, 61):
+            msk = idx == b
+            if msk.any():
+                tb.append(t[msk].mean()); yb.append(y[msk].mean())
+        tt, yy = np.array(tb), np.array(yb)
+        return smooth(tt, yy) if len(tt) > 4 else (tt, yy)
 
     def smooth(t, y, n=400):
         t = np.asarray(t, float); y = np.asarray(y, float); o = np.argsort(t)
@@ -35,23 +53,17 @@ def main():
         t, y = t[keep], y[keep]; tt = np.linspace(t.min(), t.max(), n)
         return tt, PchipInterpolator(t, y)(tt)
 
-    # standard colours
-    refstyle = {"Jain": ("black", "-", "Jain et al."),
-                "Zhao": ("blue", "--", "Zhao et al."),
-                "Mosher": ("green", "-.", "Robinson-Mosher")}
-    ddir = os.path.join(ROOT, "benchmarks", "data")
+    # standard (classic) colours + distinct line styles
+    refstyle = {"Jain": ("black", "--", "Jain et al."),
+                "Zhao": ("blue", "-.", "Zhao et al."),
+                "Mosher": ("darkgreen", ":", "Robinson-Mosher")}
     fig, ax = plt.subplots(1, 2, figsize=(10.4, 4.3))
     for j, comp in enumerate(("ke", "se")):
         for m, (c, ls, lab) in refstyle.items():
-            if comp == "ke":   # high-resolution curves extracted from Jain Fig. 14b (vector)
-                p = os.path.join(ddir, f"jain2019_fig14b_{m}_ke.csv")
-                if os.path.isfile(p):
-                    d = np.loadtxt(p, delimiter=",", skiprows=1)
-                    ax[j].plot(d[:, 0], d[:, 1], color=c, ls=ls, lw=1.4, label=lab); continue
-            key = f"{m}_{comp}"
-            if methods is not None and key in methods:
-                ax[j].plot(*smooth(*methods[key]), color=c, ls=ls, lw=1.4, label=lab)
-        ax[j].plot(hist["t"], hist[comp], color="red", lw=2.2,
+            rc = refcurve(m, comp)
+            if rc is not None:
+                ax[j].plot(rc[0], rc[1], color=c, ls=ls, lw=1.6, label=lab)
+        ax[j].plot(hist["t"], hist[comp], color="red", lw=2.4, ls="-",
                    label=r"present, $\tau\!\to\!\infty$ ($N{=}128$)")
         ax[j].set_xlabel("time $t$"); ax[j].set_xlim(0, 1)
     ax[0].set_ylabel("kinetic energy"); ax[0].set_ylim(0.010, 0.026)

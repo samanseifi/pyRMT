@@ -32,10 +32,10 @@ os.makedirs(OUT, exist_ok=True)
 # solenoidal velocity, because the wide-stencil force divergence is not in the range of the
 # compact projection gradient; negligible here (mu_s=1) but corrected for correctness.
 JAIN = dict(R=0.2, x0=0.5, y0=0.5, mu_s=1.0, mu_f=1e-3, U0=0.05, kw=2,
-            scheme="semilagrangian", isochoric=True)
+            scheme="semilagrangian_cubic", isochoric=True)
 # standard soft-disc parameters for the convergence study (single vortex)
 SOFT = dict(R=0.15, x0=0.5, y0=0.7, mu_s=0.1, mu_f=0.01, U0=0.3, kw=1,
-            scheme="semilagrangian", isochoric=True)
+            scheme="semilagrangian_cubic", isochoric=True)
 
 
 def _load_jain_methods():

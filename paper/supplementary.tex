@@ -149,14 +149,14 @@ regime (the stiff-solid example of the main text), where stepping past the elast
 \label{sec:supp-consistency}
 The $\tau\to\infty$ reduction of the viscoelastic model to neo-Hookean elasticity is shown in
 the main text; here we check that the elastic-wave stabilizer does not distort the lid-driven
-validation. On the neo-Hookean disc (Sugiyama parameters, $N{=}128$, bicubic semi-Lagrangian
-transport), resolving the elastic wave (stabilizer off, step below the elastic-wave CFL)
+validation. On the elastic ($\tau\to\infty$) disc (Sugiyama parameters, $N{=}128$, bicubic
+semi-Lagrangian transport), resolving the elastic wave (stabilizer off, step below the elastic-wave CFL)
 reproduces the stabilized run's centroid path to plotting precision (\cref{fig:lid-staboff}),
 confirming that the energy-conserving stabilizer is faithful in the regime where it is used.
 
 \begin{figure}[t]\centering
 \includegraphics[width=0.5\linewidth]{figures/lid_staboff.png}
-\caption{Elastic-wave stabilizer off (dashed) vs.\ on (solid) for the neo-Hookean lid-driven
+\caption{Elastic-wave stabilizer off (dashed) vs.\ on (solid) for the elastic ($\tau\to\infty$) lid-driven
 disc: the centroid paths over $t\in[0,24]$ coincide, so the stabilizer does not distort the
 trajectory.}
 \label{fig:lid-staboff}

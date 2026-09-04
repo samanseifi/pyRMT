@@ -92,7 +92,7 @@ def _render_soft_disc(runs, out_png):
     # classic colours, thin lines. Sugiyama 1024^2 = reference (open circles);
     # Jain 128^2 = blue dashed; present RMT = red; IMEX 4x dt = dark-green markers.
     if jain128 is not None:
-        plt.plot(jain128[:, 0], jain128[:, 1], "--", color="tab:blue", lw=1.1,
+        plt.plot(jain128[:, 0], jain128[:, 1], "-", color="blue", lw=1.6,
                  label="Jain et al.\\ (2019) $128^2$", zorder=2)
     if sug1024 is not None:
         plt.plot(sug1024[:, 0], sug1024[:, 1], "o", mfc="none", mec="0.15", ms=5.5,
@@ -107,7 +107,7 @@ def _render_soft_disc(runs, out_png):
     npz = os.path.join(root, "outputs", "overlay", "lid_stab_tauinf.npz")
     if os.path.isfile(npz):
         sls = np.load(npz)["sls"]
-        plt.plot(sls[:, 1], sls[:, 2], "-", color="tab:red", lw=1.8,
+        plt.plot(sls[:, 1], sls[:, 2], "--", color="red", lw=1.6,
                  label=r"present, $\tau\!\to\!\infty$ ($128^2$)", zorder=4)
     else:
         ex = runs["imex"]

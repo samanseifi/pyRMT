@@ -29,7 +29,7 @@ NS = [32, 64, 128, 256]
 
 
 def run_one(N, t_end, R=0.15, x0=0.5, y0=0.7, mu_s=0.1, mu_f=0.01, U0=0.3, rho=1.0,
-            scheme="semilagrangian", w_cut_fac=4.0, isochoric=False, normalize_phi=False,
+            scheme="semilagrangian_cubic", w_cut_fac=4.0, isochoric=False, normalize_phi=False,
             kw=1, dt=None, dt_coef=None, integrator="explicit"):
     # Stream function psi = U0 sin(k x) sin(k y), k = kw*pi. kw=1 is a single vortex;
     # kw=2 (four cells) with U0=0.05, R=0.2, x0=y0=0.5, mu_s=0.5, mu_f=1e-3 reproduces the

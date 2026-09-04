@@ -21,7 +21,7 @@ from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
 from pyRMT.viscoelastic import logconf_local_step_strang, sym_exp
 
 
-def run(N=128, t_end=8.0, scheme="semilagrangian", w_cut_fac=0.0, detg_clamp=0.0,
+def run(N=128, t_end=8.0, scheme="semilagrangian_cubic", w_cut_fac=0.0, detg_clamp=0.0,
         reinit=False, isochoric=False, out_root="outputs", imex=False, dt=None, write=True,
         integrator=None, mu_s=0.1, viscoelastic=False, G_ve=None, tau=np.inf, snap_times=None,
         stab=True):
