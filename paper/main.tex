@@ -362,6 +362,7 @@ incompressible motion $J\equiv1$; the discrete $J$ is monitored as a folding/qua
 diagnostic.
 
 \subsection{Neo-Hookean solid}
+\label{sec:neohookean}
 The equilibrium (non-relaxing) branch of the solid is an incompressible neo-Hookean
 material,
 \begin{equation}
@@ -752,10 +753,9 @@ viscously damps it. We run it at the \emph{elastic limit of the viscoelastic mod
 this is the same benchmark that fixes the elastic response, now carried within the unified
 constitutive framework rather than by a separate neo-Hookean stress. This is the benchmark of Jain, Kamrin \& Mani \cite{Jain2019}, validated
 there against the mixed Eulerian--Lagrangian results of Zhao \emph{et al.}\ and
-Robinson-Mosher \emph{et al.}; we compare against all three. (The modulus needs a convention
-conversion: their $\mu_s=0.5$ in the $\sig_{\!s}=2\mu_s\bt$ convention is a physical shear
-modulus $1.0$, i.e.\ $\mu_s=1.0$ in our $\sig_{\!s}=\mu_s\dev\bt$ convention; running $\mu_s=0.5$
-instead would model a solid half as stiff, oscillating ${\sim}1.5\times$ too slowly.)
+Robinson-Mosher \emph{et al.}; we compare against all three. (Applying the modulus convention of
+\cref{sec:neohookean}, their $\mu_s=0.5$ is a physical shear modulus $1.0$, i.e.\ $\mu_s=1.0$
+here; running $\mu_s=0.5$ instead would oscillate ${\sim}1.5\times$ too slowly.)
 \Cref{fig:disc-tg-energy} overlays our kinetic- and strain-energy evolution on the three
 reference methods; the two energies exchange in anti-phase during the stretch--retract
 oscillation. Our \emph{kinetic energy} tracks all three in phase across the
@@ -933,7 +933,10 @@ $\rho=1$; unit domain). Stream function $\psi=\psi_0\sin(k x)\sin(k y)$ with $k=
 stream-function amplitude, so the peak velocity is $U_0 k$ and the advective term
 $\tfrac{0.25\dx}{U_0 k}$ is $0.25\dx$ over that velocity. Grid: disc-in-TG energy $N{=}128$, convergence
 $N\in\{32,64,128,256,512\}$; disc-in-lid $N{=}128$ (and $N{=}48,64$ for the speedup/metric study);
-four-roll $N{=}128$; shear $N{=}96$.}
+four-roll $N{=}128$; shear $N{=}96$. The $\dt$ rule listed is the explicit stability bound, which
+governs the explicit baseline; the IMEX runs instead set $\dt$ by accuracy---the advective term
+alone for the coupled cases, and $4$--$8\times$ the explicit elastic-wave limit in the stiff-solid
+and speedup studies.}
 \label{tab:params}
 \begin{tabular}{@{}lcccccccc@{}}
 \toprule
