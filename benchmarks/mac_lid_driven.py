@@ -65,7 +65,7 @@ def run(Re=100.0, N=128, max_steps=120000, steady_tol=2e-6, out_root="outputs",
                np.column_stack([yc, u_line]), delimiter=",", header="y,u", comments="")
 
     if return_fields:
-        return dict(u=u, v=v, dx=dx, dy=dy, N=N, Re=Re)
+        return dict(u=u, v=v, p=p, dx=dx, dy=dy, N=N, Re=Re)
 
     ghia = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "data", f"plot_u_y_Ghia{int(Re)}.csv")

@@ -66,20 +66,20 @@ horizontal centreline $y=0.5$. Lines are the MAC solver; circles the reference.}
 \label{fig:ghia}
 \end{figure}
 
-\subsection{Spatial accuracy}
-The spatial order is measured on the periodic Taylor--Green decaying vortex, which has the exact
-solution $\uv=(-\cos x\sin y,\ \sin x\cos y)\,e^{-2\nu t}$. Integrating to $T=0.2$ with a small
-fixed step (so the temporal error is a low floor) and refining $N=32\to256$, the $L_2$ error in
-$u$ against the exact field falls at second order---Richardson slopes $2.01$, $2.06$, $2.25$ over
-successive doublings (\cref{fig:fluid-conv})---confirming that the MAC operators and projection
-are second-order accurate.
+\subsection{Developed cavity flow}
+The developed (steady) cavity flow at $\mathrm{Re}=100$ and $1000$ ($N{=}128$) is shown in
+\cref{fig:lid-developed}: the primary vortex, the secondary corner vortices---stronger and more
+extended at $\mathrm{Re}=1000$---and the pressure field, with the low-pressure primary-vortex
+core and the high-pressure stagnation region at the top-right corner where the lid drives the
+fluid into the wall. Both the streamline topology and the pressure structure are consistent with
+the Ghia \emph{et al.}\ benchmark.
 
 \begin{figure}[t]\centering
-\includegraphics[width=0.5\linewidth]{figures/fluid_convergence.png}
-\caption{Pure-fluid Taylor--Green spatial convergence: $L_2$ error in $u$ against the exact
-solution vs.\ $h=1/N$, with a second-order reference slope. The MAC solver is second-order
-accurate.}
-\label{fig:fluid-conv}
+\includegraphics[width=0.9\linewidth]{figures/lid_developed.png}
+\caption{Developed lid-driven cavity ($N{=}128$, steady): pressure field (colour) with velocity
+streamlines (black), at $\mathrm{Re}=100$ (left) and $1000$ (right). The corner vortices
+intensify and the boundary layers thin with Reynolds number.}
+\label{fig:lid-developed}
 \end{figure}
 
 \section{Reference-map advection: scheme comparison}
@@ -94,7 +94,7 @@ ${\sim}5\times10^{-3}$ residual to Sugiyama is the scatter of the benchmark itse
 under-resolution artifact (main text).
 
 \begin{figure}[t]\centering
-\includegraphics[width=0.58\linewidth]{figures/scheme_compare_N128.png}
+\includegraphics[width=0.5\linewidth]{figures/scheme_compare_N128.png}
 \caption{Soft disc in a lid-driven cavity ($N{=}128$): centroid trajectory over the inward
 spiral vs.\ the Sugiyama \emph{et al.}\ \cite{Sugiyama2011} $1024^2$ reference. Bicubic
 interpolation tracks the reference; bilinear is more diffusive on the inner turns.}
