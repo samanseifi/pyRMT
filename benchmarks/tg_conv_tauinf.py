@@ -45,7 +45,7 @@ def main():
     axc.loglog(h, perr, "^-", color="red", lw=1.6, ms=6, label="pressure")
     axc.loglog(h, keerr[0] * (h / h[0]) ** 2, "--", color="0.45", lw=1.1, label="$O(\\Delta x^2)$")
     axc.loglog(h, verr[0] * (h / h[0]) ** 1, ":", color="0.45", lw=1.1, label="$O(\\Delta x)$")
-    axc.invert_xaxis(); axc.set_xlabel("$\\Delta x = 1/N$")
+    axc.set_xlabel("$\\Delta x = 1/N$")
     axc.set_ylabel(f"$L_2$ error (fields vs.\\ $N{{=}}{ref}$; energy successive-grid)")
     axc.set_title("convergence, $\\tau\\!\\to\\!\\infty$ (energy 2nd order; fields 1st)")
     axc.legend(fontsize=11, loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=False)
