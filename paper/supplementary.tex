@@ -82,6 +82,35 @@ intensify and the boundary layers thin with Reynolds number.}
 \label{fig:lid-developed}
 \end{figure}
 
+\section{Constitutive verification}
+\label{sec:supp-constitutive}
+The log-conformation update ($\psib=\log\be$, $\sig_{\!s}=G\be$; $G=\tau=1$, so $\mathrm{Wi}$ reads
+off the imposed rate) is verified against closed-form viscometric and rheometric limits of the
+upper-convected Maxwell model. \Cref{tab:constitutive} lists each test, its analytic target, and
+the maximum error; all are reproduced between machine precision and a few percent, the latter only
+in planar extension near the $\mathrm{Wi}=\tfrac12$ coil--stretch singularity. Throughout, $\be$
+remains symmetric positive-definite (the matrix-logarithm transport guarantees it), and the exact
+relaxation substep reproduces step-strain at any $\dt$ while an explicit relaxation update errs by
+$0.29$ at $\dt/\tau=2$ and diverges by $\dt/\tau=5$.
+
+\begin{table}[t]\centering\small
+\caption{Constitutive verification of the log-conformation update against analytic
+upper-convected-Maxwell limits ($G=\tau=1$).}
+\label{tab:constitutive}
+\begin{tabular}{@{}lll@{}}
+\toprule
+test & analytic target & max error \\
+\midrule
+step-strain relaxation & $\sigma_{xy}=G\gamma\,e^{-t/\tau}$ & ${\sim}10^{-10}$ \\
+steady simple shear & $\sigma_{xy}=G\tau\dot\gamma,\ N_1=2G\tau^2\dot\gamma^2$ & ${\sim}10^{-12}$ \\
+elastic limit ($\tau\!\to\!\infty$) & $\be=\Ften\Ften^{\!\top}$ & ${\sim}10^{-13}$ \\
+startup of steady shear & $\sigma_{xy}(t)=G\tau\dot\gamma(1-e^{-t/\tau})$; $N_1(t)$ analytic & $1.8\times10^{-6}$ \\
+SAOS moduli (3 decades) & $G'=\tfrac{G(\omega\tau)^2}{1+(\omega\tau)^2}$,\ $G''=\tfrac{G\omega\tau}{1+(\omega\tau)^2}$ & $2\times10^{-4}$ \\
+steady planar extension & $b_e^{xx}=\tfrac{1}{1-2\mathrm{Wi}}$,\ $b_e^{yy}=\tfrac{1}{1+2\mathrm{Wi}}$ & ${<}3\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 \section{Reference-map advection: scheme comparison}
 \label{sec:supp-advection}
 The reference map and log-conformation strain are transported by a monotone bicubic
