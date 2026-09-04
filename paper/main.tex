@@ -26,13 +26,7 @@
 \newtheorem{remark}{Remark}
 
 % placeholder figure box (DRAFT ONLY -- replace each with a real render before submission)
-\newcommand{\phfig}[2]{%
-  \begin{figure}[t]\centering
-  \setlength{\fboxsep}{0pt}%
-  \fbox{\parbox[c][0.30\textheight][c]{0.82\textwidth}{\centering
-    \color{blue!60}\ttfamily [snapshot placeholder]\\[4pt]\small #1}}
-  \caption{#2}\label{fig:#1}
-  \end{figure}}
+%% (placeholder-figure macro removed)
 
 
 % ---- notation ----
@@ -56,7 +50,7 @@
 \newcommand{\dev}{\operatorname{dev}}
 
 \bibliographystyle{elsarticle-num}
-\journal{Computers \& Fluids}
+\journal{Journal of Computational Physics}
 
 \begin{document}
 
@@ -85,7 +79,9 @@ solid recovered as the long-relaxation-time limit. Second, the coupled system is
 \emph{implicit--explicit} (IMEX) integrator that treats the fluid viscosity by a direct
 sine/cosine-transform solve---exact even at no-slip and moving-lid walls, so the implicit step
 costs no more than an explicit one---relaxes the elastic stress exactly, and couples the elastic
-force by an energy-conserving trapezoidal rule that holds the discrete energy to round-off. By
+force by an energy-conserving trapezoidal rule that conserves the discrete energy of the linear
+elastic wave to round-off (a standing-wave test; in the nonlinear coupled setting the explicit
+force contributes an $O(\dt)$ drift over a fixed horizon). By
 lifting the viscous, elastic-wave and advective step-size limits at no per-step cost it reaches a
 target accuracy in fewer, larger steps---a several-fold wall-clock reduction that grows with
 resolution. The solver is validated against analytic Maxwell solutions, the Jain disc-in-vortex
@@ -190,11 +186,14 @@ and Brandt and co-workers \cite{Rosti2017,Rosti2018jnnfm,Rosti2018prf} carry a v
 \emph{hyperelastic} (Kelvin--Voigt) solid on a single grid, and Roub\'i\v{c}ek
 \cite{Roubicek2022} analyses Eulerian reference-map models of viscoelastic-solid/fluid
 interaction. What distinguishes the present method from these is the constitutive branch and
-its transport: it is, to our knowledge, the first fully Eulerian FSI method that carries a
-finite-strain \emph{stress-relaxing} solid---a standard-linear-solid with a Maxwell branch,
-hence a genuine relaxation time and Weissenberg number, in contrast to Kelvin--Voigt
-formulations that possess neither---advanced by \emph{log-conformation} transport with
-semi-implicit integration.
+its transport: it is, to our knowledge, the first \emph{reference-map} FSI method to carry a
+finite-strain \emph{stress-relaxing} solid with an equilibrium hyperelastic branch---a
+standard-linear-solid with a Maxwell branch, hence a genuine relaxation time and Weissenberg
+number, in contrast to Kelvin--Voigt formulations that possess neither---advanced by
+\emph{log-conformation} transport with semi-implicit integration. (Log-conformation transport of
+a conformation tensor is of course standard for Eulerian viscoelastic \emph{fluids}, and has
+appeared for capsule/membrane and elastoviscoplastic solids; the novelty here is its use for a
+relaxing \emph{solid} with an equilibrium elastic branch inside a reference-map FSI solver.)
 
 This paper develops that method. Its contribution is the numerical formulation itself:
 an \emph{implicit--explicit} (IMEX), log-conformation Reference Map Technique for incompressible
@@ -254,8 +253,9 @@ and incompressibility read
 \dive\uv &= 0,
    \label{eq:incomp}
 \end{align}
-where $\rho$ is the (piecewise-constant) density. A penalty contact force for solid--solid
-near-contact is available in the framework but is not exercised by any case reported here.
+where $\rho$ is the (piecewise-constant) density. A trace-free penalty contact stress for
+solid--solid near-contact is added to the blended solid stress before its divergence is taken;
+it is exercised in the colliding-disc example and defined there (\cref{sec:contact}).
 The deviatoric stress $\sig_{\mathrm d}$ is
 blended between fluid and solid through a smoothed indicator (one-fluid model),
 \begin{equation}
@@ -588,7 +588,7 @@ semi-Lagrangian transport of $(\xiv,\psib)$.
 
 \subsection{Stiff step-size limits}
 Advanced fully explicitly---as in prior reference-map solvers---the coupled system is bound by
-four step-size limits,
+four step-size limits (three explicit CFLs and a relaxation bound),
 \begin{equation}
 \dt \le \min\!\Big(
 \underbrace{C\,\dx/U}_{\text{advection}},\;
@@ -644,7 +644,7 @@ and a \emph{single linear solve} is used---no nonlinear iteration. The force mus
 \emph{inside} the implicit right-hand side, as a von Neumann analysis of the linearized wave
 shows (proved below):
 
-\begin{proposition}[Unconditional stability of the one-sided coupling]
+\begin{proposition}[Stability of force placement in the one-sided coupling]
 \label{prop:vn}
 For the linearized elastic wave $\uv_t=c_s^2 d_{xx},\ d_t=\uv$ advanced by the simpler one-sided
 implicit coupling ($\uv^{n+1}=\uv^n+\dt\,c_s^2 d^n_{xx}+\dt^2 c_s^2\uv^{n+1}_{xx}$), a Fourier
@@ -821,7 +821,9 @@ result to a mean nearest-point distance of ${\sim}2.5\times10^{-3}$ at $N{=}128$
 of the ${\sim}0.6$ trajectory extent---as closely as the conservative reference-map scheme of Jain
 \emph{et al.}\ \cite{Jain2019} (${\sim}3\times10^{-3}$) and well within Sugiyama's \emph{own}
 $128^2\!\to\!1024^2$ spread (${\sim}1\times10^{-2}$; \cref{fig:disc-centroid} overlays both
-references, extracted exactly from the vector artwork of \cite{Jain2019}). Carrying the elastic
+references, extracted from the vector artwork of \cite{Jain2019} with a \textsc{PyMuPDF} script
+calibrated to the axis tick marks, at a precision of ${\sim}1\times10^{-3}$ set by the plotted
+line width---below the deviations quoted here). Carrying the elastic
 strain as the log-conformation Finger tensor---rather than reconstructing it by differentiating the
 reference map, which winds up as the disc orbits the vortex many times---is what keeps the strain,
 and hence the trajectory, accurate on the inner spiral (a direct neo-Hookean run reconstructed from
@@ -1057,7 +1059,17 @@ disc: $D$ (blue) and orientation $\theta$ (red) vs.\ Ca, with the limit $D=\math
 Solid--solid contact is handled not by a repulsive body force---which the exact projection
 would annihilate---but by a trace-free contact \emph{stress} added to the blended solid stress
 before its divergence is taken \cite{Rycroft2020}, so the resulting momentum-conserving force
-survives the projection. Two soft discs, immersed in the viscous fluid, are launched head-on:
+survives the projection. Concretely, where the two smeared interfaces come within an activation
+distance $\epsilon$ of touching---measured by a linear contact intensity
+$f(\phi)=\tfrac12(1-\phi/\epsilon)$ for $\phi<\epsilon$ and $0$ otherwise---the trace-free stress
+\begin{equation}
+\bm\tau_{\rm c}=-\eta\,\min(f_a,f_b)\,(G_a+G_b)\Big(\bm n\otimes\bm n-\tfrac12\It\Big),
+\qquad \bm n=\frac{\grad(\phi_a-\phi_b)}{|\grad(\phi_a-\phi_b)|},
+\label{eq:contact}
+\end{equation}
+is added to the blended solid stress, with dimensionless strength $\eta$ and activation width
+$\epsilon=3\dx$ tied to the mesh, so the contact layer refines with resolution; the runs below
+use $\eta=2$. Two soft discs, immersed in the viscous fluid, are launched head-on:
 they approach, squeeze the intervening fluid out, deform into contact, and rebound
 (\cref{fig:contact-snaps}). \Cref{fig:contact} tracks the centroid gap; the contact stress
 prevents interpenetration (the gap dips below $2R$ as the soft discs flatten against each other,
