@@ -1148,29 +1148,39 @@ of hard-mask staircase noise) and plot it against the impact Stokes number $\mat
 R/\mu_f$ (\cref{fig:restitution}a). This probes the two asymptotic limits of
 elastohydrodynamic-collision theory \cite{Davis1986}: a slow impact is strongly damped by the fluid
 ($e\!\to\!0$ below a critical Stokes number), while a lossless elastic collision conserves kinetic
-energy ($e\!\to\!1$ as $\mathrm{St}\!\to\!\infty$, the fluid becoming negligible). The elastic
-discs reproduce this behaviour---$e$ rises monotonically with $\mathrm{St}$; fitting
-$e=a(1-\mathrm{St}_c/\mathrm{St})$ gives a critical Stokes number $\mathrm{St}_c\approx3.4$, of the
-same order as the elastohydrodynamic prediction \cite{Davis1986}---and the viscoelastic
-(SLS) discs sit below the elastic curve at every speed, the Maxwell branch dissipating part of the
-impact. The measured restitution is grid-convergent (\cref{fig:restitution}b): at $N{=}128$ it is
-within a few percent of $N{=}160$, and it is only on the resolved grids that the elastic and
-viscoelastic curves separate---the physical dissipation difference is a resolved effect, not a
-coarse-grid artefact. The comparison is qualitative---the penalty contact stress is not the
-lubrication-film physics of the elastohydrodynamic theory, and the diffuse interface limits the
-precision---and within the accessible $\mathrm{St}$ window the absolute $e$ stays well below the
-inviscid ceiling because the fluid dissipation at these moderate Stokes numbers is genuinely large;
-what the test establishes is the trend, the elastic-versus-viscoelastic ordering, and the
-grid-independence of the number.
+energy ($e\!\to\!1$ as $\mathrm{St}\!\to\!\infty$, the fluid becoming negligible). We sweep
+$\mathrm{St}$ across more than a decade by \emph{decreasing the fluid viscosity} at a fixed impact
+speed---the $\mu_f\!\to\!0$ route to the inviscid limit, since the impact speed itself cannot be
+raised past the violent-collision threshold. Both families reproduce the expected trend: $e$ rises
+monotonically with $\mathrm{St}$ toward the lossless-elastic ceiling (\cref{fig:restitution}a), and
+the viscoelastic (SLS) discs sit below the elastic curve at every $\mathrm{St}$, the Maxwell branch
+dissipating part of the impact. Extrapolating the low-$\mathrm{St}$ elastic points with
+$e=a(1-\mathrm{St}_c/\mathrm{St})$ gives a critical Stokes number $\mathrm{St}_c\approx7$, the same
+order as the elastohydrodynamic prediction \cite{Davis1986}. Reaching the inviscid ceiling itself,
+however, is a resolution limit rather than a model one: $\mathrm{St}$ is also the collision Reynolds
+number, so ever-higher $\mathrm{St}$ demands resolving an ever-thinner near-contact film, and beyond
+$\mathrm{St}\!\approx\!54$ the elastic collision is under-resolved and diverges at $N{=}128$; the
+relaxation-stabilized SLS remains robust to $\mathrm{St}\!\approx\!360$ and keeps climbing. At fixed
+impact the restitution is grid-convergent (\cref{fig:restitution}b): $e$ levels off with resolution,
+and it is only on the resolved grids that the elastic and viscoelastic curves separate---the physical
+dissipation difference is a resolved effect, not a coarse-grid artefact. The comparison is
+qualitative---the penalty contact stress is not the lubrication-film physics of the
+elastohydrodynamic theory, and the diffuse interface limits the precision---so what the test
+establishes is the trend toward the inviscid ceiling, the elastic-versus-viscoelastic ordering, and
+the grid-independence of the number at fixed $\mathrm{St}$.
 
 \begin{figure}[t]\centering
 \includegraphics[width=0.92\linewidth]{figures/contact_restitution.png}
 \caption{Coefficient of restitution $e$ of the colliding discs, elastic (blue) vs.\ viscoelastic
-SLS (red). (a) $e$ vs.\ impact Stokes number $\mathrm{St}=\rho V_0 R/\mu_f$: $e$ rises with $\mathrm{St}$
-toward the lossless-elastic ceiling $e\!\to\!1$ (dashed, $\mathrm{St}\!\to\!\infty$) and is strongly
-fluid-damped at low $\mathrm{St}$; the viscoelastic discs rebound less, dissipating the impact in
-the relaxing branch \cite{Davis1986}. (b) Grid convergence at fixed impact ($\mathrm{St}{\approx}22$):
-$e$ converges with resolution, and the elastic/viscoelastic gap is resolved by $N{=}128$.}
+SLS (red). (a) $e$ vs.\ impact Stokes number $\mathrm{St}=\rho V_0 R/\mu_f$ (log axis), swept over a
+decade by decreasing $\mu_f$ at fixed impact speed: $e$ rises monotonically toward the
+lossless-elastic ceiling $e\!\to\!1$ (dashed, $\mathrm{St}\!\to\!\infty$). Since $\mathrm{St}$ is
+also the collision Reynolds number, the near-contact flow becomes under-resolved at high
+$\mathrm{St}$ and the elastic run diverges beyond $\mathrm{St}\!\approx\!54$ (dotted line), whereas
+the relaxation-stabilized SLS survives to $\mathrm{St}\!\approx\!360$; the viscoelastic discs rebound
+less at every $\mathrm{St}$, dissipating the impact in the relaxing branch \cite{Davis1986}.
+(b) Grid convergence at fixed impact ($\mathrm{St}{\approx}22$, log-$N$ axis): $e$ levels off with
+resolution, and the elastic/viscoelastic gap is resolved.}
 \label{fig:restitution}
 \end{figure}
 

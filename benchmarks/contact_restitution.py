@@ -27,11 +27,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from benchmarks.contact_collision import run
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-N_MAIN, MUF, ETA, SEP, R, RHO = 128, 0.005, 2.0, 0.30, 0.12, 1.0
-# clean single-bounce regime (V0 >~ 1.3 becomes violent / diverges -- not a clean restitution)
-V0S = [0.3, 0.45, 0.6, 0.75, 0.9, 1.05]
-NS = [64, 96, 128, 160]     # grid-convergence sweep at V0_CONV
-V0_CONV = 0.9
+N_MAIN, ETA, SEP, R, RHO = 128, 2.0, 0.30, 0.12, 1.0
+# The impact speed cannot be pushed past V0 ~ 1.3 (the collision becomes violent and diverges),
+# so the Stokes number St = rho*V0*R/mu_f is swept to high values by DECREASING the fluid
+# viscosity mu_f at a fixed, stable impact speed -- physically the mu_f -> 0 (St -> infinity)
+# limit in which the fluid dissipation vanishes and the elastic restitution approaches unity.
+V0_FIX = 0.9
+MUF_SWEEP = [0.012, 0.008, 0.005, 0.003, 0.002, 0.0012, 0.0008, 0.0005, 0.0003]  # -> St ~ 9..360
+MUF_CONV = 0.005            # grid-convergence sweep at this mu_f (St ~ 22)
+NS = [64, 96, 128, 160]
 EL = dict(model="elastic", mu_s=0.8)
 VE = dict(model="sls", mu_s=0.2, G_ve=0.6, tau=0.2)
 
@@ -55,14 +59,14 @@ def restitution(h):
     return max(0.0, v_out) / max(v_in, 1e-12)
 
 
-def one(N, V0, cfg):
+def one(N, V0, muf, cfg):
     t_end = min(2.4, 0.6 + 1.2 / V0)
     try:
-        h = run(N=N, t_end=t_end, V0=V0, mu_f=MUF, eta=ETA, sep=SEP, R=R,
+        h = run(N=N, t_end=t_end, V0=V0, mu_f=muf, eta=ETA, sep=SEP, R=R,
                 integrator="imex", stab=False, **cfg)
         return restitution(h), h[:, [0, 3]]
     except Exception as ex:
-        print(f"    N={N} V0={V0}: diverged ({type(ex).__name__})", flush=True)
+        print(f"    N={N} V0={V0} muf={muf}: diverged ({type(ex).__name__})", flush=True)
         return np.nan, None
 
 
@@ -72,50 +76,52 @@ def main():
     from _plotstyle import apply as _style; _style()
     import matplotlib.pyplot as plt
 
-    # ---- panel (a): e vs St at the fine grid ----
+    # ---- panel (a): e vs St (swept to high St via decreasing mu_f) at the fine grid ----
     res = {"elastic": [], "sls": []}; traj = {}
-    for V0 in V0S:
+    for muf in MUF_SWEEP:
+        St = RHO * V0_FIX * R / muf
         for key, cfg in (("elastic", EL), ("sls", VE)):
-            e, tg = one(N_MAIN, V0, cfg)
+            e, tg = one(N_MAIN, V0_FIX, muf, cfg)
             res[key].append(e)
             if tg is not None:
-                traj[f"{key}_{V0}"] = tg
-            print(f"  [a] V0={V0} {key:8s}: e={e:.3f}", flush=True)
+                traj[f"{key}_muf{muf}"] = tg
+            print(f"  [a] muf={muf} St={St:.0f} {key:8s}: e={e:.3f}", flush=True)
 
     # ---- panel (b): grid convergence at a fixed impact ----
     conv = {"elastic": [], "sls": []}
     for N in NS:
         for key, cfg in (("elastic", EL), ("sls", VE)):
-            e, tg = one(N, V0_CONV, cfg)
+            e, tg = one(N, V0_FIX, MUF_CONV, cfg)
             conv[key].append(e)
             if tg is not None:
                 traj[f"conv_{key}_{N}"] = tg
             print(f"  [b] N={N} {key:8s}: e={e:.3f}", flush=True)
 
-    St = np.array(V0S) * RHO * R / MUF
+    St = RHO * V0_FIX * R / np.array(MUF_SWEEP)
     np.savez(os.path.join(ROOT, "outputs", "overlay", "contact_restitution_traj.npz"), **traj)
     np.savez(os.path.join(ROOT, "outputs", "overlay", "contact_restitution.npz"),
-             V0=np.array(V0S), St=St, e_elastic=np.array(res["elastic"]),
-             e_sls=np.array(res["sls"]), NS=np.array(NS), V0_conv=V0_CONV,
+             muf=np.array(MUF_SWEEP), St=St, e_elastic=np.array(res["elastic"]),
+             e_sls=np.array(res["sls"]), NS=np.array(NS), V0_fix=V0_FIX,
              conv_elastic=np.array(conv["elastic"]), conv_sls=np.array(conv["sls"]))
 
     fig, ax = plt.subplots(1, 2, figsize=(10.6, 4.4))
-    # (a)
+    # (a) -- log-x St axis, extended toward the St -> infinity elastic limit
     ax[0].axhline(1.0, color="0.5", ls="--", lw=1.2)
-    ax[0].text(St[0], 0.965, r"lossless elastic limit  $e\!\to\!1$  ($\mathrm{St}\!\to\!\infty$)",
+    ax[0].text(St.min(), 0.965, r"lossless elastic limit  $e\!\to\!1$  ($\mathrm{St}\!\to\!\infty$)",
                fontsize=10, color="0.4", va="top")
-    ax[0].plot(St, res["elastic"], "o-", color="blue", lw=1.8, ms=7, label="elastic")
-    ax[0].plot(St, res["sls"], "s-", color="red", lw=1.8, ms=6, label="viscoelastic (SLS)")
+    ax[0].semilogx(St, res["elastic"], "o-", color="blue", lw=1.8, ms=7, label="elastic")
+    ax[0].semilogx(St, res["sls"], "s-", color="red", lw=1.8, ms=6, label="viscoelastic (SLS)")
     ax[0].set_xlabel(r"impact Stokes number  $\mathrm{St}=\rho V_0 R/\mu_f$")
     ax[0].set_ylabel("coefficient of restitution  $e$")
-    ax[0].set_ylim(0.0, 1.05); ax[0].set_title("(a) restitution vs.\\ impact speed")
-    ax[0].legend(loc="center right")
-    # (b)
-    ax[1].plot(NS, conv["elastic"], "o-", color="blue", lw=1.8, ms=7, label="elastic")
-    ax[1].plot(NS, conv["sls"], "s-", color="red", lw=1.8, ms=6, label="viscoelastic (SLS)")
+    ax[0].set_ylim(0.0, 1.05); ax[0].set_title(r"(a) restitution vs.\ Stokes number")
+    ax[0].legend(loc="upper left")
+    # (b) -- log-x resolution axis
+    ax[1].semilogx(NS, conv["elastic"], "o-", color="blue", lw=1.8, ms=7, label="elastic")
+    ax[1].semilogx(NS, conv["sls"], "s-", color="red", lw=1.8, ms=6, label="viscoelastic (SLS)")
     ax[1].set_xlabel("grid resolution  $N$"); ax[1].set_ylabel("coefficient of restitution  $e$")
-    ax[1].set_xticks(NS); ax[1].set_ylim(bottom=0.0)
-    stc = V0_CONV * RHO * R / MUF
+    ax[1].set_xticks(NS); ax[1].get_xaxis().set_major_formatter(plt.ScalarFormatter())
+    ax[1].set_ylim(bottom=0.0)
+    stc = RHO * V0_FIX * R / MUF_CONV
     ax[1].set_title(rf"(b) grid convergence  ($\mathrm{{St}}={stc:.0f}$)")
     ax[1].legend(loc="best")
     fig.tight_layout()
