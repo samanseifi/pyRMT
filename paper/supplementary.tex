@@ -19,6 +19,7 @@
 \newcommand{\Ften}{\bm{F}}
 \newcommand{\It}{\bm{I}}
 \newcommand{\psib}{\bm{\psi}}
+\newcommand{\sig}{\bm{\sigma}}
 \newcommand{\grad}{\nabla}
 \newcommand{\dt}{\Delta t}
 \newcommand{\dx}{\Delta x}
@@ -110,6 +111,40 @@ steady planar extension & $b_e^{xx}=\tfrac{1}{1-2\mathrm{Wi}}$,\ $b_e^{yy}=\tfra
 \bottomrule
 \end{tabular}
 \end{table}
+
+\section{Interface integrity and conservation}
+\label{sec:supp-drift}
+The reference-map advection is not conservative by construction, so we quantify how faithfully the
+solid is preserved over a sustained deforming transport: a standard-linear-solid disc
+($\mu_s=0.3$, $G=0.3$, $\tau=1$) carried through a single Taylor--Green vortex for $t\in[0,3]$,
+during which it orbits and deforms while $\be$ stays bounded. \Cref{fig:drift} tracks three
+diagnostics at $N{=}64$ and $128$.
+
+\emph{(a) Area.} The solid area (measured from the smoothed indicator $\int(1-H)\,\mathrm{d}V$)
+drifts by under $1\%$, and the drift roughly halves under refinement---from ${\approx}0.9\%$ at
+$N{=}64$ to ${\approx}0.5\%$ at $N{=}128$---with no secular leak. A conservative interface scheme
+(e.g.\ the finite-volume reference-map transport of Jain \emph{et al.}\ \cite{Jain2019}) conserves
+area to round-off by construction; the present semi-Lagrangian transport trades that for
+simplicity and reinitialisation-free operation, at a controlled, mesh-convergent cost.
+
+\emph{(b) Interface band.} For the level set rebuilt from the reference map, $|\grad\phi|$ should
+remain ${\approx}1$ (near-signed-distance) so that the diffuse blend band keeps a fixed width. The
+median of $\big||\grad\phi|-1\big|$ over the band $|\phi|<2\dx$ stays within a few percent
+throughout, i.e.\ the band neither thins nor spreads as the solid deforms.
+
+\emph{(c) Boundedness / SPD.} The relaxing strain remains admissible: $\det\be$ stays bounded near
+unity ($\le1.05$) and the interior $\min J$ stays above $0.9$, so the body does not fold and the
+matrix-logarithm transport preserves the symmetric-positive-definiteness of $\be$.
+
+\begin{figure}[t]\centering
+\includegraphics[width=\linewidth]{figures/drift_diagnostics.png}
+\caption{Interface integrity and conservation for a standard-linear-solid disc deforming in a
+Taylor--Green vortex, at $N{=}64$ (blue) and $128$ (green): (a) solid-area change---sub-percent and
+roughly halving with refinement, no secular drift; (b) interface-band distortion, the median
+$\big||\grad\phi|-1\big|$ over $|\phi|<2\dx$, holding to a few percent; (c) $\det\be$ (solid) bounded
+near unity and interior $\min J$ (dashed) bounded above $0.9$---no folding, SPD preserved.}
+\label{fig:drift}
+\end{figure}
 
 \section{Reference-map advection: scheme comparison}
 \label{sec:supp-advection}

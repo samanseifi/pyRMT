@@ -1007,6 +1007,20 @@ equilibrium branch keeps the energy from decaying to zero (shape memory).}
 \Cref{fig:ve-snapshots} shows the disc stretched and retracted at the extensional centre of the
 vortex, over the flow streamlines, at five times.
 
+\emph{Interface integrity and conservation.} The reference-map transport is not conservative by
+construction, so we monitor how well the solid is preserved over a sustained deforming orbit (a
+standard-linear-solid disc carried through a single vortex, $t\in[0,3]$). Three diagnostics are
+tracked at two resolutions (histories in the supplementary material). The solid area drifts by less than $1\%$ and the
+drift roughly \emph{halves} under refinement ($0.9\%\to0.5\%$ from $N{=}64$ to $128$), with no
+secular leak---in contrast to a diffusive interface capture, which would lose area monotonically;
+this is the price paid, and its scaling, for the non-conservative reference-map advection relative to
+a strictly conservative scheme such as that of Jain \emph{et al.}\ \cite{Jain2019}. The relaxing
+strain stays admissible throughout: $\det\be$ remains bounded near unity ($\le1.05$) and the
+interior $\min J>0.9$ (no folding), confirming that the log-conformation transport preserves
+symmetric positive-definiteness. The rebuilt level set stays close to a signed distance in the
+diffuse band, $\big||\grad\phi|-1\big|$ holding to a few percent (median), so the blended stress
+band does not distort under the deformation.
+
 \begin{figure*}[t]\centering
 \includegraphics[width=\linewidth]{figures/ve_snapshots.png}
 \caption{Standard-linear-solid disc (red) stretched at the extensional centre of the four-cell

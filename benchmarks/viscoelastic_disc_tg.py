@@ -83,8 +83,9 @@ def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
     p = np.zeros((N, N))
 
     area0 = float(np.sum(phi <= 0) * dx * dy)
+    areas0 = float(np.sum(1.0 - smoothed_heaviside(phi, w_t)) * dx * dy)  # smooth (diffuse) area
     hist = {"t": [], "KE": [], "Eel": [], "detbe_max": [], "minJ": [], "cx": [], "cy": [],
-            "bevsF": [], "area": []}
+            "bevsF": [], "area": [], "areas": [], "gphi": []}
     has_maxwell = model in ("maxwell", "sls")
     snaps = []; snap_q = list(snap_times) if snap_times else []
     t = 0.0
@@ -175,6 +176,14 @@ def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
             hist["t"].append(t); hist["KE"].append(KE); hist["Eel"].append(Eel)
             hist["detbe_max"].append(detbe_max); hist["minJ"].append(minJ)
             hist["bevsF"].append(bevsF); hist["area"].append(float(np.sum(msk) * dx * dy) / area0)
+            hist["areas"].append(float(np.sum(1.0 - H) * dx * dy) / areas0)  # smooth area (no quant. jitter)
+            # interface-band distortion: for the level set rebuilt from the reference map, |grad phi|
+            # should stay ~1 (near-signed-distance). Measure the MEDIAN deviation from 1 in the band
+            # |phi|<2dx -- robust to isolated kink cells (the diffuse-band diagnostic, referee C4).
+            gpx = grad_central_x_2nd(phi, dx); gpy = grad_central_y_2nd(phi, dy)
+            band = np.abs(phi) < 2.0 * dx
+            hist["gphi"].append(float(np.median(np.abs(np.sqrt(gpx**2 + gpy**2)[band] - 1.0)))
+                                if band.any() else 0.0)
             hist["cx"].append(float(Xc[msk].mean()) if msk.any() else np.nan)
             hist["cy"].append(float(Yc[msk].mean()) if msk.any() else np.nan)
 
