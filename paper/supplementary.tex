@@ -21,6 +21,7 @@
 \newcommand{\psib}{\bm{\psi}}
 \newcommand{\sig}{\bm{\sigma}}
 \newcommand{\grad}{\nabla}
+\newcommand{\dive}{\grad\!\cdot\!}
 \newcommand{\dt}{\Delta t}
 \newcommand{\dx}{\Delta x}
 
@@ -168,35 +169,6 @@ near unity and interior $\min J$ (dashed) bounded above $0.9$---no folding, SPD 
 \label{fig:drift}
 \end{figure}
 
-\section{Wall Helmholtz solve: transform variants and exactness}
-\label{sec:supp-helmholtz}
-The implicit viscous (and, with the stabilizer, elastic-wave) predictor requires a Helmholtz solve
-$(\It-\mathrm{coef}\,\nabla^2)\uv^*=\mathrm{rhs}$ with $\mathrm{coef}=\dt\,\nu$ (plus
-$\tfrac14\dt^2c_s^2$ when the stabilizer is on). On a staggered MAC grid the two velocity
-components sit on different faces, so each diagonalizes under a \emph{different} tensor product of
-one-dimensional transforms:
-\begin{itemize}
-\item $u$ (an $x$-face quantity) is homogeneous-Dirichlet on the interior $x$-faces (the wall-normal
-direction, walls at $i=0,N$ removed), which diagonalizes under a type-I discrete sine transform
-(DST-I) in $x$; in the tangential $y$ direction it is cell-centred with a reflect ghost, which
-diagonalizes under a type-II sine transform (DST-II).
-\item $v$ (a $y$-face quantity) is the transpose: DST-I in $y$ and DST-II in $x$.
-\end{itemize}
-The corresponding Laplacian eigenvalues are $\lambda_k=-2\big(1-\cos(\pi k'/N)\big)/h^2$ with the
-mode index $k'$ shifted by the transform type, and each Fourier--sine mode of the right-hand side is
-divided by $1-\mathrm{coef}\,\lambda_k>0$. This is a single forward/inverse transform pair per
-component---no iteration---so the wall viscous solve costs the same as the cosine-transform pressure
-projection.
-
-The diagonalization is \emph{exact} up to floating point. Applying the discrete homogeneous
-Laplacian stencil (with the Dirichlet-face and reflect-ghost boundary treatment above) to the
-transform solution reproduces the right-hand side to a relative residual of ${\approx}5\times
-10^{-15}$ on both square and rectangular grids (the rectangular case, $N_x\neq N_y$, guards against
-an axis or transform-type mix-up), and the solution agrees with a matrix-free conjugate-gradient
-solve on the identical stencil to ${\approx}10^{-10}$. The conjugate-gradient path is retained only
-as the generalization to a spatially varying one-fluid viscosity, under which the operator no longer
-diagonalizes; it is not used in any run reported here.
-
 \section{Reference-map advection: scheme comparison}
 \label{sec:supp-advection}
 The reference map and log-conformation strain are transported by a monotone bicubic
@@ -216,25 +188,36 @@ interpolation tracks the reference; bilinear is more diffusive on the inner turn
 \label{fig:scheme-compare}
 \end{figure}
 
-\section{Work--precision diagram}
+\section{Work--precision table}
 \label{sec:supp-workprec}
-The efficiency subsection of the main text reports the speedup outcome and the accuracy--cost
-trade; \cref{fig:work-precision} is the corresponding work--precision diagram on the soft-disc-in-lid
-case. At each resolution the accuracy is the maximum centroid deviation from a fine-$\dt$ reference
-at the \emph{same} resolution (isolating the temporal error each integrator controls), plotted
-against measured wall-clock. The adaptive-advection IMEX (imex-sl) traces a Pareto front below the
-explicit baseline at both resolutions, and the gap widens with $N$ as the explicit viscous limit
-$\dx^2/\nu$ tightens.
+\Cref{tab:workprec} is the work--precision data behind the main-text speedup on the soft-disc-in-lid
+case: for the adaptive-advection IMEX (imex-sl) at increasing step multiples, the accuracy is the
+maximum centroid deviation from a fine-$\dt$ explicit reference at the \emph{same} resolution
+(isolating the temporal error), and the wall-clock is measured against the same-resolution explicit
+baseline. The error grows smoothly with the step---an accuracy-for-speed trade rather than a
+stability wall---and the speedup grows with $N$ as the explicit viscous limit $\dx^2/\nu$ tightens.
 
-\begin{figure}[t]\centering
-\includegraphics[width=0.62\linewidth]{figures/work_precision.png}
-\caption{Work--precision on the soft-disc-in-lid case ($N{=}64$ blue, $N{=}128$ red): maximum
-centroid error vs.\ a fine-$\dt$ reference at the same resolution, against wall-clock time.
-Markers: explicit (circle, at its CFL step), IMEX (square), and adaptive-advection IMEX (imex-sl,
-triangles) at $2,4,6,8\times$ the explicit step. Larger steps trade accuracy for speed along a
-Pareto front; the explicit baseline is the slowest at each resolution.}
-\label{fig:work-precision}
-\end{figure}
+\begin{table}[t]\centering\small
+\caption{Work--precision of the adaptive-advection IMEX (imex-sl) on the soft-disc-in-lid case,
+against the same-resolution explicit baseline. ``step'' is the multiple of the explicit CFL step;
+error is the maximum centroid deviation from the fine-$\dt$ reference; speedup is wall-clock relative
+to the explicit run.}
+\label{tab:workprec}
+\begin{tabular}{@{}llll@{}}
+\toprule
+ & step & centroid error & speedup \\
+\midrule
+$N{=}64$  & explicit & $3.4\times10^{-3}$ & $1.0\times$ \\
+          & $4\times$ & $4.2\times10^{-3}$ & $2.1\times$ \\
+          & $8\times$ & $6.5\times10^{-3}$ & $4.6\times$ \\
+\midrule
+$N{=}128$ & explicit & (reference) & $1.0\times$ \\
+          & $4\times$ & $1.2\times10^{-3}$ & $3.9\times$ \\
+          & $6\times$ & $1.7\times10^{-3}$ & $5.5\times$ \\
+          & $8\times$ & $2.1\times10^{-3}$ & $6.7\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \section{Contact and the elastic-wave stabilizer}
 \label{sec:supp-stabilizer}
@@ -266,25 +249,37 @@ trajectory.}
 \label{fig:lid-staboff}
 \end{figure}
 
-\section{Generalized-\texorpdfstring{$\alpha$}{alpha} elastic-wave sub-integrator}
-\label{sec:supp-genalpha}
-The default elastic-wave stabilizer is the energy-conserving trapezoidal (implicit-midpoint) rule,
-which is lossless for the linear wave. For stiff problems it can be useful to \emph{dissipate}
-under-resolved high-frequency elastic waves in a controlled way rather than conserve them, so we
-also implemented a generalized-$\alpha$ (Chung--Hulbert) sub-integrator, which advances the linear
-elastic-wave operator with a single parameter $\rho_\infty\in[0,1]$ setting the spectral radius at
-the highest resolved frequency: $\rho_\infty=1$ recovers the lossless (energy-conserving) limit and
-smaller values add high-frequency-selective damping while remaining second-order accurate and
-unconditionally stable for the linear wave. On a standing-wave test the scheme reproduces the
-analytic frequency and the designed high-frequency decay, and at $\rho_\infty=1$ it matches the
-trapezoidal rule to round-off.
+\section{Temporal accuracy and the generalized-\texorpdfstring{$\alpha$}{alpha} sub-integrator}
+\label{sec:supp-temporal}
+We measure the temporal order directly on the coupled problem. At fixed resolution ($N{=}96$, soft
+disc in a lid-driven cavity) the IMEX integrator is stepped at a geometric sequence of time steps
+and the maximum centroid deviation from the finest-step run of the same scheme is recorded---a
+self-convergence study that isolates the temporal error (\cref{fig:temporal-conv}). The error
+follows $O(\dt)$ rather than $O(\dt^2)$: a least-squares fit gives an observed order
+$p\approx0.7$--$0.9$ (the coarsest step saturates and the finest is limited by the reference step,
+so the interior slopes are the reliable estimate), i.e.\ the coupled scheme is first order in $\dt$.
 
-This variant refines only the linear wave sub-step. As shown in the temporal-convergence study of
-the main text, the coupled FSI accuracy is first order and set by the explicit force splitting, so
-the generalized-$\alpha$ sub-integrator does not raise the coupled order; it is offered as an
-optional stabilizer that trades the trapezoidal rule's exact energy conservation for tunable
-dissipation of stiff, under-resolved elastic waves. The implementation, unit tests, and the
-standing-wave verification are maintained on a separate development branch of the code repository.
+\begin{figure}[t]\centering
+\includegraphics[width=0.58\linewidth]{figures/temporal_convergence.png}
+\caption{Temporal self-convergence of the coupled IMEX FSI scheme ($N{=}96$): maximum centroid
+error vs.\ time step, against the finest-step run of the same scheme. The error follows $O(\dt)$
+(dashed), not $O(\dt^2)$ (dotted); the coupled scheme is first order, set by the explicit
+elastic-force splitting.}
+\label{fig:temporal-conv}
+\end{figure}
+
+This first-order limit is set by the explicit force splitting: the elastic force
+$\bm f^n=\dive\sig_{\!s}(\xiv^n,\be^n)$ is lagged by $O(\dt)$, and this dominates the coupled error
+regardless of how the linear wave operator is advanced. We also implemented a generalized-$\alpha$
+(Chung--Hulbert) elastic-wave sub-integrator with tunable high-frequency dissipation
+($\rho_\infty\in[0,1]$: $\rho_\infty=1$ recovers the energy-conserving midpoint rule, smaller values
+damp the highest modes while staying second order and unconditionally stable), verified on the
+linear standing wave. Because it refines only the wave sub-step, it does \emph{not} raise the
+coupled order; it is retained as an \emph{optional} stabilizer trading the trapezoidal rule's exact
+energy conservation for controllable damping of stiff, under-resolved waves. Raising the coupled
+order would require an implicit or predictor--corrector treatment of the force itself, left to
+future work. The generalized-$\alpha$ implementation and its standing-wave verification are
+maintained on a separate development branch of the code repository.
 
 \bibliographystyle{elsarticle-num}
 \bibliography{refs}
