@@ -216,10 +216,30 @@ interpolation tracks the reference; bilinear is more diffusive on the inner turn
 \label{fig:scheme-compare}
 \end{figure}
 
+\section{Work--precision diagram}
+\label{sec:supp-workprec}
+The efficiency subsection of the main text reports the speedup outcome and the accuracy--cost
+trade; \cref{fig:work-precision} is the corresponding work--precision diagram on the soft-disc-in-lid
+case. At each resolution the accuracy is the maximum centroid deviation from a fine-$\dt$ reference
+at the \emph{same} resolution (isolating the temporal error each integrator controls), plotted
+against measured wall-clock. The adaptive-advection IMEX (imex-sl) traces a Pareto front below the
+explicit baseline at both resolutions, and the gap widens with $N$ as the explicit viscous limit
+$\dx^2/\nu$ tightens.
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.62\linewidth]{figures/work_precision.png}
+\caption{Work--precision on the soft-disc-in-lid case ($N{=}64$ blue, $N{=}128$ red): maximum
+centroid error vs.\ a fine-$\dt$ reference at the same resolution, against wall-clock time.
+Markers: explicit (circle, at its CFL step), IMEX (square), and adaptive-advection IMEX (imex-sl,
+triangles) at $2,4,6,8\times$ the explicit step. Larger steps trade accuracy for speed along a
+Pareto front; the explicit baseline is the slowest at each resolution.}
+\label{fig:work-precision}
+\end{figure}
+
 \section{Contact and the elastic-wave stabilizer}
 \label{sec:supp-stabilizer}
-The explicit baseline and the work--precision/speedup comparison are given in the efficiency
-subsection of the main text; here we add the contact-integration detail.
+The explicit baseline is described in the efficiency subsection of the main text; here we add the
+contact-integration detail.
 At the colliding-disc parameters the advective and
 elastic-wave step limits nearly coincide, so the collisions of the main text are integrated with
 the elastic wave resolved (stabilizer off), which keeps the rebound---and hence the coefficient of
