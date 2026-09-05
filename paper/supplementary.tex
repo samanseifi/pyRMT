@@ -168,6 +168,35 @@ near unity and interior $\min J$ (dashed) bounded above $0.9$---no folding, SPD 
 \label{fig:drift}
 \end{figure}
 
+\section{Wall Helmholtz solve: transform variants and exactness}
+\label{sec:supp-helmholtz}
+The implicit viscous (and, with the stabilizer, elastic-wave) predictor requires a Helmholtz solve
+$(\It-\mathrm{coef}\,\nabla^2)\uv^*=\mathrm{rhs}$ with $\mathrm{coef}=\dt\,\nu$ (plus
+$\tfrac14\dt^2c_s^2$ when the stabilizer is on). On a staggered MAC grid the two velocity
+components sit on different faces, so each diagonalizes under a \emph{different} tensor product of
+one-dimensional transforms:
+\begin{itemize}
+\item $u$ (an $x$-face quantity) is homogeneous-Dirichlet on the interior $x$-faces (the wall-normal
+direction, walls at $i=0,N$ removed), which diagonalizes under a type-I discrete sine transform
+(DST-I) in $x$; in the tangential $y$ direction it is cell-centred with a reflect ghost, which
+diagonalizes under a type-II sine transform (DST-II).
+\item $v$ (a $y$-face quantity) is the transpose: DST-I in $y$ and DST-II in $x$.
+\end{itemize}
+The corresponding Laplacian eigenvalues are $\lambda_k=-2\big(1-\cos(\pi k'/N)\big)/h^2$ with the
+mode index $k'$ shifted by the transform type, and each Fourier--sine mode of the right-hand side is
+divided by $1-\mathrm{coef}\,\lambda_k>0$. This is a single forward/inverse transform pair per
+component---no iteration---so the wall viscous solve costs the same as the cosine-transform pressure
+projection.
+
+The diagonalization is \emph{exact} up to floating point. Applying the discrete homogeneous
+Laplacian stencil (with the Dirichlet-face and reflect-ghost boundary treatment above) to the
+transform solution reproduces the right-hand side to a relative residual of ${\approx}5\times
+10^{-15}$ on both square and rectangular grids (the rectangular case, $N_x\neq N_y$, guards against
+an axis or transform-type mix-up), and the solution agrees with a matrix-free conjugate-gradient
+solve on the identical stencil to ${\approx}10^{-10}$. The conjugate-gradient path is retained only
+as the generalization to a spatially varying one-fluid viscosity, under which the operator no longer
+diagonalizes; it is not used in any run reported here.
+
 \section{Reference-map advection: scheme comparison}
 \label{sec:supp-advection}
 The reference map and log-conformation strain are transported by a monotone bicubic

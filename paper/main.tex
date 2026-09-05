@@ -628,11 +628,16 @@ backward Euler, yielding a Helmholtz solve for the predictor,
 For constant viscosity this operator is diagonalized \emph{exactly} by the same
 sine/cosine transforms as the pressure Poisson solve of \cref{sec:discretization}---on
 periodic, Neumann, and Dirichlet (no-slip / moving-lid) walls alike---each mode divided by
-$1-\dt\,\nu\,\lambda_k>0$. So \cref{eq:helmholtz} is a single direct transform pair per
+$1-\dt\,\nu\,\lambda_k>0$ (the specific per-component transform variant, its reflect-ghost
+treatment, and a machine-precision residual check are given in the supplementary material). So
+\cref{eq:helmholtz} is a single direct transform pair per
 component, unconditionally stable, with the lid entering as a right-hand-side
 inhomogeneity: the wall predictor costs the same as the explicit one, and the lifted step
-converts directly into wall-clock. A matrix-free conjugate-gradient solve on the identical
-stencil remains available for the variable one-fluid viscosity. \emph{Exact relaxation.} The stiff relaxation of \cref{eq:ucm} is removed by the analytic
+converts directly into wall-clock. The viscosity here is a single constant (the one-fluid
+solvent value); the solid enters through the blended elastic \emph{stress}, not through a
+viscosity contrast, so no viscosity-blending or iterative Helmholtz solve is exercised in the
+runs. A matrix-free conjugate-gradient solve on the identical
+stencil remains available should a variable one-fluid viscosity be introduced. \emph{Exact relaxation.} The stiff relaxation of \cref{eq:ucm} is removed by the analytic
 Strang substep \cref{eq:relax-exact}, which is $A$-stable in $\tau$ and
 positive-definite-preserving (\cref{sec:exact-relax}).
 
