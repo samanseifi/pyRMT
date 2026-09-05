@@ -914,6 +914,41 @@ $N{=}128$ & $6\times$ & $\mathbf{5.6\times}$ & $1.1\times10^{-3}$ \\
 \end{tabular}
 \end{table}
 
+\subsection{Temporal accuracy and the elastic-wave sub-integrator}
+\label{sec:temporal}
+The efficiency of the scheme is only useful if its temporal error is controlled, so we measure the
+temporal order directly on the coupled problem. At fixed resolution ($N{=}96$) we step the IMEX
+integrator at a geometric sequence of time steps and record the maximum centroid deviation from the
+finest-step run of the same scheme---a self-convergence study that isolates the temporal error
+(\cref{fig:temporal-conv}). The error tracks the first-order line: a least-squares fit over the
+sequence gives an observed order $p\approx0.7$--$0.9$ (the coarsest step saturates and the finest is
+limited by the reference step, so the interior slopes are the reliable estimate), i.e.\ the coupled
+scheme is \emph{first order} in $\dt$.
+
+This first-order limit is set by the \emph{explicit force splitting}, not by the elastic-wave
+sub-integrator: the elastic force $\bm f^n=\dive\sig_{\!s}(\xiv^n,\be^n)$ is evaluated at the start
+of the step and lagged by $O(\dt)$ (\cref{eq:elastic-stab}), and this lag dominates the coupled
+error regardless of how the linear wave operator is advanced. The consequence for a higher-order
+elastic-wave integrator is concrete. We implemented a generalized-$\alpha$ (Chung--Hulbert)
+elastic-wave stabilizer with tunable high-frequency dissipation ($\rho_\infty\in[0,1]$) and verified
+it on the linear standing wave; but promoting it into the coupled predictor does \emph{not} raise the
+observed order, because it refines only the wave sub-step while the $O(\dt)$ force lag is untouched.
+Its value is therefore as an \emph{optional} stabilizer for stiff problems---controllable damping of
+under-resolved elastic waves in place of the energy-conserving trapezoidal rule---not as a route to
+second-order coupled accuracy. Raising the coupled order would instead require an
+implicit or predictor--corrector treatment of the force itself, which we leave to future work. The
+generalized-$\alpha$ variant and its standing-wave verification are described in the supplementary
+material.
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.6\linewidth]{figures/temporal_convergence.png}
+\caption{Temporal self-convergence of the coupled IMEX FSI scheme ($N{=}96$, soft disc in a
+lid-driven cavity): maximum centroid error vs.\ time step, against the finest-step run of the same
+scheme. The error follows $O(\dt)$ (dashed) rather than $O(\dt^2)$ (dotted); the coupled scheme is
+first order, set by the explicit elastic-force splitting.}
+\label{fig:temporal-conv}
+\end{figure}
+
 \subsection{Stiff-solid regime}
 \label{sec:stiff}
 The introduction motivates implicit integration partly by the stiff-solid regime. A

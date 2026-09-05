@@ -246,6 +246,26 @@ trajectory.}
 \label{fig:lid-staboff}
 \end{figure}
 
+\section{Generalized-\texorpdfstring{$\alpha$}{alpha} elastic-wave sub-integrator}
+\label{sec:supp-genalpha}
+The default elastic-wave stabilizer is the energy-conserving trapezoidal (implicit-midpoint) rule,
+which is lossless for the linear wave. For stiff problems it can be useful to \emph{dissipate}
+under-resolved high-frequency elastic waves in a controlled way rather than conserve them, so we
+also implemented a generalized-$\alpha$ (Chung--Hulbert) sub-integrator, which advances the linear
+elastic-wave operator with a single parameter $\rho_\infty\in[0,1]$ setting the spectral radius at
+the highest resolved frequency: $\rho_\infty=1$ recovers the lossless (energy-conserving) limit and
+smaller values add high-frequency-selective damping while remaining second-order accurate and
+unconditionally stable for the linear wave. On a standing-wave test the scheme reproduces the
+analytic frequency and the designed high-frequency decay, and at $\rho_\infty=1$ it matches the
+trapezoidal rule to round-off.
+
+This variant refines only the linear wave sub-step. As shown in the temporal-convergence study of
+the main text, the coupled FSI accuracy is first order and set by the explicit force splitting, so
+the generalized-$\alpha$ sub-integrator does not raise the coupled order; it is offered as an
+optional stabilizer that trades the trapezoidal rule's exact energy conservation for tunable
+dissipation of stiff, under-resolved elastic waves. The implementation, unit tests, and the
+standing-wave verification are maintained on a separate development branch of the code repository.
+
 \bibliographystyle{elsarticle-num}
 \bibliography{refs}
 

@@ -1,21 +1,21 @@
-"""Temporal convergence of the FSI integrators on the soft-disc-in-lid case at fixed
-resolution (N=64): max centroid error vs a fine-time-step explicit reference, as a
-function of Delta t. Explicit runs only up to its CFL; IMEX-SL runs well beyond it.
-The split IMEX-SL is first order in Delta t and levels off at the semi-Lagrangian
-numerical-diffusion floor at large steps.
-
-Usage: python benchmarks/temporal_convergence.py  ->  data/temporal_convergence.png
+"""Temporal convergence of the coupled IMEX FSI scheme (referee C2). At a fixed spatial
+resolution we step the semi-Lagrangian IMEX integrator (imex-sl, which lifts the viscous AND
+advective CFLs) at a geometric sequence of time steps and measure the maximum centroid deviation
+from the finest-step run of the SAME scheme at the SAME resolution -- a self-convergence study that
+isolates the temporal error. The fitted slope is the observed temporal order. This is the study
+that decides whether a higher-order elastic-wave sub-integrator (generalized-alpha / HHT) would
+change the coupled order. Writes paper/figures/temporal_convergence.png.
 """
-import os, sys, time
+import os, sys
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from benchmarks.mac_soft_disc_lid import run
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+T_END = 1.5
 
-N, T_END = 64, 3.0
 
-
-def _traj(**kw):
-    return run(N=N, t_end=T_END, write=False, **kw)
+def _traj(N, dt, integrator="imex-sl"):
+    return run(t_end=T_END, write=False, N=N, dt=dt, integrator=integrator)
 
 
 def _cerr(tr, ref):
@@ -26,35 +26,40 @@ def _cerr(tr, ref):
 
 def main():
     import matplotlib; matplotlib.use("Agg")
-    from _plotstyle import apply as _style; _style()
+    sys.path.insert(0, os.path.join(ROOT, "benchmarks")); from _plotstyle import apply as _s; _s()
     import matplotlib.pyplot as plt
-
+    N = 96
     dx = 1.0 / N
-    dt_ex = min(0.3 * dx, 0.2 * dx * dx / 0.01)      # explicit CFL
-    ref = _traj(dt=0.125 * dt_ex, integrator="explicit")   # fine-time reference
+    dt0 = min(0.3 * dx, 0.2 * dx * dx / 0.01)      # explicit binding CFL as the base step
+    facs = np.array([1, 2, 4, 8, 16])
+    dt_ref = dt0 / 2.0                              # finest = self-convergence reference
+    print(f"N={N} dt0={dt0:.3e} dt_ref={dt_ref:.3e}", flush=True)
+    ref = _traj(N, dt_ref)
+    dts, errs = [], []
+    for f in facs:
+        dt = f * dt0
+        tr = _traj(N, dt)
+        e = _cerr(tr, ref)
+        dts.append(dt); errs.append(e)
+        print(f"  dt={dt:.3e} ({f:2d}x dt0)  err={e:.3e}", flush=True)
+    dts = np.array(dts); errs = np.array(errs)
+    np.savez(os.path.join(ROOT, "outputs", "overlay", "temporal_conv.npz"),
+             dts=dts, errs=errs, N=N, dt_ref=dt_ref)
+    good = errs > 1e-12
+    p = np.polyfit(np.log(dts[good]), np.log(errs[good]), 1)[0]
+    print(f"  fitted temporal order p = {p:.2f}", flush=True)
 
-    expl = [(f, _cerr(_traj(dt=f * dt_ex, integrator="explicit"), ref)) for f in (0.25, 0.5, 1.0)]
-    imexsl = [(f, _cerr(_traj(dt=f * dt_ex, integrator="imex-sl"), ref)) for f in (1.0, 2.0, 4.0, 8.0)]
-    print("explicit:", [(f, f"{e:.2e}") for f, e in expl])
-    print("imex-sl :", [(f, f"{e:.2e}") for f, e in imexsl])
-
-    fig, ax = plt.subplots(figsize=(6.2, 4.7))
-    fe, ee = zip(*expl); fs, es = zip(*imexsl)
-    dte = np.array(fe) * dt_ex; dts = np.array(fs) * dt_ex
-    ax.loglog(dte, ee, "o-", color="C0", label="explicit")
-    ax.loglog(dts, es, "^-", color="C3", label="IMEX-SL")
-    # O(dt) and O(dt^2) guides anchored at the IMEX-SL mid-point
-    d0 = dts[1]; e0 = es[1]
-    ax.loglog(dts, e0 * (dts / d0)**1, "k--", lw=1, label="$O(\\Delta t)$")
-    ax.loglog(dte, ee[0] * (dte / dte[0])**2, "k:", lw=1, label="$O(\\Delta t^2)$")
-    ax.set_xlabel(r"$\Delta t$"); ax.set_ylabel("max centroid error vs fine-$\\Delta t$ reference")
-    ax.set_title(f"Temporal convergence, soft disc in lid ($N={N}$)")
-    ax.legend(fontsize=9)
+    fig, ax = plt.subplots(figsize=(6.4, 4.8))
+    ax.loglog(dts, errs, "o-", color="red", lw=1.7, ms=7, label=f"imex-sl ($N={N}$), $p\\approx{p:.2f}$")
+    ax.loglog(dts, errs[0] * (dts / dts[0]) ** 1, "--", color="0.45", lw=1.1, label="$O(\\Delta t)$")
+    ax.loglog(dts, errs[0] * (dts / dts[0]) ** 2, ":", color="0.45", lw=1.1, label="$O(\\Delta t^2)$")
+    ax.set_xlabel("time step $\\Delta t$")
+    ax.set_ylabel("max centroid error vs.\\ fine-$\\Delta t$ reference")
+    ax.set_title(f"Temporal convergence of the coupled IMEX FSI scheme ($N={N}$)")
+    ax.legend(loc="upper left")
     fig.tight_layout()
-    data = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
-    os.makedirs(data, exist_ok=True)
-    out = os.path.join(data, "temporal_convergence.png"); fig.savefig(out); print("saved", out)
-    return dict(explicit=expl, imexsl=imexsl)
+    out = os.path.join(ROOT, "paper", "figures", "temporal_convergence.png")
+    fig.savefig(out, dpi=200); print("saved", out)
 
 
 if __name__ == "__main__":
