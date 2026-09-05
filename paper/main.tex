@@ -130,10 +130,9 @@ response, naturally posed on a material reference configuration, must be reconst
 fixed Eulerian grid.
 
 The \emph{reference map technique} (RMT) supplies exactly this reconstruction. It
-transports the inverse motion---the reference map $\xiv(\xv,t)$ carrying a current
-point back to its material label---as an Eulerian field, from which the deformation
-gradient $\Ften=(\grad\xiv)^{-1}$ and hence the elastic stress follow pointwise
-\cite{Kamrin2012,Valkov2015}. Since its introduction the RMT has grown into a robust
+transports the inverse motion---an Eulerian field that carries each current point back to
+its material label---from which the local deformation, and hence the elastic stress,
+follow pointwise \cite{Kamrin2012,Valkov2015}. Since its introduction the RMT has grown into a robust
 incompressible FSI solver with level-set interface capture and stress blending
 \cite{Rycroft2020}, and into a conservative, non-dissipative finite-difference
 formulation \cite{Jain2019}; it belongs to the same Eulerian-solid lineage as the
@@ -150,9 +149,9 @@ carrier---the reference map, or equivalently the elastic strain---folds under su
 shear, so that reinitialization or filtering is used to treat the symptom. A \emph{relaxing}
 stress helps, but it is important to state what it does and does not do: relaxation bounds
 the stored elastic strain and makes the stress insensitive to a folding reference
-map---the stress is then carried by the bounded, always-positive-definite $\be$ rather than
-by $\Ften=(\grad\xiv)^{-1}$---but it does not prevent the map itself from folding, and a
-more fluid-like (smaller-$\tau$) body in fact stretches and folds sooner. Relaxation thus
+map---the stress is then carried by a bounded, always-positive-definite elastic strain measure
+rather than by the reference-map gradient---but it does not prevent the map itself from folding,
+and a more fluid-like, faster-relaxing body in fact stretches and folds sooner. Relaxation thus
 relocates the folding difficulty out of the stress; only in the Maxwell-fluid limit, where
 the map need not be differentiated at all, is it removed entirely. Transporting a
 viscoelastic stress stably is itself a classical difficulty---the high-Weissenberg
@@ -168,10 +167,9 @@ same stable transport that viscoelastic \emph{fluids} already enjoy, and decoupl
 from the folding-prone reference map.
 
 On the time-integration side, the same formulations advance momentum explicitly, so
-the step is throttled simultaneously by the elastic-wave speed $c_s=\sqrt{\mu_s/\rho}$,
-the viscous diffusion $\dx^2/\nu$, the advective CFL, and---once the solid relaxes---the
-relaxation time $\tau$. Stiff solids and high-Weissenberg regimes are then effectively
-out of reach. Implicit and monolithic Eulerian FSI does exist, but for
+the step is throttled simultaneously by the elastic-wave speed, the viscous diffusion, the
+advective CFL, and---once the solid relaxes---the relaxation time. Stiff solids and
+high-Weissenberg regimes are then effectively out of reach. Implicit and monolithic Eulerian FSI does exist, but for
 \emph{hyperelastic} solids: Dunne \cite{Dunne2006}, Richter \cite{Richter2013,Richter2017}
 and Wick \cite{Wick2013} solve a coupled Newton system for velocity, pressure and a
 solid deformation field on a fixed grid, tracking the interface with an ``initial point
@@ -202,9 +200,9 @@ implicit RMT---the technique has been an explicit finite-difference method throu
 \cite{Kamrin2012,Rycroft2020,Jain2019}---and the first to carry a finite-strain, stress-relaxing
 viscoelastic solid inside the FSI solver.
 The solid stress
-is carried by a log-conformation tensor $\psib=\log\be$, positive-definite by
+is carried by a log-conformation representation of the elastic strain, positive-definite by
 construction and, in the standard-linear-solid form, retaining an equilibrium
-hyperelastic branch so the body still returns to shape while $\tau\!\to\!\infty$
+hyperelastic branch so the body still returns to shape, while the non-relaxing limit
 recovers the neo-Hookean RMT exactly. The staggered discretization makes the pressure
 projection exact---divergence is driven to machine zero, the standard advantage of the MAC
 arrangement over a collocated one, which needs no checkerboard or Rhie--Chow fix
@@ -386,15 +384,19 @@ adds a relaxing branch.
 \label{sec:constitutive}
 
 \emph{Standard-linear-solid model.}
-The solid stress is split into a non-relaxing (equilibrium) neo-Hookean branch
-\cref{eq:neohookean} and a relaxing Maxwell branch carried by an elastic Finger tensor
-$\be$,
+The solid stress is split into a non-relaxing equilibrium branch---the neo-Hookean stress
+$\sig_{\!s}^{\infty}$ of \cref{eq:neohookean}---and a relaxing Maxwell branch carried by the
+\emph{elastic Finger tensor} $\be$. The latter is the symmetric positive-definite conformation
+tensor of the relaxing branch: it is the elastic left Cauchy--Green tensor
+$\be=\Ften_e\Ften_e^{\!\top}$ associated with the elastic part $\Ften_e$ of a multiplicative split
+$\Ften=\Ften_e\Ften_p$ into elastic and inelastic (relaxing) factors, so that $\be=\It$ in the
+stress-free, fully relaxed state; the model transports $\be$ directly rather than the individual
+factors. The total solid stress is
 \begin{equation}
-\sig_{\!s} = \mu_s\,\dev\!\left(\Ften\Ften^{\!\top}\right)
-   + G\,\dev(\be),
+\sig_{\!s} = \sig_{\!s}^{\infty} + G\,\dev(\be),
 \label{eq:sls}
 \end{equation}
-where $G$ is the viscoelastic modulus. The elastic Finger tensor evolves by the
+where $G$ is the modulus of the relaxing branch. The elastic Finger tensor evolves by the
 upper-convected Maxwell (UCM) equation with relaxation time $\tau$,
 \begin{equation}
 \Dt{\be} - \Lt\be - \be\Lt^{\!\top} = -\frac1\tau\left(\be-\It\right),
