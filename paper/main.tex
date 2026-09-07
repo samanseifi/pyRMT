@@ -795,16 +795,23 @@ The spatial convergence (\cref{fig:disc-tg-conv}, measured against a resolved $N
 reference) splits cleanly by quantity. The \emph{integrated energies} converge at second
 order---the $O(\dx)$ interfacial error largely cancels in the volume integral---so the
 kinetic and strain energy track $O(\dx^2)$, matching the second-order energy convergence of
-Jain \emph{et al.} The \emph{pointwise fields} (velocity, pressure) are first order: the
-mollified Heaviside spreads the stress and pressure jump over a band of width ${\sim}2\dx$,
-and the captured interface sits at an $O(\dx)$-different sub-cell position on each grid, so
-the near-interface field error is $O(\dx)$ on top of a second-order bulk---intrinsic to the
-diffuse interface. It persists when the time step is scaled $\dt\propto\dx^2$ rather than
-$\dt\propto\dx$ (finest-grid pressure order $0.79$ vs.\ $0.76$, velocity $1.12$ vs.\ $1.11$), so
-the near-first-order fields are not the $O(\dt)$ projection-splitting error
-\cite{GuermondMinevShen2006} but the diffuse one-fluid interface. Second order in the
-\emph{fields} would require a fully-conservative, discretely-telescoping stencil or a
-sharp-interface treatment \cite{Kolahdouz2023}. The order is set by the spatial discretization,
+Jain \emph{et al.} The \emph{pointwise fields} are near first order over the full domain, but the
+two fields fail second order for different reasons. The \emph{pressure} jump across the interface
+($[p]=\bm n\!\cdot\!\sig_{\!s}\!\cdot\!\bm n$) is smeared over the ${\sim}2\dx$ blend band, and
+this is a purely \emph{interfacial} error: measured on the bulk---outside a fixed interfacial
+neighbourhood ($|\phi|>0.06$, $95\%$ of the domain)---the pressure recovers toward second order
+(bulk order ${\approx}1.7$ on the finest pair vs.\ ${\approx}0.9$ full-domain,
+\cref{fig:disc-tg-conv}b). The \emph{velocity}, by contrast, stays near first order even in the
+bulk (bulk and full-domain errors nearly coincide): it is limited not by the stress smearing but
+by the captured interface sitting at an $O(\dx)$-different sub-cell position on each grid, which
+shifts the whole incompressible flow at $O(\dx)$. Both effects are intrinsic to the diffuse
+one-fluid interface and are \emph{spatial}: they persist when the time step is scaled
+$\dt\propto\dx^2$ rather than $\dt\propto\dx$ (finest-grid pressure order $0.79$ vs.\ $0.76$,
+velocity $1.12$ vs.\ $1.11$), so the fields are not limited by the $O(\dt)$ projection-splitting
+error \cite{GuermondMinevShen2006}. Second order in the velocity would require sub-cell interface
+localization with jump-condition (immersed-interface) corrections or a sharp-interface treatment
+\cite{Kolahdouz2023}---a natural extension, since the jump conditions enter only the right-hand
+side and would preserve the exact transform solve. The order is set by the spatial discretization,
 not the time integrator.
 
 \begin{figure}[t]\centering
@@ -817,10 +824,14 @@ model tracks the reference methods, recovering the elastic benchmark.}
 \end{figure}
 
 \begin{figure}[t]\centering
-\includegraphics[width=0.62\linewidth]{figures/disc_tg_convergence.png}
+\includegraphics[width=\linewidth]{figures/disc_tg_convergence.png}
 \caption{Disc in a Taylor--Green vortex, spatial convergence (vs.\ a resolved $N{=}512$
-reference): integrated energies converge at $O(\Delta x^2)$ (dashed); pointwise velocity and
-pressure are near first order (dotted), capped by the diffuse interface.}
+reference). (a) Integrated kinetic and strain energy converge at $O(\Delta x^2)$. (b) Pointwise
+fields: over the full domain both velocity and pressure are near first order (open symbols,
+dashed), but the \emph{bulk} error outside a fixed interfacial band $|\phi|>0.06$ (filled symbols,
+solid) shows the pressure recovering toward $O(\Delta x^2)$---its low order is the smeared
+interfacial jump---while the velocity stays near $O(\Delta x)$ even in the bulk, limited by the
+$O(\Delta x)$ sub-cell interface position.}
 \label{fig:disc-tg-conv}
 \end{figure}
 

@@ -190,7 +190,7 @@ def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
     u_c = 0.5 * (u[:, :-1] + u[:, 1:]); v_c = 0.5 * (v[:-1, :] + v[1:, :])
     speed = np.sqrt(u_c**2 + v_c**2)
     KE = 0.5 * np.sum(u_c**2 + v_c**2) * dx * dy
-    out = dict(N=N, dx=dx, xc=xc, speed=speed, p=p, KE=KE,
+    out = dict(N=N, dx=dx, xc=xc, speed=speed, p=p, KE=KE, phi=phi,
                divmax=float(np.max(np.abs(divergence(u, v, dx, dy)))))
     if history:
         out["hist"] = {k: np.array(val) for k, val in hist.items()}
