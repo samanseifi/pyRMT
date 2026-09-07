@@ -375,9 +375,12 @@ $\sig_{\!s}=2\mu_s\bt-P\It$ \cite{Jain2019}, so that \emph{their} $\mu_s$ equals
 $\mu_s/2$, which we convert accordingly when reproducing external benchmarks
 (\cref{sec:disc-tg}). Throughout, $\mu_s$ denotes the equilibrium (neo-Hookean) modulus and
 $G$---introduced in \cref{sec:constitutive}---the modulus of the relaxing Maxwell branch; the
-two coincide only when a case sets them equal. In the purely hyperelastic limit ($\tau\to\infty$,
-\cref{sec:constitutive}) this is the entire solid stress; the general viscoelastic solid
-adds a relaxing branch.
+two coincide only when a case sets them equal. For a purely hyperelastic solid---no relaxing
+branch---this is the entire stress. The general viscoelastic solid adds the relaxing branch of
+\cref{sec:constitutive}; in its \emph{non-relaxing} limit ($\tau\to\infty$) that branch is elastic
+as well, so the elastic benchmarks are recovered as a neo-Hookean solid whose shear modulus is that
+of the non-relaxing branch---not to be confused with the equilibrium stress $\sig_{\!s}^{\infty}$,
+which is instead the \emph{fully relaxed} ($t\to\infty$) response.
 
 %% ===== begin constitutive.tex =====
 \subsection{Finite-strain viscoelasticity: log-conformation}
@@ -386,17 +389,21 @@ adds a relaxing branch.
 \emph{Standard-linear-solid model.}
 The solid stress is split into a non-relaxing equilibrium branch---the neo-Hookean stress
 $\sig_{\!s}^{\infty}$ of \cref{eq:neohookean}---and a relaxing Maxwell branch carried by the
-\emph{elastic Finger tensor} $\be$. The latter is the symmetric positive-definite conformation
-tensor of the relaxing branch: it is the elastic left Cauchy--Green tensor
-$\be=\Ften_e\Ften_e^{\!\top}$ associated with the elastic part $\Ften_e$ of a multiplicative split
-$\Ften=\Ften_e\Ften_p$ into elastic and inelastic (relaxing) factors, so that $\be=\It$ in the
-stress-free, fully relaxed state; the model transports $\be$ directly rather than the individual
-factors. The total solid stress is
+\emph{elastic Finger tensor} $\be$. The latter is the symmetric positive-definite internal
+conformation tensor of the relaxing branch, equal to the identity $\It$ in the stress-free, fully
+relaxed state; it is interpretable as the elastic left Cauchy--Green tensor
+$\be=\Ften_e\Ften_e^{\!\top}$ of the elastic factor in a multiplicative split
+$\Ften=\Ften_e\Ften_p$, but the model transports $\be$ directly through its own evolution equation
+rather than enforcing that kinematic split. The total solid stress is
 \begin{equation}
 \sig_{\!s} = \sig_{\!s}^{\infty} + G\,\dev(\be),
 \label{eq:sls}
 \end{equation}
-where $G$ is the modulus of the relaxing branch. The elastic Finger tensor evolves by the
+where $\sig_{\!s}^{\infty}$ is the equilibrium (fully relaxed) stress of \cref{eq:neohookean} and
+$G$ the modulus of the relaxing branch. Note that $\be$ is a distinct strain measure from the
+total Finger tensor $\bt=\Ften\Ften^{\!\top}$ of \cref{eq:neohookean}: $\bt$ tracks the full
+deformation and drives the equilibrium branch, whereas $\be$ relaxes; the two coincide only in the
+non-relaxing limit $\tau\to\infty$, where $\be\to\bt$. The elastic Finger tensor evolves by the
 upper-convected Maxwell (UCM) equation with relaxation time $\tau$,
 \begin{equation}
 \Dt{\be} - \Lt\be - \be\Lt^{\!\top} = -\frac1\tau\left(\be-\It\right),
@@ -416,7 +423,10 @@ The model derives from the free energy
       +\tfrac{G}{2}\!\left(\tr\be-2-\ln\det\be\right),
 \label{eq:free-energy}
 \end{equation}
-of which \cref{eq:sls} is the (deviatoric) Cauchy stress, while the relaxation term produces
+of which \cref{eq:sls} is the (deviatoric) Cauchy stress. The equilibrium branch carries no
+$\ln\det$ term because it is kinematically incompressible ($J\equiv1$), whereas the relaxing
+conformation $\be$ is not constrained to $\det\be=1$ (\emph{cf.}\ caveat (ii) below), so its
+neo-Hookean energy retains the $\ln\det\be$ term. The relaxation term produces
 the non-negative dissipation
 \begin{equation}
 \mathcal D=\tfrac{G}{2\tau}\,\tr\!\left(\be+\be^{-1}-2\It\right)\ge0.
@@ -427,8 +437,9 @@ relaxation; the equilibrium branch $\mu_s\dev(\Ften\Ften^{\!\top})$ is still bui
 $\Ften=(\grad\xiv)^{-1}$ and can fold under unbounded shear, so relaxation eliminates the
 folding sensitivity only in the Maxwell-fluid limit and mitigates it otherwise.
 \emph{(ii) Incompressibility of $\be$.} The relaxation toward $\It$ does not preserve
-$\det\be=1$ (as in Oldroyd-B): in steady planar extension the model gives
-$\det\be=1/(1-4\mathrm{Wi}^2)$, so $\be$ genuinely dilates as it stretches. This does not affect
+$\det\be=1$ (as in Oldroyd-B): in steady planar extension at rate $\varepsilon$ the model gives
+$\det\be=1/(1-4\mathrm{Wi}^2)$ (Weissenberg number $\mathrm{Wi}=\varepsilon\tau$), so $\be$
+genuinely dilates as it stretches. This does not affect
 the momentum balance---only the deviatoric part $G\dev\be$ enters the stress, and the isotropic
 part is carried by the pressure---but $\det\be$ is monitored as a diagnostic. In the coupled
 SLS-in-vortex runs it reaches $\det\be\approx1.3$ ($\tau=1$) to $1.5$ ($\tau=0.25$) at the
@@ -479,19 +490,14 @@ evolution of $\psib$ is
 \label{eq:logconf-rhs}
 \end{equation}
 rotated back by $\bm R(\cdot)\bm R^{\!\top}$; the diagonal carries stretching and
-relaxation, the off-diagonal the eigenvector rotation. In the degenerate limit
-$\ell_1\!\to\!\ell_2$ the prefactor $(\ell_2-\ell_1)/(\lambda_2-\lambda_1)\to\lambda_1^{-1}
-=e^{-\ell_1}$ while $\lambda_2 M_{12}+\lambda_1 M_{21}\to\lambda_1(M_{12}+M_{21})$, so
-$\Omega_{12}\to M_{12}+M_{21}$, recovering $\dot{\psib}=2\,\mathrm{sym}(\Lt)$ at $\be=\It$;
-\cref{eq:logconf-rhs} is therefore smooth. In two dimensions the eigendecomposition of the
-symmetric $2\times2$ field is available in closed form, so \cref{eq:logconf-rhs} is evaluated
-without iterative diagonalization; the code evaluates
-$\Omega_{12}=\big[(\ell_2-\ell_1)/(\lambda_2-\lambda_1)\big]\,(\lambda_2 M_{12}+\lambda_1 M_{21})$,
-replacing \emph{only the prefactor} by its limit $(\ell_2-\ell_1)/(\lambda_2-\lambda_1)\to
-\lambda_1^{-1}=e^{-\ell_1}$ while keeping the factor $\lambda_2 M_{12}+\lambda_1 M_{21}$ when
-$|\lambda_1-\lambda_2|<10^{-10}$ (an absolute, dimensionless tolerance---the $\lambda_i$ are
-eigenvalues of the dimensionless $\be$), so the full product tends to the correct limit
-$M_{12}+M_{21}$ in both branches.
+relaxation, the off-diagonal the eigenvector rotation. In two dimensions the eigendecomposition of
+the symmetric $2\times2$ field is closed-form, so \cref{eq:logconf-rhs} is evaluated without
+iterative diagonalization. In the degenerate limit $\ell_1\!\to\!\ell_2$ the prefactor
+$(\ell_2-\ell_1)/(\lambda_2-\lambda_1)\to\lambda_1^{-1}$ while
+$\lambda_2 M_{12}+\lambda_1 M_{21}\to\lambda_1(M_{12}+M_{21})$, so $\Omega_{12}\to M_{12}+M_{21}$ and
+$\dot{\psib}\to2\,\mathrm{sym}(\Lt)$ at $\be=\It$; the code applies this limit to the prefactor
+alone when $|\lambda_1-\lambda_2|<10^{-10}$ (an absolute, dimensionless tolerance, the $\lambda_i$
+being eigenvalues of the dimensionless $\be$), keeping \cref{eq:logconf-rhs} smooth.
 
 \emph{Exact relaxation for stiff $\tau$.}
 \label{sec:exact-relax}
@@ -540,8 +546,6 @@ sharp and the strain accurate on the sensitive parts of the flow (\cref{sec:disc
 velocity departure point in the semi-Lagrangian momentum branch (\cref{alg:imex}) uses plain
 cubic interpolation (no limiter is needed for the smooth velocity), a distinct stencil from the
 limited $(\xiv,\psib)$ transport.
-The semi-Lagrangian transport adopted here removes the advective step-size limit while keeping
-the map smooth.
 
 %% ===== end constitutive.tex =====
 
@@ -763,15 +767,17 @@ material).
 \label{sec:disc-tg}
 A soft disc of radius $r=0.2$ at the centre of a unit box is released in the vortex
 $\psi=\psi_0\sin(2\pi x)\sin(2\pi y)$ ($\psi_0=0.05$, $\mu_f=10^{-3}$, $\rho_s=\rho_f=1$, shear
-modulus $\mu_s=1.0$); it stretches, elastically retracts and oscillates while the fluid
+modulus $1.0$); it stretches, elastically retracts and oscillates while the fluid
 viscously damps it. We run it at the \emph{elastic limit of the viscoelastic model}
 ($\tau\to\infty$, so the log-conformation branch is non-relaxing and $\be\to\Ften\Ften^{\!\top}$):
-this is the same benchmark that fixes the elastic response, now carried within the unified
-constitutive framework rather than by a separate neo-Hookean stress. This is the benchmark of Jain, Kamrin \& Mani \cite{Jain2019}, validated
+the elastic response is carried by this non-relaxing branch (modulus $G=1.0$), which at
+$\tau\to\infty$ is a neo-Hookean spring of shear modulus $1.0$---equivalently an equilibrium
+$\mu_s=1.0$, the two being indistinguishable in the elastic limit---rather than by a separate
+neo-Hookean stress. This is the benchmark of Jain, Kamrin \& Mani \cite{Jain2019}, validated
 there against the mixed Eulerian--Lagrangian results of Zhao \emph{et al.}\ and
 Robinson-Mosher \emph{et al.}; we compare against all three. (Applying the modulus convention of
-\cref{sec:neohookean}, their $\mu_s=0.5$ is a physical shear modulus $1.0$, i.e.\ $\mu_s=1.0$
-here; running $\mu_s=0.5$ instead would oscillate ${\sim}1.5\times$ too slowly.)
+\cref{sec:neohookean}, their $\mu_s=0.5$ corresponds to a physical shear modulus $1.0$, which we
+use here; a shear modulus $0.5$ instead would oscillate ${\sim}1.5\times$ too slowly.)
 \Cref{fig:disc-tg-energy} overlays our kinetic- and strain-energy evolution on the three
 reference methods; the two energies exchange in anti-phase during the stretch--retract
 oscillation. Our \emph{kinetic energy} tracks all three in phase across the
@@ -803,7 +809,7 @@ not the time integrator.
 
 \begin{figure}[t]\centering
 \includegraphics[width=\linewidth]{figures/disc_tg_energy.png}
-\caption{Disc in a Taylor--Green vortex ($\mu_s=1.0$; present result at the $\tau\to\infty$
+\caption{Disc in a Taylor--Green vortex (shear modulus $1.0$; present result at the $\tau\to\infty$
 elastic limit, $N{=}128$, red): (a) kinetic and (b) strain energy vs.\ time, against Jain, Zhao,
 and Robinson-Mosher \emph{et al.}\ \cite{Jain2019}. The $\tau\to\infty$ limit of the viscoelastic
 model tracks the reference methods, recovering the elastic benchmark.}
