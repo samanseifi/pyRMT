@@ -55,19 +55,27 @@ def main(recompute=True):
         dv2 = (sp - spref) ** 2; dp2 = (pr - prref) ** 2
         full_v.append(np.sqrt(dv2.mean())); full_p.append(np.sqrt(dp2.mean()))
         bulk_v.append(np.sqrt(dv2[mbulk].mean())); bulk_p.append(np.sqrt(dp2[mbulk].mean()))
-    KEa, SEa = d["KE"], d["SE"]
-    keerr = np.abs(KEa[:-1] - KEa[1:]); seerr = np.abs(SEa[:-1] - SEa[1:])
+    # energies: successive-grid (Richardson) change on the power-of-2 subset, which avoids both the
+    # vs-reference floor and the uneven-spacing noise; the integrated energies are ~2nd order.
+    KE = dict(zip(d["NS"], d["KE"])); SE = dict(zip(d["NS"], d["SE"]))
+    p2 = [N for N in (32, 64, 128, 256) if N in KE]
+    he = np.array([1.0 / N for N in p2[:-1]])
+    eKE = np.array([abs(KE[p2[i]] - KE[p2[i + 1]]) for i in range(len(p2) - 1)])
+    eSE = np.array([abs(SE[p2[i]] - SE[p2[i + 1]]) for i in range(len(p2) - 1)])
+    def _ord(Ns, e):
+        Ns = np.array(Ns); e = np.array(e)
+        return [f"{x:.2f}" for x in np.log(e[:-1] / e[1:]) / np.log(Ns[1:] / Ns[:-1])]
     for nm, e in (("full velocity", full_v), ("bulk velocity", bulk_v),
-                  ("full pressure", full_p), ("bulk pressure", bulk_p),
-                  ("kinetic E", keerr), ("strain E", seerr)):
-        e = np.array(e); o = np.log(e[:-1] / e[1:]) / np.log(np.array(coarse[1:]) / np.array(coarse[:-1]))
-        print(f"  {nm:14s} order {[f'{x:.2f}' for x in o]}", flush=True)
+                  ("full pressure", full_p), ("bulk pressure", bulk_p)):
+        print(f"  {nm:14s} order {_ord(coarse, e)}", flush=True)
+    print(f"  kinetic E      order {_ord(p2[:-1], eKE)}", flush=True)
+    print(f"  strain E       order {_ord(p2[:-1], eSE)}", flush=True)
 
     fig, ax = plt.subplots(1, 2, figsize=(11.0, 4.5))
-    # (a) energies (2nd order)
-    ax[0].loglog(h, keerr, "s-", color="black", lw=1.6, ms=6, label="kinetic energy")
-    ax[0].loglog(h, seerr, "D-", color="darkgreen", lw=1.6, ms=6, label="strain energy")
-    ax[0].loglog(h, keerr[0] * (h / h[0]) ** 2, "--", color="0.5", lw=1.0, label="$O(\\Delta x^2)$")
+    # (a) integrated energies -- second order (successive-grid change)
+    ax[0].loglog(he, eKE, "s-", color="black", lw=1.6, ms=6, label="kinetic energy")
+    ax[0].loglog(he, eSE, "D-", color="darkgreen", lw=1.6, ms=6, label="strain energy")
+    ax[0].loglog(he, eKE[0] * (he / he[0]) ** 2, "--", color="0.5", lw=1.0, label="$O(\\Delta x^2)$")
     ax[0].set_xlabel("$\\Delta x = 1/N$"); ax[0].set_ylabel("successive-grid energy change")
     ax[0].set_title("(a) integrated energies"); ax[0].legend(fontsize=10)
     # (b) fields: full-domain vs bulk (outside a fixed interfacial band |phi|>delta).
