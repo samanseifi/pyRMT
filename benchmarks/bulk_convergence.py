@@ -55,28 +55,29 @@ def main(recompute=True):
         dv2 = (sp - spref) ** 2; dp2 = (pr - prref) ** 2
         full_v.append(np.sqrt(dv2.mean())); full_p.append(np.sqrt(dp2.mean()))
         bulk_v.append(np.sqrt(dv2[mbulk].mean())); bulk_p.append(np.sqrt(dp2[mbulk].mean()))
-    # energies: successive-grid (Richardson) change on the power-of-2 subset, which avoids both the
-    # vs-reference floor and the uneven-spacing noise; the integrated energies are ~2nd order.
+    # energies: error vs the N=512 reference. The integrated energies super-converge and reach the
+    # reference's own ~1e-6 (KE) / ~1e-7 (SE) floor by N~128-192, so we plot each up to the last
+    # grid above its floor (monotone regime); both track O(dx^2).
     KE = dict(zip(d["NS"], d["KE"])); SE = dict(zip(d["NS"], d["SE"]))
-    p2 = [N for N in (32, 64, 128, 256) if N in KE]
-    he = np.array([1.0 / N for N in p2[:-1]])
-    eKE = np.array([abs(KE[p2[i]] - KE[p2[i + 1]]) for i in range(len(p2) - 1)])
-    eSE = np.array([abs(SE[p2[i]] - SE[p2[i + 1]]) for i in range(len(p2) - 1)])
+    keN = [N for N in coarse if N <= 192]; seN = [N for N in coarse if N <= 128]
+    hke = np.array([1.0 / N for N in keN]); hse = np.array([1.0 / N for N in seN])
+    eKE = np.array([abs(KE[N] - KE[ref]) for N in keN])
+    eSE = np.array([abs(SE[N] - SE[ref]) for N in seN])
     def _ord(Ns, e):
-        Ns = np.array(Ns); e = np.array(e)
+        Ns = np.array(Ns, float); e = np.array(e)
         return [f"{x:.2f}" for x in np.log(e[:-1] / e[1:]) / np.log(Ns[1:] / Ns[:-1])]
     for nm, e in (("full velocity", full_v), ("bulk velocity", bulk_v),
                   ("full pressure", full_p), ("bulk pressure", bulk_p)):
         print(f"  {nm:14s} order {_ord(coarse, e)}", flush=True)
-    print(f"  kinetic E      order {_ord(p2[:-1], eKE)}", flush=True)
-    print(f"  strain E       order {_ord(p2[:-1], eSE)}", flush=True)
+    print(f"  kinetic E      order {_ord(keN, eKE)}", flush=True)
+    print(f"  strain E       order {_ord(seN, eSE)}", flush=True)
 
     fig, ax = plt.subplots(1, 2, figsize=(11.0, 4.5))
-    # (a) integrated energies -- second order (successive-grid change)
-    ax[0].loglog(he, eKE, "s-", color="black", lw=1.6, ms=6, label="kinetic energy")
-    ax[0].loglog(he, eSE, "D-", color="darkgreen", lw=1.6, ms=6, label="strain energy")
-    ax[0].loglog(he, eKE[0] * (he / he[0]) ** 2, "--", color="0.5", lw=1.0, label="$O(\\Delta x^2)$")
-    ax[0].set_xlabel("$\\Delta x = 1/N$"); ax[0].set_ylabel("successive-grid energy change")
+    # (a) integrated energies vs the reference -- second order
+    ax[0].loglog(hke, eKE, "s-", color="black", lw=1.6, ms=6, label="kinetic energy")
+    ax[0].loglog(hse, eSE, "D-", color="darkgreen", lw=1.6, ms=6, label="strain energy")
+    ax[0].loglog(hke, eKE[0] * (hke / hke[0]) ** 2, "--", color="0.5", lw=1.0, label="$O(\\Delta x^2)$")
+    ax[0].set_xlabel("$\\Delta x = 1/N$"); ax[0].set_ylabel(f"energy error (vs.\\ $N{{=}}{ref}$)")
     ax[0].set_title("(a) integrated energies"); ax[0].legend(fontsize=10)
     # (b) fields: full-domain vs bulk (outside a fixed interfacial band |phi|>delta).
     # Pressure's low order is interfacial: the bulk pressure recovers toward 2nd order. Velocity
