@@ -48,9 +48,9 @@ references to the main text (its sections, algorithms and figures) are named exp
 
 \section{Fluid-solver validation}
 
-\subsection{Lid-driven cavity vs.\ Ghia \emph{et al.}}
+\subsection{Lid-driven cavity vs.\ Ghia et al.}
 The pure-fluid MAC solver (incompressible Navier--Stokes with exact projection) is validated
-against the benchmark of Ghia \emph{et al.}\ \cite{Ghia1982} in the lid-driven cavity at
+against the benchmark of Ghia et al.\ \cite{Ghia1982} in the lid-driven cavity at
 $\mathrm{Re}=100$ and $1000$ ($N{=}128$, driven to steady state). \Cref{fig:ghia} compares both
 centreline profiles: the vertical-centreline $u(y)$ at $x=0.5$ and the horizontal-centreline
 $v(x)$ at $y=0.5$. The MAC profiles overlay the reference at both Reynolds numbers, with RMS
@@ -62,7 +62,7 @@ divergence stays at machine zero ($\le3\times10^{-14}$) throughout.
 \begin{figure}[t]\centering
 \includegraphics[width=0.47\linewidth]{figures/ghia_uy.png}\hfill
 \includegraphics[width=0.47\linewidth]{figures/ghia_vx.png}
-\caption{Lid-driven cavity vs.\ Ghia \emph{et al.}\ \cite{Ghia1982} ($\mathrm{Re}=100$ blue, $1000$
+\caption{Lid-driven cavity vs.\ Ghia et al.\ \cite{Ghia1982} ($\mathrm{Re}=100$ blue, $1000$
 red, $N{=}128$): centreline $u(y)$ at $x=0.5$ (left) and $v(x)$ at $y=0.5$ (right). Lines, MAC
 solver; circles, reference.}
 \label{fig:ghia}
@@ -74,7 +74,7 @@ The developed (steady) cavity flow at $\mathrm{Re}=100$ and $1000$ ($N{=}128$) i
 extended at $\mathrm{Re}=1000$---and the pressure field, with the low-pressure primary-vortex
 core and the high-pressure stagnation region at the top-right corner where the lid drives the
 fluid into the wall. Both the streamline topology and the pressure structure are consistent with
-the Ghia \emph{et al.}\ benchmark.
+the Ghia et al.\ benchmark.
 
 \begin{figure}[t]\centering
 \includegraphics[width=0.9\linewidth]{figures/lid_developed.png}
@@ -123,7 +123,7 @@ diagnostics at $N{=}64$ and $128$.
 \emph{(a) Area.} The solid area (measured from the smoothed indicator $\int(1-H)\,\mathrm{d}V$)
 drifts by under $1\%$, and the drift roughly halves under refinement---from ${\approx}0.9\%$ at
 $N{=}64$ to ${\approx}0.5\%$ at $N{=}128$---with no secular leak. A conservative interface scheme
-(e.g.\ the finite-volume reference-map transport of Jain \emph{et al.}\ \cite{Jain2019}) conserves
+(e.g.\ the finite-volume reference-map transport of Jain et al.\ \cite{Jain2019}) conserves
 area to round-off by construction; the present semi-Lagrangian transport trades that for
 simplicity and reinitialisation-free operation, at a controlled, mesh-convergent cost.
 
@@ -159,7 +159,7 @@ under-resolution artifact (main text).
 \begin{figure}[t]\centering
 \includegraphics[width=0.5\linewidth]{figures/scheme_compare_N128.png}
 \caption{Soft disc in a lid-driven cavity ($N{=}128$): centroid trajectory over the inward
-spiral vs.\ the Sugiyama \emph{et al.}\ \cite{Sugiyama2011} $1024^2$ reference. Bicubic
+spiral vs.\ the Sugiyama et al.\ \cite{Sugiyama2011} $1024^2$ reference. Bicubic
 interpolation tracks the reference; bilinear is more diffusive on the inner turns.}
 \label{fig:scheme-compare}
 \end{figure}
@@ -168,7 +168,7 @@ interpolation tracks the reference; bilinear is more diffusive on the inner turn
 \label{sec:supp-workprec}
 \Cref{tab:workprec} is the work--precision data behind the main-text speedup on the soft-disc-in-lid
 case: for the adaptive-advection IMEX (imex-sl) at increasing step multiples, the accuracy is the
-maximum centroid deviation from a fine-$\dt$ explicit reference at the \emph{same} resolution
+maximum centroid deviation from a fine-$\dt$ explicit reference at the same resolution
 (isolating the temporal error), and the wall-clock is measured against the same-resolution explicit
 baseline. The error grows smoothly with the step---an accuracy-for-speed trade rather than a
 stability wall---and the speedup grows with $N$ as the explicit viscous limit $\dx^2/\nu$ tightens.
@@ -198,7 +198,7 @@ $N{=}128$ & explicit & (reference) & $1.0\times$ \\
 \section{Contact: grid convergence, momentum, and the elastic-wave stabilizer}
 \label{sec:supp-stabilizer}
 \paragraph{Grid convergence and no interpenetration.} The colliding-disc example reproduces the
-solid--solid collision benchmark of Jain \emph{et al.}\ \cite{Jain2019} (their \S4.6.1): two elastic
+solid--solid collision benchmark of Jain et al.\ \cite{Jain2019} (their \S4.6.1): two elastic
 solids meet, deform, and rebound. \Cref{fig:contact-conv} shows the centroid-gap trajectory---approach,
 contact (the gap dips below $2R$ as the discs flatten), and rebound---at $N=96,128,192$. The
 trajectory converges under refinement: the $N{=}128\!\to\!192$ RMS change of the gap history
@@ -207,7 +207,7 @@ minimum gap converges monotonically to $0.208$ ($0.2089,0.2077,0.2076$). The dis
 interpenetrate at any resolution (the centroids never cross). Because the contact force is the
 divergence of the \emph{trace-free} solid stress, it conserves total momentum by construction and
 survives the exact projection---a plain repulsive body force would be nullified by the projection,
-as noted by Rycroft \emph{et al.}\ \cite{Rycroft2020}. As in Jain \emph{et al.}, the rebound speed
+as noted by Rycroft et al.\ \cite{Rycroft2020}. As in Jain et al., the rebound speed
 is the most resolution-sensitive part of the collision (it is set by the under-resolved elastic wave
 during the brief contact), which is why we report the trend rather than a single restitution number.
 
@@ -215,7 +215,7 @@ during the brief contact), which is why we report the trend rather than a single
 \includegraphics[width=0.6\linewidth]{figures/contact_convergence.png}
 \caption{Two elastic discs colliding head-on: centroid gap $c_b-c_a$ vs.\ time at $N=96,128,192$.
 Approach, contact (gap below $2R$, dotted), and rebound; the trajectory converges under refinement
-and the discs never interpenetrate. Analogous to the solid--solid collision of Jain \emph{et al.}\
+and the discs never interpenetrate. Analogous to the solid--solid collision of Jain et al.\
 \cite{Jain2019}.}
 \label{fig:contact-conv}
 \end{figure}
@@ -227,8 +227,8 @@ the elastic wave resolved (stabilizer off), which keeps the rebound free of nume
 Engaging the stabilizer trades that fidelity for
 robustness: it damps the under-resolved elastic wave, so IMEX then completes even violent impacts
 (e.g.\ $V_0=1.6$, where the forward-Euler elastic force diverges at the same step) but at a lower,
-stabilizer-dependent restitution. This is why the stabilizer is reserved for the genuinely stiff
-regime (the stiff-solid example of the main text), where stepping past the elastic-wave CFL is the point.
+stabilizer-dependent restitution. This is why the stabilizer is reserved for genuinely stiff
+solids, where stepping past the elastic-wave CFL is the point.
 
 \section{Elastic-wave stabilizer faithfulness}
 \label{sec:supp-consistency}
@@ -272,12 +272,11 @@ regardless of how the linear wave operator is advanced. We also implemented a ge
 (Chung--Hulbert) elastic-wave sub-integrator with tunable high-frequency dissipation
 ($\rho_\infty\in[0,1]$: $\rho_\infty=1$ recovers the energy-conserving midpoint rule, smaller values
 damp the highest modes while staying second order and unconditionally stable), verified on the
-linear standing wave. Because it refines only the wave sub-step, it does \emph{not} raise the
-coupled order; it is retained as an \emph{optional} stabilizer trading the trapezoidal rule's exact
+linear standing wave. Because it refines only the wave sub-step, it does not raise the
+coupled order; it is retained as an optional stabilizer trading the trapezoidal rule's exact
 energy conservation for controllable damping of stiff, under-resolved waves. Raising the coupled
 order would require an implicit or predictor--corrector treatment of the force itself, left to
-future work. The generalized-$\alpha$ implementation and its standing-wave verification are
-maintained on a separate development branch of the code repository.
+future work.
 
 \bibliographystyle{elsarticle-num}
 \bibliography{refs}
