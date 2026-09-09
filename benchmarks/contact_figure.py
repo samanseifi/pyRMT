@@ -25,9 +25,14 @@ def main():
     # stabilizer OFF: for a collision the elastic wave IS the rebound physics, so it is
     # resolved (not damped); the step here is at the elastic CFL so the stabilizer, which
     # exists to step PAST it for stiff solids, is unnecessary and would only dissipate.
-    common = dict(N=N, t_end=T, V0=V0, mu_f=MUF, eta=ETA, sep=SEP, R=R, integrator="imex", stab=False)
-    runs = {"elastic": run(**EL, **common), "sls": run(**VE, **common)}
-    np.savez(os.path.join(ROOT, "outputs", "overlay", "contact_collision.npz"), **runs)
+    npz = os.path.join(ROOT, "outputs", "overlay", "contact_collision.npz")
+    plot_only = "--plot-only" in sys.argv
+    if plot_only:
+        d = np.load(npz); runs = {"elastic": d["elastic"], "sls": d["sls"]}
+    else:
+        common = dict(N=N, t_end=T, V0=V0, mu_f=MUF, eta=ETA, sep=SEP, R=R, integrator="imex", stab=False)
+        runs = {"elastic": run(**EL, **common), "sls": run(**VE, **common)}
+        np.savez(npz, **runs)
 
     # ---- gap vs time: elastic vs viscoelastic (IMEX; the explicit comparison is in the supp) ----
     fig, ax = plt.subplots(figsize=(6.2, 4.5))
@@ -35,11 +40,13 @@ def main():
     ax.plot(runs["sls"][:, 0], runs["sls"][:, 3], "-", color="red", lw=2.0, label="viscoelastic (SLS)")
     ax.axhline(2 * R, color="0.5", ls=":", lw=1.2, label=r"$2R$ (touching)")
     ax.set_xlabel("time $t$"); ax.set_ylabel("centroid gap")
-    ax.legend(loc="upper right"); fig.tight_layout()
+    ax.legend(loc="upper left", fontsize=9, frameon=False); fig.tight_layout()
     fig.savefig(os.path.join(ROOT, "paper", "figures", "contact_collision.png"), dpi=200)
     print("saved contact_collision.png")
 
     # ---- snapshot montage: the discs colliding in the fluid ----
+    if plot_only:
+        print("plot-only: skipping snapshot montage"); return
     times = [0.15, 0.30, 0.42, 0.70, 1.20]
     _, snaps = run(**EL, snap_times=times, **common)
     fig, axes = plt.subplots(1, len(snaps), figsize=(2.3 * len(snaps), 2.6))

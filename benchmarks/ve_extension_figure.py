@@ -69,15 +69,13 @@ def main():
             "tau0.25": r"$\mathrm{Wi}=0.125$", "tau0.5": r"$\mathrm{Wi}=0.25$"}
     for tag in ("elastic", "tau0.25", "tau0.5"):
         h = np.load(os.path.join(D, f"hist_{tag}.npz"))
-        ax.plot(h["t"], h["bxx"], "-", color=cols[tag], label=labs[tag])
+        ax.plot(h["t"], h["bxx"], "-", color=cols[tag], lw=1.8, label=labs[tag])
         ba = float(h["bxx_analytic"])
-        if np.isfinite(ba):
-            ax.axhline(ba, ls=":", color=cols[tag], lw=1.0)
+        if np.isfinite(ba):     # analytic plateau 1/(1-2Wi) the viscoelastic curve saturates to
+            ax.axhline(ba, ls=":", color=cols[tag], lw=1.8)
+            ax.plot(h["t"][-1], ba, "o", color=cols[tag], ms=5)
     ax.set_xlabel("time $t$"); ax.set_ylabel(r"$b_e^{xx}$ at blob centre")
-    ax.set_title(r"elastic diverges; viscoelastic $\to 1/(1-2\mathrm{Wi})$", fontsize=10)
-    ax.legend(loc="center right")
-    ax.text(0.5, 0.9, r"dotted: analytic $1/(1-2\mathrm{Wi})$",
-            transform=ax.transAxes, ha="center", fontsize=8.5, color="0.4")
+    ax.legend(loc="upper left", fontsize=9, frameon=False)
 
     data = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
     os.makedirs(data, exist_ok=True)

@@ -78,7 +78,7 @@ def main(recompute=True):
     ax[0].loglog(hse, eSE, "D-", color="darkgreen", lw=1.6, ms=6, label="strain energy")
     ax[0].loglog(hke, eKE[0] * (hke / hke[0]) ** 2, "--", color="0.5", lw=1.0, label="$O(\\Delta x^2)$")
     ax[0].set_xlabel("$\\Delta x = 1/N$"); ax[0].set_ylabel(f"energy error (vs.\\ $N{{=}}{ref}$)")
-    ax[0].set_title("(a) integrated energies"); ax[0].legend(fontsize=10)
+    ax[0].set_title("(a) integrated energies"); ax[0].legend(fontsize=12)
     # (b) fields: full-domain vs bulk (outside a fixed interfacial band |phi|>delta).
     # Pressure's low order is interfacial: the bulk pressure recovers toward 2nd order. Velocity
     # is global: the bulk barely differs from the full domain.
@@ -90,7 +90,7 @@ def main(recompute=True):
     ax[1].loglog(h, np.array(full_v)[0] * (h / h[0]) ** 1, ":", color="0.5", lw=1.0, label="$O(\\Delta x)$")
     ax[1].set_xlabel("$\\Delta x = 1/N$"); ax[1].set_ylabel(f"$L_2$ field error (vs.\\ $N{{=}}{ref}$)")
     ax[1].set_title(rf"(b) fields: full vs.\ bulk ($|\phi|>{delta}$)")
-    ax[1].legend(fontsize=8.5, ncol=1, loc="lower left")
+    ax[1].legend(fontsize=11, ncol=1, loc="lower right")
     fig.tight_layout()
     out = os.path.join(ROOT, "paper", "figures", "disc_tg_convergence.png")
     fig.savefig(out, dpi=200, bbox_inches="tight"); print("saved", out)

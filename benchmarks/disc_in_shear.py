@@ -191,11 +191,11 @@ def main():
     ax[1].set_xlabel(r"$\mathrm{Wi}=\dot\gamma\,\tau$")
     ax[1].set_ylabel(r"steady $D$ at $\mathrm{Ca}=0.2$")
     ax[1].set_title("(b) viscoelastic (SLS) disc")
-    ax[1].text(max(Wis) * 0.98, D_hi, r"elastic $D(\mathrm{Ca}{=}0.2)$ ($\mathrm{Wi}\!\to\!0$)",
-               ha="right", va="bottom", fontsize=8.5, color="0.35")
-    ax[1].text(max(Wis) * 0.98, D_lo, r"elastic $D(\mathrm{Ca}{=}0.1)$, modulus $\mu_s{+}G$ ($\mathrm{Wi}\!\to\!\infty$)",
-               ha="right", va="bottom", fontsize=8.5, color="0.35")
-    ax[1].set_ylim(0.0, D_hi * 1.25)
+    ax[1].text(max(Wis) * 0.97, D_hi, r"$\mathrm{Wi}\!\to\!0$: elastic $D(\mathrm{Ca}{=}0.2)$",
+               ha="right", va="bottom", fontsize=9, color="0.35")
+    ax[1].text(max(Wis) * 0.97, D_lo, r"$\mathrm{Wi}\!\to\!\infty$: elastic $D(\mathrm{Ca}{=}0.1)$",
+               ha="right", va="top", fontsize=9, color="0.35")
+    ax[1].set_ylim(0.0, D_hi * 1.3)
 
     fig.tight_layout()
     data = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
