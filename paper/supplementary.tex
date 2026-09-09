@@ -62,9 +62,9 @@ divergence stays at machine zero ($\le3\times10^{-14}$) throughout.
 \begin{figure}[t]\centering
 \includegraphics[width=0.47\linewidth]{figures/ghia_uy.png}\hfill
 \includegraphics[width=0.47\linewidth]{figures/ghia_vx.png}
-\caption{Lid-driven cavity vs.\ Ghia \emph{et al.}\ \cite{Ghia1982} at $\mathrm{Re}=100$ (blue)
-and $1000$ (red), $N{=}128$: (left) $u$ on the vertical centreline $x=0.5$; (right) $v$ on the
-horizontal centreline $y=0.5$. Lines are the MAC solver; circles the reference.}
+\caption{Lid-driven cavity vs.\ Ghia \emph{et al.}\ \cite{Ghia1982} ($\mathrm{Re}=100$ blue, $1000$
+red, $N{=}128$): centreline $u(y)$ at $x=0.5$ (left) and $v(x)$ at $y=0.5$ (right). Lines, MAC
+solver; circles, reference.}
 \label{fig:ghia}
 \end{figure}
 
@@ -78,9 +78,8 @@ the Ghia \emph{et al.}\ benchmark.
 
 \begin{figure}[t]\centering
 \includegraphics[width=0.9\linewidth]{figures/lid_developed.png}
-\caption{Developed lid-driven cavity ($N{=}128$, steady): pressure field (colour) with velocity
-streamlines (black), at $\mathrm{Re}=100$ (left) and $1000$ (right). The corner vortices
-intensify and the boundary layers thin with Reynolds number.}
+\caption{Developed lid-driven cavity ($N{=}128$, steady): pressure (colour) with streamlines
+(black), $\mathrm{Re}=100$ (left) and $1000$ (right).}
 \label{fig:lid-developed}
 \end{figure}
 
@@ -110,10 +109,9 @@ direct conformation methods, and the reason $\psib$ is transported in the main s
 
 \begin{figure}[t]\centering
 \includegraphics[width=0.72\linewidth]{figures/logconf_vs_direct.png}
-\caption{Minimum eigenvalue of $\be$ over a solid disc strained by a frozen four-cell Taylor--Green
-flow (symlog axis). Direct transport of the $\be$ components (red) becomes indefinite at
-$t\approx0.24$ and diverges; transporting $\psib=\log\be$ (blue) keeps $\be$ positive-definite by
-construction. Both use identical advection and relaxation.}
+\caption{Minimum eigenvalue of $\be$ for a disc strained by a frozen four-cell Taylor--Green flow
+(symlog). Direct $\be$ transport (red) becomes indefinite at $t\approx0.24$ and diverges;
+transporting $\psib=\log\be$ (blue) stays positive-definite. Identical advection and relaxation.}
 \label{fig:logconf}
 \end{figure}
 
@@ -161,11 +159,10 @@ matrix-logarithm transport preserves the symmetric-positive-definiteness of $\be
 
 \begin{figure}[t]\centering
 \includegraphics[width=\linewidth]{figures/drift_diagnostics.png}
-\caption{Interface integrity and conservation for a standard-linear-solid disc deforming in a
-Taylor--Green vortex, at $N{=}64$ (blue) and $128$ (green): (a) solid-area change---sub-percent and
-roughly halving with refinement, no secular drift; (b) interface-band distortion, the median
-$\big||\grad\phi|-1\big|$ over $|\phi|<2\dx$, holding to a few percent; (c) $\det\be$ (solid) bounded
-near unity and interior $\min J$ (dashed) bounded above $0.9$---no folding, SPD preserved.}
+\caption{Interface integrity for an SLS disc in a Taylor--Green vortex, $N{=}64$ (blue) and $128$
+(green): (a) solid-area change (sub-percent, halving with refinement); (b) band distortion,
+median $\big||\grad\phi|-1\big|$ over $|\phi|<2\dx$; (c) $\det\be$ (solid) and interior $\min J$
+(dashed).}
 \label{fig:drift}
 \end{figure}
 
