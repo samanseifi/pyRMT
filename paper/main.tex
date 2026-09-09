@@ -826,7 +826,9 @@ model tracks the reference methods, recovering the elastic benchmark.}
 \begin{figure}[t]\centering
 \includegraphics[width=\linewidth]{figures/disc_tg_convergence.png}
 \caption{Disc in a Taylor--Green vortex, spatial convergence (vs.\ a resolved $N{=}512$
-reference). (a) Integrated kinetic and strain energy converge at $O(\Delta x^2)$. (b) Pointwise
+reference). (a) Integrated kinetic and strain energy converge at $O(\Delta x^2)$; each is plotted
+only up to the grid where it reaches the reference's own floor (the smooth energies super-converge,
+strain energy fastest), which is why the two curves stop at different $N$. (b) Pointwise
 fields: over the full domain both velocity and pressure are near first order (open symbols,
 dashed), but the \emph{bulk} error outside a fixed interfacial band $|\phi|>0.06$ (filled symbols,
 solid) shows the pressure recovering toward $O(\Delta x^2)$---its low order is the smeared
@@ -928,7 +930,9 @@ shows the scheme is \emph{first order} in $\dt$, and that the order is set by th
 splitting rather than the elastic-wave sub-integrator: the elastic force is lagged $O(\dt)$, so a
 higher-order wave integrator such as generalized-$\alpha$ cannot raise the coupled order and is
 retained only as an optional stiff-problem stabilizer. Raising the order would require an implicit
-or predictor--corrector force, which we leave to future work.
+or predictor--corrector force, which we leave to future work. The explicit baseline it is measured
+against is \emph{itself} first order, so the speedup above is a matched-accuracy step-size lift---the
+same solution reached in fewer, larger steps---not an improvement in convergence order.
 
 \subsection{Stiff-solid regime}
 \label{sec:stiff}
@@ -947,7 +951,7 @@ substep, accurate to machine precision at \emph{any} $\dt$, \cref{sec:verificati
 
 \subsection{Constitutive verification}
 \label{sec:ve-fsi}
-The log-conformation update ($\psib=\log\be$, $\sig_{\!s}=G\be$) is verified against the
+The log-conformation update ($\psib=\log\be$, $\sig_{\!s}=G\dev\be$) is verified against the
 closed-form limits of the upper-convected Maxwell model across transient, steady, oscillatory,
 high-Weissenberg and elastic regimes---step-strain relaxation, startup and steady shear (with the
 first normal-stress difference $N_1$), small-amplitude oscillatory shear over three decades of
@@ -970,12 +974,14 @@ extrapolation over $3$ layers, and cubic semi-Lagrangian transport of $(\xiv,\ps
 
 \begin{table}[t]\centering\small
 \caption{Simulation parameters for the FSI cases ($\nu=\mu_f/\rho$; $c_s=\sqrt{\mu_s/\rho}$;
-$\rho=1$; unit domain). Stream function $\psi=\psi_0\sin(k x)\sin(k y)$ with $k=k_w\pi$
+$\rho=1$; unit domain unless noted). Stream function $\psi=\psi_0\sin(k x)\sin(k y)$ with $k=k_w\pi$
 ($k_w{=}2$ four-cell for the Jain case, $k_w{=}1$ single vortex otherwise); $U_0=\psi_0$ is the
 stream-function amplitude, so the peak velocity is $U_0 k$ and the advective term
 $\tfrac{0.25\dx}{U_0 k}$ is $0.25\dx$ over that velocity. Grid: disc-in-TG energy $N{=}128$, convergence
-$N\in\{32,64,128,256,512\}$; disc-in-lid $N{=}128$ (and $N{=}48,64$ for the speedup/metric study);
-four-roll $N{=}128$; shear $N{=}96$. The $\dt$ rule listed is the explicit stability bound, which
+$N\in\{32,48,64,96,128,192,256\}$ against an $N{=}512$ reference; disc-in-lid $N{=}128$ (and
+$N{=}48,64$ for the speedup/metric study); four-roll $N{=}128$; shear $N{=}96$.
+$^{\dagger}$The shear case uses a $2\times1$ cell (all others a unit square). The $\dt$ rule
+listed is the explicit stability bound, which
 governs the explicit baseline; the IMEX runs instead set $\dt$ by accuracy---the advective term
 alone for the coupled cases, and $4$--$8\times$ the explicit elastic-wave limit in the stiff-solid
 and speedup studies.}
@@ -992,7 +998,7 @@ disc-in-lid (\S\ref{sec:disc-lid}) & $0.20$ & $(0.6,0.5)$ & $0.01$ & $0.1$ & ---
 $U_{\rm lid}{=}1$ & $\min(\tfrac{0.3\dx}{U},\tfrac{0.2\dx^2}{\nu},\tfrac{0.3\dx}{c_s})$ \\
 four-roll (\S\ref{sec:ve-extension}) & $0.13$ & $(0.5,0.5)$ & $0.05$ & --- & $0.3$ &
 $\infty,\tfrac12,\tfrac14$ & $\dot\varepsilon{=}0.5$ & $\min(\tfrac{0.3\dx}{U},\tfrac{0.3\dx}{c_s})$ \\
-shear (\S\ref{sec:shear}) & $0.20$ & $(0.5,0.5)$ & $0.02$ & --- & $0.1$ & $\infty\!\to\!0$ &
+shear$^{\dagger}$ (\S\ref{sec:shear}) & $0.15$ & $(1.0,0.5)$ & $0.02$ & $0.1$ & $0.1$ & $\infty\!\to\!0$ &
 $\dot\gamma$ ($\mathrm{Ca}{=}\tfrac{\mu_f\dot\gamma}{G}$) & $\min(\tfrac{0.3\dx}{U},\tfrac{0.3\dx}{c_s})$ \\
 SLS disc-in-TG (\S\ref{sec:ve-coupled}) & $0.15$ & $(0.5,0.7)$ & $0.01$ & $1.0$ &
 $1.0$ & $\infty,1,\tfrac14$ & $\psi_0{=}0.3$ & $\min(\tfrac{0.25\dx}{U_0 k},\tfrac{0.2\dx^2}{\nu},\tfrac{0.25\dx}{c_s})$ \\
@@ -1086,7 +1092,9 @@ steady Taylor deformation $D=(a-b)/(a+b)$ and orientation $\theta$ from the seco
 tensor of the solid, as functions of the elastic capillary number
 $\mathrm{Ca}=\mu_f\dot\gamma/G$ (viscous stress over elastic modulus). This is the classic
 deformable-particle-in-shear test \cite{Sugiyama2011,Jain2019}, here for a finite-strain
-viscoelastic solid carried by the reference map and log-conformation.
+viscoelastic solid carried by the reference map and log-conformation---a standard-linear solid with
+equal equilibrium and relaxing moduli ($\mu_s=G=0.1$), so it carries an equilibrium branch and
+returns to its shape at rest.
 For the elastic disc (\cref{fig:shear}a) the small-Ca response follows the universal
 small-deformation limit---$D\!\to\!\mathrm{Ca}$ with the particle aligning toward
 $\theta\!\to\!45^\circ$ as $\mathrm{Ca}\!\to\!0$---and departs sublinearly at larger Ca as the
