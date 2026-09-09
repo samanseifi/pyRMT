@@ -1103,21 +1103,31 @@ ${\sim}22^\circ$ at $\mathrm{Ca}=0.4$), reproducing the deformation--orientation
 established for elastic and hyperelastic particles \cite{Sugiyama2011}.
 Turning on the relaxing branch (the standard-linear solid, \cref{fig:shear}b) lowers the steady deformation
 monotonically with the Weissenberg number $\mathrm{Wi}=\dot\gamma\tau$: under sustained
-shear the Maxwell branch accumulates a steady elastic stress $\sim G\tau\dot\gamma$ that
-stiffens the particle, and $\mathrm{Wi}\!\to\!0$ recovers the elastic curve. This is the
-viscoelastic-solid signature the title promises, absent from a purely elastic solver.
+shear the Maxwell branch stiffens the particle. This is the viscoelastic-solid signature the title
+promises, absent from a purely elastic solver.
 The elastic-branch deformation and orientation reproduce the trend reported by Gao \& Hu
-\cite{GaoHu2009} for a two-dimensional elastic particle in shear; for the SLS branch no
-published finite-strain viscoelastic-particle $D(\mathrm{Wi})$ curve exists---this is the new
-regime---so the monotone decrease is anchored by the steady Maxwell-stress estimate
-$\sim G\tau\dot\gamma$ above. The runs use a unit shear cell at $N=96$ (\cref{tab:params}).
+\cite{GaoHu2009} for a two-dimensional elastic particle in shear. No published finite-strain
+viscoelastic-particle $D(\mathrm{Wi})$ curve exists for the SLS branch, but it is not free of
+independent checks: the whole curve is \emph{bracketed by two validated elastic limits}. In its
+two extremes the SLS reduces to a neo-Hookean solid, and its steady $D$ must land on the elastic
+$D(\mathrm{Ca})$ curve of \cref{fig:shear}a at the corresponding effective modulus. At $\mathrm{Wi}\!\to\!0$
+the relaxing branch relaxes fully and only the equilibrium modulus acts ($\mathrm{Ca}{=}0.2$); at
+$\mathrm{Wi}\!\to\!\infty$ it never relaxes and the \emph{instantaneous} modulus $\mu_s{+}G$ acts
+(effective $\mathrm{Ca}{=}0.1$). The computed curve meets both anchors quantitatively---$D(\mathrm{Wi}{=}0)=0.195$
+equals the measured elastic $D(\mathrm{Ca}{=}0.2)$, and $D$ saturates by $\mathrm{Wi}\!\approx\!2$ at
+$0.097$, the measured elastic $D(\mathrm{Ca}{=}0.1)$ (dashed lines, \cref{fig:shear}b)---so the new
+$D(\mathrm{Wi})$ curve interpolates between two independently validated elastic states.
+The runs use a $2\times1$ shear cell at $N=96$ (\cref{tab:params}).
 
 \begin{figure}[t]\centering
 \includegraphics[width=\linewidth]{figures/disc_in_shear.png}
 \caption{Viscoelastic-solid disc in plane shear ($\mathrm{Ca}=\mu_f\dot\gamma/G$ is
 viscous/elastic---no surface tension; $D$ is the Taylor deformation parameter). (a) Elastic
 disc: $D$ (blue) and orientation $\theta$ (red) vs.\ Ca, with the limit $D=\mathrm{Ca}$
-(dashed). (b) SLS disc at $\mathrm{Ca}=0.2$: $D$ decreases with the Weissenberg number.}
+(dashed). (b) SLS disc at $\mathrm{Ca}=0.2$: $D$ decreases with the Weissenberg number, and the
+curve is bracketed by two validated elastic anchors (dashed grey)---$\mathrm{Wi}\!\to\!0$ meets the
+elastic $D(\mathrm{Ca}{=}0.2)$ (equilibrium modulus) and $\mathrm{Wi}\!\to\!\infty$ the elastic
+$D(\mathrm{Ca}{=}0.1)$ (instantaneous modulus $\mu_s{+}G$).}
 \label{fig:shear}
 \end{figure}
 

@@ -142,27 +142,35 @@ def main():
     from _plotstyle import apply as _style; _style()
     import matplotlib.pyplot as plt
 
-    TEND, SCH, NRES = 5.0, "semilagrangian", 128
-    # (a) elastic D vs Ca (grid-converged); orientation theta
+    TEND, SCH, NRES = 5.0, "semilagrangian", 96
     Cas = [0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4]
-    el = [run(N=NRES, Ca=c, model="elastic", t_end=TEND, scheme=SCH) for c in Cas]
-    D_el = [r["D"] for r in el]; th_el = [np.degrees(r["th"]) for r in el]
-    print("elastic D vs Ca:", [(c, f"{d:.3f}") for c, d in zip(Cas, D_el)])
-    # grid convergence at Ca=0.2
-    conv = {Nn: run(N=Nn, Ca=0.2, model="elastic", t_end=TEND, scheme=SCH)["D"] for Nn in (32, 48, 64)}
-    # orientation is ill-defined for a near-circular disc (D small -> Ixx~Iyy); mask it
-    th_mask = [d >= 0.08 for d in D_el]
-    print("grid conv (Ca=0.2):", {k: f"{v:.4f}" for k, v in conv.items()})
-    # (b) viscoelastic (SLS) at Ca=0.2: steady D vs Weissenberg number
-    Ca_v = 0.2; gdot = 2 * 0.5 / 1.0
-    Wis = [0.0, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0]
-    ve = []
-    for Wi in Wis:
-        tau = np.inf if Wi == 0 else Wi / gdot
-        # SLS with G=mu_s(Ca_v); Wi=0 is the elastic limit (tau->inf handled by model)
-        m = "elastic" if Wi == 0 else "sls"
-        ve.append(run(N=NRES, Ca=Ca_v, model=m, tau=(np.inf if Wi == 0 else tau), t_end=TEND, scheme=SCH)["D"])
-    print("SLS D vs Wi (Ca=0.2):", [(w, f"{d:.3f}") for w, d in zip(Wis, ve)])
+    npz = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "data", "disc_in_shear_data.npz")
+    if "--plot-only" in sys.argv:                      # re-plot from cache (no re-run)
+        d = np.load(npz); Cas = list(d["Cas"]); D_el = list(d["D_el"]); th_el = list(d["th_el"])
+        th_mask = list(d["th_mask"]); Wis = list(d["Wis"]); ve = list(d["ve"]); conv = {}
+    else:
+        # (a) elastic D vs Ca (grid-converged); orientation theta
+        el = [run(N=NRES, Ca=c, model="elastic", t_end=TEND, scheme=SCH) for c in Cas]
+        D_el = [r["D"] for r in el]; th_el = [np.degrees(r["th"]) for r in el]
+        print("elastic D vs Ca:", [(c, f"{d:.3f}") for c, d in zip(Cas, D_el)])
+        conv = {Nn: run(N=Nn, Ca=0.2, model="elastic", t_end=TEND, scheme=SCH)["D"] for Nn in (32, 48, 64)}
+        th_mask = [d >= 0.08 for d in D_el]
+        print("grid conv (Ca=0.2):", {k: f"{v:.4f}" for k, v in conv.items()})
+        # (b) viscoelastic (SLS) at Ca=0.2: steady D vs Weissenberg number
+        Ca_v = 0.2; gdot = 2 * 0.5 / 1.0
+        Wis = [0.0, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0]
+        ve = []
+        for Wi in Wis:
+            tau = np.inf if Wi == 0 else Wi / gdot
+            m = "elastic" if Wi == 0 else "sls"
+            ve.append(run(N=NRES, Ca=Ca_v, model=m, tau=(np.inf if Wi == 0 else tau), t_end=TEND, scheme=SCH)["D"])
+        print("SLS D vs Wi (Ca=0.2):", [(w, f"{d:.3f}") for w, d in zip(Wis, ve)])
+    # elastic self-consistency anchors for the SLS curve (referee M2): at fixed Ca=0.2 the SLS
+    # deformation is bracketed by two validated elastic points -- Wi->0 recovers the equilibrium
+    # modulus (Ca=0.2) and Wi->inf the instantaneous modulus mu_s+G=2*mu_s (effective Ca=0.1).
+    D_lo = D_el[Cas.index(0.1)]; D_hi = D_el[Cas.index(0.2)]
+    print(f"anchors: D_el(Ca=0.2)={D_hi:.4f} (Wi->0), D_el(Ca=0.1)={D_lo:.4f} (Wi->inf)")
 
     fig, ax = plt.subplots(1, 2, figsize=(10.6, 4.2))
     ax[0].plot(Cas, D_el, "o-", color="b", lw=1.4, label="RMT (elastic disc)")
@@ -176,12 +184,18 @@ def main():
     axr.set_ylabel(r"orientation $\theta$ (deg)", color="r"); axr.set_ylim(0, 50)
     axr.axhline(45, ls=":", color="r", lw=0.7)
 
-    ax[1].plot(Wis, ve, "^-", color="g", lw=1.4)
+    # two validated elastic anchors that bracket the SLS curve (referee M2)
+    ax[1].axhline(D_hi, ls="--", color="0.5", lw=1.0)
+    ax[1].axhline(D_lo, ls="--", color="0.5", lw=1.0)
+    ax[1].plot(Wis, ve, "^-", color="g", lw=1.6, ms=6, zorder=3)
     ax[1].set_xlabel(r"$\mathrm{Wi}=\dot\gamma\,\tau$")
     ax[1].set_ylabel(r"steady $D$ at $\mathrm{Ca}=0.2$")
     ax[1].set_title("(b) viscoelastic (SLS) disc")
-    ax[1].text(0.5, 0.06, r"$\mathrm{Wi}=0$: elastic limit", transform=ax[1].transAxes,
-               ha="center", fontsize=9)
+    ax[1].text(max(Wis) * 0.98, D_hi, r"elastic $D(\mathrm{Ca}{=}0.2)$ ($\mathrm{Wi}\!\to\!0$)",
+               ha="right", va="bottom", fontsize=8.5, color="0.35")
+    ax[1].text(max(Wis) * 0.98, D_lo, r"elastic $D(\mathrm{Ca}{=}0.1)$, modulus $\mu_s{+}G$ ($\mathrm{Wi}\!\to\!\infty$)",
+               ha="right", va="bottom", fontsize=8.5, color="0.35")
+    ax[1].set_ylim(0.0, D_hi * 1.25)
 
     fig.tight_layout()
     data = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
