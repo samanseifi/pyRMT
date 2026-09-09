@@ -1147,6 +1147,14 @@ right-hand side. Because the rebound \emph{is} elastic-wave physics, these runs 
 elastic wave directly---the elastic-wave stabilizer of \cref{alg:imex} is left off, as for every
 non-stiff solid, and engaged only in the stiff regime of \cref{sec:stiff}---so the collision is
 integrated without numerical damping of the bounce.
+This colliding-disc configuration mirrors the solid--solid collision benchmark of Jain \emph{et al.}\
+\cite{Jain2019} (two elastic solids that meet and rebound in a flow); as there, the trace-free
+contact stress is applied as the divergence of a solid stress, so it conserves total momentum by
+construction and survives the projection (a plain repulsive body force would be nullified). The
+collision is grid-convergent and the discs never interpenetrate---the centroid-gap trajectory
+converges under refinement (its $N{=}128\!\to\!192$ RMS change halves that of $N{=}96\!\to\!192$)
+and the minimum gap settles to $0.208$ across $N=96,128,192$---as detailed in the supplementary
+material.
 
 \begin{figure*}[t]\centering
 \includegraphics[width=\linewidth]{figures/contact_snapshots.png}

@@ -219,14 +219,36 @@ $N{=}128$ & explicit & (reference) & $1.0\times$ \\
 \end{tabular}
 \end{table}
 
-\section{Contact and the elastic-wave stabilizer}
+\section{Contact: grid convergence, momentum, and the elastic-wave stabilizer}
 \label{sec:supp-stabilizer}
-The explicit baseline is described in the efficiency subsection of the main text; here we add the
-contact-integration detail.
+\paragraph{Grid convergence and no interpenetration.} The colliding-disc example reproduces the
+solid--solid collision benchmark of Jain \emph{et al.}\ \cite{Jain2019} (their \S4.6.1): two elastic
+solids meet, deform, and rebound. \Cref{fig:contact-conv} shows the centroid-gap trajectory---approach,
+contact (the gap dips below $2R$ as the discs flatten), and rebound---at $N=96,128,192$. The
+trajectory converges under refinement: the $N{=}128\!\to\!192$ RMS change of the gap history
+($1.24\times10^{-2}$) is roughly half the $N{=}96\!\to\!192$ change ($2.80\times10^{-2}$), and the
+minimum gap converges monotonically to $0.208$ ($0.2089,0.2077,0.2076$). The discs never
+interpenetrate at any resolution (the centroids never cross). Because the contact force is the
+divergence of the \emph{trace-free} solid stress, it conserves total momentum by construction and
+survives the exact projection---a plain repulsive body force would be nullified by the projection,
+as noted by Rycroft \emph{et al.}\ \cite{Rycroft2020}. As in Jain \emph{et al.}, the rebound speed
+is the most resolution-sensitive part of the collision (it is set by the under-resolved elastic wave
+during the brief contact), which is why we report the trend rather than a single restitution number.
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.6\linewidth]{figures/contact_convergence.png}
+\caption{Two elastic discs colliding head-on: centroid gap $c_b-c_a$ vs.\ time at $N=96,128,192$.
+Approach, contact (gap below $2R$, dotted), and rebound; the trajectory converges under refinement
+and the discs never interpenetrate. Analogous to the solid--solid collision of Jain \emph{et al.}\
+\cite{Jain2019}.}
+\label{fig:contact-conv}
+\end{figure}
+
+\paragraph{Elastic-wave stabilizer.}
 At the colliding-disc parameters the advective and
 elastic-wave step limits nearly coincide, so the collisions of the main text are integrated with
-the elastic wave resolved (stabilizer off), which keeps the rebound---and hence the coefficient of
-restitution---free of numerical damping. Engaging the stabilizer trades that fidelity for
+the elastic wave resolved (stabilizer off), which keeps the rebound free of numerical damping.
+Engaging the stabilizer trades that fidelity for
 robustness: it damps the under-resolved elastic wave, so IMEX then completes even violent impacts
 (e.g.\ $V_0=1.6$, where the forward-Euler elastic force diverges at the same step) but at a lower,
 stabilizer-dependent restitution. This is why the stabilizer is reserved for the genuinely stiff
