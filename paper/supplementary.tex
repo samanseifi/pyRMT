@@ -94,27 +94,6 @@ remains symmetric positive-definite (the matrix-logarithm transport guarantees i
 relaxation substep reproduces step-strain at any $\dt$ while an explicit relaxation update errs by
 $0.29$ at $\dt/\tau=2$ and diverges by $\dt/\tau=5$.
 
-\paragraph{Why log-conformation: direct \texorpdfstring{$\be$}{be} transport fails.}
-The log-conformation representation is not a convenience but a necessity for the grid transport.
-\Cref{fig:logconf} makes this concrete: a disc seeded with $\be=\It$ is subjected to a frozen
-four-cell straining flow, and the strain is carried once by transporting the $\be$ components
-directly and once by transporting $\psib=\log\be$, using the \emph{same} bicubic semi-Lagrangian
-scheme and the \emph{same} local relaxation. Direct transport overshoots at the steep gradients
-that build up under the strain; the smaller eigenvalue of $\be$ crosses zero at $t\approx0.24$
-(the conformation becomes indefinite, the elastic stress unphysical) and the field then diverges,
-reaching ${\sim}-10^{16}$. The log-conformation transport keeps $\be=\exp\psib$
-symmetric-positive-definite for any $\psib$, so its minimum eigenvalue stays positive throughout
-and the computation is stable. This is the mechanism behind the high-Weissenberg breakdown of
-direct conformation methods, and the reason $\psib$ is transported in the main solver.
-
-\begin{figure}[t]\centering
-\includegraphics[width=0.72\linewidth]{figures/logconf_vs_direct.png}
-\caption{Minimum eigenvalue of $\be$ for a disc strained by a frozen four-cell Taylor--Green flow
-(symlog). Direct $\be$ transport (red) becomes indefinite at $t\approx0.24$ and diverges;
-transporting $\psib=\log\be$ (blue) stays positive-definite. Identical advection and relaxation.}
-\label{fig:logconf}
-\end{figure}
-
 \begin{table}[t]\centering\small
 \caption{Constitutive verification of the log-conformation update against analytic
 upper-convected-Maxwell limits ($G=\tau=1$).}
