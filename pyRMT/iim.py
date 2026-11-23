@@ -52,3 +52,45 @@ def project_with_jump(u_star, v_star, dx, dy, dt, rho, eig, phi, jump):
     u[:, 1:-1] -= (dt / rho) * gx
     v[1:-1, :] -= (dt / rho) * gy
     return u, v, q
+
+
+def laplacian_jump_correction(phi, gx, gy, dx, dy, gxx=None, gyy=None):
+    """Immersed-interface correction to the 5-point Laplacian of a field that is continuous
+    across phi = 0 but whose first derivatives jump there (stage 2: tangential traction).
+
+    phi, gx, gy are given at the field's own grid points (shape (Ny, Nx)); gx = [d/dx], gy =
+    [d/dy] are the derivative jumps OUTSIDE minus INSIDE (phi > 0 minus phi <= 0), interpolated to
+    each crossing. Along a grid line the correction needs the jump right minus left,
+    g = s (out - in) with s = +1 if the left/lower point is inside. For a crossing between points
+    k and k+1 at fraction theta from k:
+        Lap_k     += -g (1 - theta) h / h^2      (k sees a value from the other side)
+        Lap_{k+1} += -g theta h / h^2
+    so that (standard 5-point Laplacian) + correction is the one-sided Laplacian on each side,
+    with an O(h) local truncation error at the interface points instead of O(1/h).
+    Optional gxx, gyy: jumps (outside minus inside) of the second derivatives d2/dx2, d2/dy2. With
+    them the correction is exact for piecewise quadratics and the local error at the interface
+    points drops from O(1) to O(h):
+        Lap_k     += -g (1 - theta)/h - gxx (1 - theta)^2 / 2
+        Lap_{k+1} += -g theta/h       + gxx theta^2 / 2
+    Returns the additive correction C (Ny, Nx): Lap_true ~= Lap_5pt(u) + C."""
+    C = np.zeros_like(phi)
+    for ax, g, g2, h in ((1, gx, gxx, dx), (0, gy, gyy, dy)):
+        a = phi[:, :-1] if ax == 1 else phi[:-1, :]
+        b = phi[:, 1:] if ax == 1 else phi[1:, :]
+        ga = g[:, :-1] if ax == 1 else g[:-1, :]
+        gb = g[:, 1:] if ax == 1 else g[1:, :]
+        cr = (a <= 0) != (b <= 0)
+        th = np.where(cr, a / np.where(cr, a - b, 1.0), 0.0)
+        sgn = np.where(a <= 0, 1.0, -1.0)                       # right-minus-left orientation
+        gc = np.where(cr, sgn * ((1 - th) * ga + th * gb), 0.0)
+        lo = -gc * (1 - th) / h; hi = -gc * th / h
+        if g2 is not None:                                       # second-derivative jump
+            g2a = g2[:, :-1] if ax == 1 else g2[:-1, :]
+            g2b = g2[:, 1:] if ax == 1 else g2[1:, :]
+            g2c = np.where(cr, sgn * ((1 - th) * g2a + th * g2b), 0.0)
+            lo = lo - g2c * (1 - th) ** 2 / 2.0; hi = hi + g2c * th ** 2 / 2.0
+        if ax == 1:
+            C[:, :-1] += lo; C[:, 1:] += hi
+        else:
+            C[:-1, :] += lo; C[1:, :] += hi
+    return C
