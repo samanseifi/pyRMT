@@ -33,6 +33,10 @@ BAND_STRESS = False       # bug 2 fix: evaluate the reference-map stress across 
                           # well-defined band field (see material_band in viscoelastic_disc_tg).
 COMPACT_FORCE = True      # compact face divergence of the stress (bug 3)
 CONSISTENT_MASK = True    # cut and extrapolate psi with the same level set (bug 4)
+DETG_CLAMP = 3.0          # with COMPACT_FORCE: bound the local J = 1/det(grad xi) to [1/3, 3]. The compact
+                          # force no longer averages away isolated interface cells with a corrupt
+                          # extrapolated gradient (J spiked 1.6 -> 23 in one step at t~19.9, N=128);
+                          # the clamp is active in ~1% of steps and leaves the trajectory unchanged.
 
 def run(N=128, t_end=8.0, scheme="semilagrangian_cubic", w_cut_fac=0.0, detg_clamp=0.0,
         reinit=False, isochoric=False, out_root="outputs", imex=False, dt=None, write=True,
@@ -119,7 +123,9 @@ def run(N=128, t_end=8.0, scheme="semilagrangian_cubic", w_cut_fac=0.0, detg_cla
                 phi = reinitialize_phi_fmm(phi, dx, dy)
 
         sxx, sxy, syy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s, kappa, phi,
-                                               detg_clamp=detg_clamp, isochoric=isochoric,
+                                               detg_clamp=(detg_clamp if (detg_clamp > 0.0 or not COMPACT_FORCE)
+                                                           else DETG_CLAMP),
+                                               isochoric=isochoric,
                                                w_cut=(w_t if (BAND_STRESS and w_cut_fac == 0.0) else 0.0))
         if viscoelastic:
             # transport psi=log(b_e), stretch + relax, then use sigma = G dev(b_e).
