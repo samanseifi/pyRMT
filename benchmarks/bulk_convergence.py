@@ -1,10 +1,17 @@
 """Bulk-vs-band spatial convergence of the disc-in-Taylor-Green fields (tau->inf elastic limit).
-The one-fluid fields are only first order at the diffuse interface (the blended stress smears the
-traction jump over a ~2dx band). Here we separate the error INSIDE each grid's own blend band
-(|phi| < 2 dx_N, where the stress is blended) from the BULK (|phi| > 2 dx_N, where the stress is
-the pure fluid/solid stress). The bulk should recover second order; the full-domain error is
-first order, capped by the band. Reference = resolved N=512. Caches fields to
-outputs/overlay/bulk_conv.npz and writes paper/figures/disc_tg_convergence.png.
+
+Orders are measured REFERENCE-FREE, from successive-grid (Cauchy) differences ||f_N - f_2N|| over
+the doubling pairs (32,64) (48,96) (64,128) (96,192) (128,256) (256,512). An error measured against
+the N=512 run is biased upward on the fine grids (the reference is then only 2-4x finer than the
+grid being tested: a first-order quantity shows an apparent order ~1.8 on the 192->256 pair), so
+it is not used for the quoted orders. All fields are sampled on the N=512 cell centres.
+
+"Bulk" = cells farther than DELTA from the N=512 interface, by true distance (Euclidean distance
+transform of the solid indicator). The level set itself cannot be used for this: phi = phi0(xi) is
+only defined inside the 3-layer extrapolation band and is a constant outside it.
+
+Caches fields to outputs/overlay/bulk_conv.npz (compute() + add_convergence_points.py) and writes
+paper/figures/disc_tg_convergence.png. Re-plot with `--plot-only`.
 """
 import os, sys
 import numpy as np
@@ -39,57 +46,76 @@ def compute():
     return save
 
 
+DELTA = 0.06                                    # bulk = farther than this from the interface
+PAIRS = [(32, 64), (48, 96), (64, 128), (96, 192), (128, 256), (256, 512)]
+
+
+def analyse(d):
+    """Successive-grid differences and their observed orders (reference-free)."""
+    from scipy import ndimage as ndi
+    ref = int(d["ref"])
+    f = {int(N): (d[f"sp_{N}"], d[f"pr_{N}"]) for N in d["coarse"]}
+    f[ref] = (d["spref"], d["prref"])
+    solid = d["phiref"] <= 0.0
+    dist = np.where(solid, ndi.distance_transform_edt(solid), ndi.distance_transform_edt(~solid)) / ref
+    mbulk = dist > DELTA
+    KE = {int(N): float(v) for N, v in zip(d["NS"], d["KE"])}
+    SE = {int(N): float(v) for N, v in zip(d["NS"], d["SE"])}
+    rms = lambda a: float(np.sqrt((a ** 2).mean()))
+    out = dict(h=[], full_v=[], bulk_v=[], full_p=[], bulk_p=[], dKE=[], dSE=[], bulk_frac=float(mbulk.mean()))
+    for a, b in PAIRS:
+        if a not in f or b not in f:
+            continue
+        dv = f[a][0] - f[b][0]; dp = f[a][1] - f[b][1]
+        out["h"].append(1.0 / a)
+        out["full_v"].append(rms(dv)); out["bulk_v"].append(rms(dv[mbulk]))
+        out["full_p"].append(rms(dp)); out["bulk_p"].append(rms(dp[mbulk]))
+        out["dKE"].append(KE[a] - KE[b]); out["dSE"].append(SE[a] - SE[b])
+    for k in ("h", "full_v", "bulk_v", "full_p", "bulk_p", "dKE", "dSE"):
+        out[k] = np.array(out[k])
+    return out
+
+
+def _orders(h, e):
+    """Observed order between difference points whose grids are a factor 2 apart."""
+    res = []
+    for i, hi in enumerate(h):
+        for k, hk in enumerate(h):
+            if abs(hi / hk - 2.0) < 1e-12:
+                res.append((round(1 / hi), round(1 / hk), float(np.log2(abs(e[i]) / abs(e[k])))))
+    return res
+
+
 def main(recompute=True):
     import matplotlib; matplotlib.use("Agg")
     sys.path.insert(0, os.path.join(ROOT, "benchmarks")); from _plotstyle import apply as _s; _s()
     import matplotlib.pyplot as plt
     d = compute() if (recompute or not os.path.isfile(NPZ)) else dict(np.load(NPZ))
-    coarse = list(d["coarse"]); ref = int(d["ref"])
-    spref, prref, phiref = d["spref"], d["prref"], d["phiref"]
-    h = np.array([1.0 / N for N in coarse])
-    delta = 0.06                                # fixed interfacial exclusion band (same for all N)
-    mbulk = np.abs(phiref) > delta
-    full_v, full_p, bulk_v, bulk_p = [], [], [], []
-    for N in coarse:
-        sp, pr = d[f"sp_{N}"], d[f"pr_{N}"]
-        dv2 = (sp - spref) ** 2; dp2 = (pr - prref) ** 2
-        full_v.append(np.sqrt(dv2.mean())); full_p.append(np.sqrt(dp2.mean()))
-        bulk_v.append(np.sqrt(dv2[mbulk].mean())); bulk_p.append(np.sqrt(dp2[mbulk].mean()))
-    # energies: error vs the N=512 reference. The integrated energies super-converge and reach the
-    # reference's own ~1e-6 (KE) / ~1e-7 (SE) floor by N~128-192, so we plot each up to the last
-    # grid above its floor (monotone regime); both track O(dx^2).
-    KE = dict(zip(d["NS"], d["KE"])); SE = dict(zip(d["NS"], d["SE"]))
-    keN = [N for N in coarse if N <= 192]; seN = [N for N in coarse if N <= 128]
-    hke = np.array([1.0 / N for N in keN]); hse = np.array([1.0 / N for N in seN])
-    eKE = np.array([abs(KE[N] - KE[ref]) for N in keN])
-    eSE = np.array([abs(SE[N] - SE[ref]) for N in seN])
-    def _ord(Ns, e):
-        Ns = np.array(Ns, float); e = np.array(e)
-        return [f"{x:.2f}" for x in np.log(e[:-1] / e[1:]) / np.log(Ns[1:] / Ns[:-1])]
-    for nm, e in (("full velocity", full_v), ("bulk velocity", bulk_v),
-                  ("full pressure", full_p), ("bulk pressure", bulk_p)):
-        print(f"  {nm:14s} order {_ord(coarse, e)}", flush=True)
-    print(f"  kinetic E      order {_ord(keN, eKE)}", flush=True)
-    print(f"  strain E       order {_ord(seN, eSE)}", flush=True)
+    r = analyse(d); h = r["h"]
+    print(f"  bulk (> {DELTA} from the interface) = {100 * r['bulk_frac']:.1f}% of the domain")
+    for nm, key in (("full velocity", "full_v"), ("bulk velocity", "bulk_v"), ("full pressure", "full_p"),
+                    ("bulk pressure", "bulk_p"), ("kinetic E", "dKE"), ("strain E", "dSE")):
+        o = _orders(h, r[key])
+        print(f"  {nm:14s} " + "  ".join(f"{a}/{b}:{p:5.2f}" for a, b, p in o)
+              + f"   mean {np.mean([p for *_, p in o]):.2f}", flush=True)
+    print("  signed dKE", r["dKE"]); print("  signed dSE", r["dSE"])
 
     fig, ax = plt.subplots(1, 2, figsize=(11.0, 4.5))
-    # (a) integrated energies vs the reference -- second order
-    ax[0].loglog(hke, eKE, "s-", color="black", lw=1.6, ms=6, label="kinetic energy")
-    ax[0].loglog(hse, eSE, "D-", color="darkgreen", lw=1.6, ms=6, label="strain energy")
-    ax[0].loglog(hke, eKE[0] * (hke / hke[0]) ** 2, "--", color="0.5", lw=1.0, label="$O(\\Delta x^2)$")
-    ax[0].set_xlabel("$\\Delta x = 1/N$"); ax[0].set_ylabel(f"energy error (vs.\\ $N{{=}}{ref}$)")
+    # (a) integrated energies: successive-grid differences, every pair shown
+    ax[0].loglog(h, np.abs(r["dKE"]), "s-", color="black", lw=1.6, ms=6, label="kinetic energy")
+    ax[0].loglog(h, np.abs(r["dSE"]), "D-", color="darkgreen", lw=1.6, ms=6, label="strain energy")
+    ax[0].loglog(h, abs(r["dKE"][0]) * (h / h[0]) ** 2, "--", color="0.5", lw=1.0, label="$O(\\Delta x^2)$")
+    ax[0].set_xlabel("$\\Delta x = 1/N$"); ax[0].set_ylabel("$|E_N - E_{2N}|$")
     ax[0].set_title("(a) integrated energies"); ax[0].legend(fontsize=12)
-    # (b) fields: full-domain vs bulk (outside a fixed interfacial band |phi|>delta).
-    # Pressure's low order is interfacial: the bulk pressure recovers toward 2nd order. Velocity
-    # is global: the bulk barely differs from the full domain.
-    ax[1].loglog(h, full_v, "o--", color="blue", lw=1.4, ms=6, alpha=0.6, label="velocity, full")
-    ax[1].loglog(h, bulk_v, "o-", color="blue", lw=1.9, ms=6, label="velocity, bulk")
-    ax[1].loglog(h, full_p, "^--", color="red", lw=1.4, ms=6, alpha=0.6, label="pressure, full")
-    ax[1].loglog(h, bulk_p, "^-", color="red", lw=1.9, ms=6, label="pressure, bulk")
-    ax[1].loglog(h, np.array(bulk_p)[0] * (h / h[0]) ** 2, "--", color="0.5", lw=1.0, label="$O(\\Delta x^2)$")
-    ax[1].loglog(h, np.array(full_v)[0] * (h / h[0]) ** 1, ":", color="0.5", lw=1.0, label="$O(\\Delta x)$")
-    ax[1].set_xlabel("$\\Delta x = 1/N$"); ax[1].set_ylabel(f"$L_2$ field error (vs.\\ $N{{=}}{ref}$)")
-    ax[1].set_title(rf"(b) fields: full vs.\ bulk ($|\phi|>{delta}$)")
+    # (b) fields: full domain vs bulk
+    ax[1].loglog(h, r["full_v"], "o--", color="blue", lw=1.4, ms=6, alpha=0.6, label="velocity, full")
+    ax[1].loglog(h, r["bulk_v"], "o-", color="blue", lw=1.9, ms=6, label="velocity, bulk")
+    ax[1].loglog(h, r["full_p"], "^--", color="red", lw=1.4, ms=6, alpha=0.6, label="pressure, full")
+    ax[1].loglog(h, r["bulk_p"], "^-", color="red", lw=1.9, ms=6, label="pressure, bulk")
+    ax[1].loglog(h, r["full_v"][0] * (h / h[0]) ** 1, ":", color="0.5", lw=1.0, label="$O(\\Delta x)$")
+    ax[1].loglog(h, r["full_p"][0] * (h / h[0]) ** 0.5, "-.", color="0.5", lw=1.0, label="$O(\\Delta x^{1/2})$")
+    ax[1].set_xlabel("$\\Delta x = 1/N$"); ax[1].set_ylabel("$\\|f_N - f_{2N}\\|_{L_2}$")
+    ax[1].set_title("(b) fields: full domain vs.\\ bulk")
     ax[1].legend(fontsize=11, ncol=1, loc="lower right")
     fig.tight_layout()
     out = os.path.join(ROOT, "paper", "figures", "disc_tg_convergence.png")

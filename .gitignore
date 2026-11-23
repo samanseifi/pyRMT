@@ -48,3 +48,11 @@ docs/*.aux
 docs/*.log
 docs/*.out
 docs/*.toc
+
+# Generated figure copies (the paper uses paper/figures/) and local reference PDFs
+data/*.png
+refs/*.pdf
+# LaTeX build products
+paper/*.pdf
+*:Zone.Identifier
+texput.log

@@ -77,24 +77,33 @@ def main():
 
 
 def replot_split():
-    """Re-render the supplementary stabilizer-faithfulness figure from the cached
-    trajectories (no re-run): figures/lid_staboff.png (stabilizer off vs on). The
-    tau->inf vs neo-Hookean comparison is drawn on the main-text benchmark figure
-    (fig:disc-centroid) directly from the same npz by overlay_integrators."""
+    """Supplementary stabilizer-faithfulness figure: figures/lid_staboff.png.
+
+    "on"  = imex-elastic-sl, i.e. the trapezoidal elastic-wave stabilizer with cs2 = mu_s/rho
+            (outputs/overlay/lid_stab_on.npz).
+    "off" = imex-sl at the same step with cs2 = 0 (the `neo` array of lid_stab_tauinf.npz).
+
+    NOTE: main() above labels its imex-sl run "stabilizer on", but "imex-sl" passes cs2 = 0, so
+    the `neo` and `off` arrays it stores are the same run (bit-identical). The comparison below
+    uses a run with the stabilizer actually engaged instead."""
     import matplotlib; matplotlib.use("Agg")
     sys.path.insert(0, os.path.join(ROOT, "benchmarks"))
     from _plotstyle import apply as _style; _style()
     import matplotlib.pyplot as plt
-    d = np.load(os.path.join(ROOT, "outputs", "overlay", "lid_stab_tauinf.npz"))
-    neo, off = d["neo"], d["off"]
+    off = np.load(os.path.join(ROOT, "outputs", "overlay", "lid_stab_tauinf.npz"))["neo"]
+    on = np.load(os.path.join(ROOT, "outputs", "overlay", "lid_stab_on.npz"))["on"]
+    n = min(len(on), len(off))
+    sep = np.hypot(on[:n, 1] - off[:n, 1], on[:n, 2] - off[:n, 2])
+    print("stabilizer on vs off: time-matched centroid separation mean %.2e max %.2e; "
+          "min J on %.3f off %.3f" % (sep.mean(), sep.max(), on[:, 3].min(), off[:, 3].min()))
 
     fig, ax = plt.subplots(figsize=(5.4, 5.0))
-    ax.plot(neo[:, 1], neo[:, 2], "-", color="black", lw=2.4, label="stabilizer on (imex-sl)")
-    ax.plot(off[:, 1], off[:, 2], "--", color="tab:blue", lw=1.8, label="stabilizer off (resolved)")
+    ax.plot(on[:, 1], on[:, 2], "-", color="black", lw=2.4, label="stabilizer on")
+    ax.plot(off[:, 1], off[:, 2], "--", color="tab:blue", lw=1.8, label="stabilizer off")
     ax.set_xlabel("centroid $x$"); ax.set_ylabel("centroid $y$")
     ax.set_aspect("equal"); ax.legend(loc="lower left"); fig.tight_layout()
     fig.savefig(os.path.join(ROOT, "paper", "figures", "lid_staboff.png"), dpi=200)
-    print("saved lid_staboff.png  (max sep %.1e)" % maxsep(neo, off))
+    print("saved lid_staboff.png")
 
 
 if __name__ == "__main__":
