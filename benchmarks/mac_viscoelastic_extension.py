@@ -26,12 +26,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pyRMT.mac import (mac_grid, momentum_predictor_periodic,
                        momentum_predictor_periodic_imex,
                        momentum_predictor_periodic_imex_elastic, lap_eigs_periodic,
-                       project_per, poisson_eigs_periodic, divergence_per,
+                       project_per, poisson_eigs_periodic, divergence_per, cell_velocity_gradient,
                        resolve_integrator)
 from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
     rebuild_phi_from_reference_map, smoothed_heaviside, grad_central_x_2nd, grad_central_y_2nd)
 from pyRMT.viscoelastic import logconf_local_step, logconf_local_step_strang, sym_exp
 
+
+
+# Bug 1 fix: build the strain-update velocity gradient so that tr(L) is the MAC divergence.
+TRACE_FREE_L = True
 
 def _lam_max(b11, b12, b22):
     tr = 0.5 * (b11 + b22)
@@ -116,8 +120,11 @@ def run(N=128, t_end=12.0, tau=0.5, eps_rate=0.5, G=0.3, mu_f=0.05, rho=1.0,
         p22 = advect_reference_map(p22, u_c, v_c, Xg, Yg, dt, dx, dy, phi, 'semilagrangian_cubic', 0.0) * m
         p11, p12 = extrapolate_reference_map(p11, p12, phi, dx, dy, 3)
         p22, _ = extrapolate_reference_map(p22, np.zeros((N, N)), phi, dx, dy, 3)
-        L11 = grad_central_x_2nd(u_c, dx); L12 = grad_central_y_2nd(u_c, dy)
-        L21 = grad_central_x_2nd(v_c, dx); L22 = grad_central_y_2nd(v_c, dy)
+        if TRACE_FREE_L:     # tr(L) = MAC divergence = 0 (bug 1 fix)
+            L11, L12, L21, L22 = cell_velocity_gradient(u, v, dx, dy, periodic=True)
+        else:                # former construction: trace not zero, det(b_e) drifts
+            L11 = grad_central_x_2nd(u_c, dx); L12 = grad_central_y_2nd(u_c, dy)
+            L21 = grad_central_x_2nd(v_c, dx); L22 = grad_central_y_2nd(v_c, dy)
         local_step = logconf_local_step_strang if imex else logconf_local_step
         p11, p12, p22 = local_step(p11, p12, p22, L11, L12, L21, L22, tau, dt)
         be11, be12, be22 = sym_exp(p11, p12, p22)

@@ -84,6 +84,60 @@ def divergence(u, v, dx, dy):
     return (u[:, 1:] - u[:, :-1]) / dx + (v[1:, :] - v[:-1, :]) / dy
 
 
+def cell_velocity_gradient(u, v, dx, dy, periodic=False):
+    """Velocity gradient L = grad(u) at the cell centres, for the log-conformation stretch.
+
+    The diagonal entries are the compact MAC differences (u[i+1/2]-u[i-1/2])/dx and
+    (v[j+1/2]-v[j-1/2])/dy, so tr(L) equals the discrete MAC divergence exactly -- zero to
+    round-off after the projection. This matters because d(ln det b_e)/dt = 2 tr(L): the former
+    construction (central differences of cell-averaged velocities) has a trace that is a smoothed
+    combination of neighbouring divergences, O(1) where the velocity gradient jumps, and made
+    det(b_e) drift. The off-diagonal entries are central differences of the cell-averaged
+    velocities (unchanged).
+
+    walled  : u (Ny, Nx+1), v (Ny+1, Nx)   periodic : u, v (Ny, Nx), face i left/below cell i.
+    Returns L11 = du/dx, L12 = du/dy, L21 = dv/dx, L22 = dv/dy, each (Ny, Nx)."""
+    if periodic:
+        L11 = (np.roll(u, -1, 1) - u) / dx
+        L22 = (np.roll(v, -1, 0) - v) / dy
+        u_c = 0.5 * (u + np.roll(u, -1, 1)); v_c = 0.5 * (v + np.roll(v, -1, 0))
+        L12 = (np.roll(u_c, -1, 0) - np.roll(u_c, 1, 0)) / (2 * dy)
+        L21 = (np.roll(v_c, -1, 1) - np.roll(v_c, 1, 1)) / (2 * dx)
+        return L11, L12, L21, L22
+    from pyRMT.utils import grad_central_x_2nd, grad_central_y_2nd
+    L11 = (u[:, 1:] - u[:, :-1]) / dx
+    L22 = (v[1:, :] - v[:-1, :]) / dy
+    u_c = 0.5 * (u[:, :-1] + u[:, 1:]); v_c = 0.5 * (v[:-1, :] + v[1:, :])
+    return L11, grad_central_y_2nd(u_c, dy), grad_central_x_2nd(v_c, dx), L22
+
+
+def solid_force_faces(Sxx, Sxy, Syy, dx, dy, periodic=False):
+    """Divergence of a cell-centred stress, evaluated compactly on the MAC faces.
+
+      f_u at x-face (j, i-1/2) = (Sxx[j,i] - Sxx[j,i-1])/dx + (Sxy_n[j+1,i] - Sxy_n[j,i])/dy
+      f_v at y-face (j-1/2, i) = (Syy[j,i] - Syy[j-1,i])/dy + (Sxy_n[j,i+1] - Sxy_n[j,i])/dx
+
+    with Sxy_n the shear stress averaged to the cell corners. For an isotropic stress s*I this is
+    exactly the MAC pressure gradient of s, so the projection absorbs it to round-off; the former
+    construction (2dx central differences at the centres, averaged to the faces) is not, and left a
+    spurious solenoidal force. Second-order accurate for smooth stress.
+
+    walled  : returns fu (Ny, Nx+1), fv (Ny+1, Nx), zero on the boundary faces.
+    periodic: returns fu, fv (Ny, Nx), face i left of / face j below cell (j, i)."""
+    if periodic:
+        Sn = 0.25 * (Sxy + np.roll(Sxy, 1, 0) + np.roll(Sxy, 1, 1) + np.roll(np.roll(Sxy, 1, 0), 1, 1))
+        fu = (Sxx - np.roll(Sxx, 1, 1)) / dx + (np.roll(Sn, -1, 0) - Sn) / dy
+        fv = (Syy - np.roll(Syy, 1, 0)) / dy + (np.roll(Sn, -1, 1) - Sn) / dx
+        return fu, fv
+    Ny, Nx = Sxx.shape
+    P = np.pad(Sxy, 1, mode="edge")                        # zero-gradient at the walls
+    Sn = 0.25 * (P[:-1, :-1] + P[1:, :-1] + P[:-1, 1:] + P[1:, 1:])   # corners (Ny+1, Nx+1)
+    fu = np.zeros((Ny, Nx + 1)); fv = np.zeros((Ny + 1, Nx))
+    fu[:, 1:-1] = (Sxx[:, 1:] - Sxx[:, :-1]) / dx + (Sn[1:, 1:-1] - Sn[:-1, 1:-1]) / dy
+    fv[1:-1, :] = (Syy[1:, :] - Syy[:-1, :]) / dy + (Sn[1:-1, 1:] - Sn[1:-1, :-1]) / dx
+    return fu, fv
+
+
 def gradient_p_u(p, dx):
     """d p/dx at u-faces. p:(Ny,Nx) -> (Ny,Nx+1). Wall faces (i=0,Nx) are 0
     (no pressure correction of the zero wall-normal velocity)."""

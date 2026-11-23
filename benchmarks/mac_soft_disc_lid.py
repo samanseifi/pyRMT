@@ -14,12 +14,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pyRMT.mac import (mac_grid, momentum_predictor, momentum_predictor_lid_imex,
                        momentum_predictor_lid_semilag, project, poisson_eigs_neumann,
-                       divergence, advect_xi_conservative, resolve_integrator)
+                       divergence, advect_xi_conservative, resolve_integrator,
+                       cell_velocity_gradient)
 from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
     rebuild_phi_from_reference_map, solid_cauchy_stress, smoothed_heaviside,
     grad_central_x_2nd, grad_central_y_2nd, reinitialize_phi_fmm)
 from pyRMT.viscoelastic import logconf_local_step_strang, sym_exp
 
+
+
+# Bug 1 fix: build the strain-update velocity gradient so that tr(L) is the MAC divergence.
+TRACE_FREE_L = True
 
 def run(N=128, t_end=8.0, scheme="semilagrangian_cubic", w_cut_fac=0.0, detg_clamp=0.0,
         reinit=False, isochoric=False, out_root="outputs", imex=False, dt=None, write=True,
@@ -115,8 +120,11 @@ def run(N=128, t_end=8.0, scheme="semilagrangian_cubic", w_cut_fac=0.0, detg_cla
             p22 = advect_reference_map(p22, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
             p11, p12 = extrapolate_reference_map(p11, p12, phi, dx, dy, nl)
             p22, _ = extrapolate_reference_map(p22, np.zeros((N, N)), phi, dx, dy, nl)
-            L11 = grad_central_x_2nd(u_c, dx); L12 = grad_central_y_2nd(u_c, dy)
-            L21 = grad_central_x_2nd(v_c, dx); L22 = grad_central_y_2nd(v_c, dy)
+            if TRACE_FREE_L:     # tr(L) = MAC divergence = 0 (bug 1 fix)
+                L11, L12, L21, L22 = cell_velocity_gradient(u, v, dx, dy)
+            else:                # former construction: trace not zero, det(b_e) drifts
+                L11 = grad_central_x_2nd(u_c, dx); L12 = grad_central_y_2nd(u_c, dy)
+                L21 = grad_central_x_2nd(v_c, dx); L22 = grad_central_y_2nd(v_c, dy)
             p11, p12, p22 = logconf_local_step_strang(p11, p12, p22, L11, L12, L21, L22, tau, dt)
             be11, be12, be22 = sym_exp(p11, p12, p22)
             trbe = 0.5 * (be11 + be22)

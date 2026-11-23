@@ -19,12 +19,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pyRMT.mac import (mac_grid, momentum_predictor_periodic,
                        momentum_predictor_periodic_imex_elastic, project_per,
-                       poisson_eigs_periodic, lap_eigs_periodic, divergence, contact_stress)
+                       poisson_eigs_periodic, lap_eigs_periodic, divergence, contact_stress,
+                       cell_velocity_gradient)
 from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
     rebuild_phi_from_reference_map, solid_cauchy_stress, smoothed_heaviside,
     grad_central_x_2nd, grad_central_y_2nd)
 from pyRMT.viscoelastic import logconf_local_step_strang, sym_exp
 
+
+
+# Bug 1 fix: build the strain-update velocity gradient so that tr(L) is the MAC divergence.
+TRACE_FREE_L = True
 
 def _surface_gap(pa, pb, xc):
     """Distance between the two interfaces on the line of centres: right-most zero of phi_a
@@ -124,11 +129,12 @@ def run(N=128, t_end=2.4, V0=0.3, eta=2.0, mu_s=0.2, G_ve=0.6, tau=0.4,
         W += 0.5 * G_ve * np.sum((be11 + be22 - 2.0 - (p11 + p22))[inside]) * dx * dy
         return exx + G_ve * (be11 - trbe), exy + G_ve * be12, eyy + G_ve * (be22 - trbe), W
 
-    def advance_solid(uc, vc):
+    def advance_solid(uf, vf):
         """Transport the reference maps (and, for SLS, psi with its stretch/relax step)
         by the cell velocity (uc,vc). Explicit uses the start velocity; the IMEX
         (trapezoidal) coupling uses the implicit-midpoint velocity, which is lossless."""
         nonlocal X1a, X2a, X1b, X2b, pa11, pa12, pa22, pb11, pb12, pb22
+        uc = 0.5 * (uf + np.roll(uf, -1, axis=1)); vc = 0.5 * (vf + np.roll(vf, -1, axis=0))
         pa_ = rebuild_phi_from_reference_map(X1a, X2a, pia); ma_ = (pa_ <= 0).astype(float)
         pb_ = rebuild_phi_from_reference_map(X1b, X2b, pib); mb_ = (pb_ <= 0).astype(float)
         X1a = advect_reference_map(X1a, uc, vc, Xg, Yg, dt, dx, dy, pa_, scheme, 0.0) * ma_
@@ -144,8 +150,11 @@ def run(N=128, t_end=2.4, V0=0.3, eta=2.0, mu_s=0.2, G_ve=0.6, tau=0.4,
             pb11 = advect_reference_map(pb11, uc, vc, Xg, Yg, dt, dx, dy, pb_, scheme, 0.0) * mb_
             pb12 = advect_reference_map(pb12, uc, vc, Xg, Yg, dt, dx, dy, pb_, scheme, 0.0) * mb_
             pb22 = advect_reference_map(pb22, uc, vc, Xg, Yg, dt, dx, dy, pb_, scheme, 0.0) * mb_
-            L11 = grad_central_x_2nd(uc, dx); L12 = grad_central_y_2nd(uc, dy)
-            L21 = grad_central_x_2nd(vc, dx); L22 = grad_central_y_2nd(vc, dy)
+            if TRACE_FREE_L:     # tr(L) = MAC divergence = 0 (bug 1 fix); periodic box
+                L11, L12, L21, L22 = cell_velocity_gradient(uf, vf, dx, dy, periodic=True)
+            else:
+                L11 = grad_central_x_2nd(uc, dx); L12 = grad_central_y_2nd(uc, dy)
+                L21 = grad_central_x_2nd(vc, dx); L22 = grad_central_y_2nd(vc, dy)
             pa11, pa12, pa22 = logconf_local_step_strang(pa11, pa12, pa22, L11, L12, L21, L22, tau, dt)
             pb11, pb12, pb22 = logconf_local_step_strang(pb11, pb12, pb22, L11, L12, L21, L22, tau, dt)
             pa11, pa12 = extrapolate_reference_map(pa11, pa12, pa_, dx, dy, 3)
@@ -161,7 +170,7 @@ def run(N=128, t_end=2.4, V0=0.3, eta=2.0, mu_s=0.2, G_ve=0.6, tau=0.4,
         u_c = 0.5 * (u + np.roll(u, -1, axis=1)); v_c = 0.5 * (v + np.roll(v, -1, axis=0))
         # sequential ordering: advance the solid state first, force from the updated maps
         if seq:
-            advance_solid(u_c, v_c)
+            advance_solid(u, v)
         pa = rebuild_phi_from_reference_map(X1a, X2a, pia)
         pb = rebuild_phi_from_reference_map(X1b, X2b, pib)
 
@@ -198,8 +207,7 @@ def run(N=128, t_end=2.4, V0=0.3, eta=2.0, mu_s=0.2, G_ve=0.6, tau=0.4,
         # implicit-midpoint velocity -- lossless, unlike advancing with the start velocity
         if not seq:
             um = 0.5 * (u_old + u); vm = 0.5 * (v_old + v)
-            umc = 0.5 * (um + np.roll(um, -1, axis=1)); vmc = 0.5 * (vm + np.roll(vm, -1, axis=0))
-            advance_solid(umc, vmc)
+            advance_solid(um, vm)
         t += dt
         # smooth (Heaviside-weighted) centroids -- the staircase mean Xc[phi<=0] jumps
         # by ~dx as cells flip in/out of the mask, which corrupts the gap-velocity (and

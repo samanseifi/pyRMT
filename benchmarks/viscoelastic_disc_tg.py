@@ -23,8 +23,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pyRMT.mac import (mac_grid, momentum_predictor_freeslip,
                        momentum_predictor_freeslip_imex, project,
-                       poisson_eigs_neumann, divergence)
-from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
+                       poisson_eigs_neumann, divergence, cell_velocity_gradient,
+                       solid_force_faces)
+from pyRMT.functions import (extrapolate_reference_map, advect_reference_map, advance_conformation,
     rebuild_phi_from_reference_map, solid_cauchy_stress, smoothed_heaviside,
     grad_central_x_2nd, grad_central_y_2nd)
 from pyRMT.viscoelastic import logconf_local_step_strang, sym_exp
@@ -50,7 +51,9 @@ def _FFt_from_xi(X1, X2, dx, dy):
 
 def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
             mu_f=0.01, U0=0.3, rho=1.0, scheme="semilagrangian_cubic", w_cut_fac=4.0,
-            model="maxwell", history=False, snap_times=None, kw=1, integrator="explicit"):
+            model="maxwell", history=False, snap_times=None, kw=1, integrator="explicit",
+            trace_free_L=True, compact_force=False, band_stress=False, consistent_mask=False,
+            dt_scale=1.0, band_width=None, band_extrap=None, material_band=False):
     """One disc-in-Taylor-Green FSI run. ``model`` selects the solid constitution:
         "elastic" -- reference-map neo-Hookean, sigma = mu_s dev(F F^T)  (Sec. 8.2)
         "maxwell" -- pure Maxwell branch,       sigma = G dev(b_e)       (fluid drop)
@@ -71,20 +74,38 @@ def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
 
     phi_init = lambda X, Y: np.sqrt((X - x0)**2 + (Y - y0)**2) - R
     phi = phi_init(Xc, Yc); sm = (phi <= 0).astype(float)
-    X1, X2 = extrapolate_reference_map(Xc * sm, Yc * sm, phi, dx, dy, 3)
+    # blend half-width: 2 cells by default; band_width fixes it as a PHYSICAL length, so a
+    # refinement study converges to one regularized problem. The extrapolation band must cover
+    # phi < w_t (plus a stencil margin).
+    w_t = 2.0 * dx if band_width is None else float(band_width)
+    # band_extrap (idea 1, Richardson extrapolation in the band width): blend the stress with
+    # c*(1-H_w) + (1-c)*(1-H_2w), c = 2 (cancels an O(w) error) or 4/3 (cancels O(w^2)).
+    # The weight is signed; both widths must be covered by the extrapolation band.
+    c_ex = {None: None, 1: 2.0, 2: 4.0 / 3.0}[band_extrap]
+    w_max = w_t if c_ex is None else 2.0 * w_t
+    NL = max(3, int(np.ceil(w_max / dx)) + 2)
+    # material_band: the reference map and psi are transported (and psi stretched) EVERYWHERE,
+    # so the band holds the labels / deformation of the actual neighbouring fluid parcels -- a
+    # continuum-defined extension, continuous across the interface -- instead of a layer-by-layer
+    # extrapolation that has no limit at a fixed physical band width. psi is reset to 0 far from
+    # the solid (beyond the band), where its blend weight is zero anyway.
+    if material_band:
+        X1, X2 = Xc.copy(), Yc.copy()
+    else:
+        X1, X2 = extrapolate_reference_map(Xc * sm, Yc * sm, phi, dx, dy, NL)
     p11 = np.zeros((N, N)); p12 = np.zeros((N, N)); p22 = np.zeros((N, N))  # psi=log I=0
-    w_t = 2.0 * dx; nu = mu_f / rho; cs = np.sqrt(mu_s / rho)
+    nu = mu_f / rho; cs = np.sqrt(mu_s / rho)
     eig = poisson_eigs_neumann(N, N, dx, dy)
     imex = (integrator == "imex")
     _lim = [0.25 * dx / (U0 * k), 0.25 * dx / (cs + 1e-9)]
     if not imex:                       # explicit also bound by the viscous CFL
         _lim.append(0.2 * dx * dx / nu)
-    dt = min(_lim)
+    dt = min(_lim) * dt_scale          # dt_scale < 1: refine the step independently of the grid
     p = np.zeros((N, N))
 
     area0 = float(np.sum(phi <= 0) * dx * dy)
     areas0 = float(np.sum(1.0 - smoothed_heaviside(phi, w_t)) * dx * dy)  # smooth (diffuse) area
-    hist = {"t": [], "KE": [], "Eel": [], "detbe_max": [], "minJ": [], "cx": [], "cy": [],
+    hist = {"t": [], "KE": [], "Eel": [], "Eel_s": [], "detbe_max": [], "minJ": [], "cx": [], "cy": [],
             "bevsF": [], "area": [], "areas": [], "gphi": []}
     has_maxwell = model in ("maxwell", "sls")
     snaps = []; snap_q = list(snap_times) if snap_times else []
@@ -95,23 +116,43 @@ def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
         u_c = 0.5 * (u[:, :-1] + u[:, 1:]); v_c = 0.5 * (v[:-1, :] + v[1:, :])
         phi = rebuild_phi_from_reference_map(X1, X2, phi_init); sm = (phi <= 0).astype(float)
         wc = w_cut_fac * dx
-        X1 = advect_reference_map(X1, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
-        X2 = advect_reference_map(X2, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
-        X1, X2 = extrapolate_reference_map(X1, X2, phi, dx, dy, 3)
+        if material_band:
+            X1 = advect_reference_map(X1, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc)
+            X2 = advect_reference_map(X2, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc)
+        else:
+            X1 = advect_reference_map(X1, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
+            X2 = advect_reference_map(X2, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
+            X1, X2 = extrapolate_reference_map(X1, X2, phi, dx, dy, NL)
         phi = rebuild_phi_from_reference_map(X1, X2, phi_init)
         # equilibrium (neo-Hookean) branch from the reference map -- used by "elastic"/"sls"
-        eqxx, eqxy, eqyy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s, 0.0, phi)
+        # band_stress (bug 2 fix): evaluate across the blend band, not only where phi <= 0
+        eqxx, eqxy, eqyy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s, 0.0, phi,
+                                                  w_cut=(w_max if band_stress else 0.0))
 
         detbe_max = 1.0
         if has_maxwell:
-            p11 = advect_reference_map(p11, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
-            p12 = advect_reference_map(p12, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
-            p22 = advect_reference_map(p22, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
-            p11, p12 = extrapolate_reference_map(p11, p12, phi, dx, dy, 3)
-            p22, _ = extrapolate_reference_map(p22, np.zeros((N, N)), phi, dx, dy, 3)
-            L11 = grad_central_x_2nd(u_c, dx); L12 = grad_central_y_2nd(u_c, dy)
-            L21 = grad_central_x_2nd(v_c, dx); L22 = grad_central_y_2nd(v_c, dy)
+            if material_band:    # transport everywhere, no cut / extrapolation
+                p11 = advect_reference_map(p11, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc)
+                p12 = advect_reference_map(p12, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc)
+                p22 = advect_reference_map(p22, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc)
+            elif consistent_mask:  # bug 4 fix: cut and extrapolate psi with the same (new) level set
+                p11, p12, p22 = advance_conformation(p11, p12, p22, u_c, v_c, Xg, Yg, dt, dx, dy,
+                                                     phi, scheme, wc, NL)
+            else:                # former: start-of-step mask, new level set -> psi=0 strip
+                p11 = advect_reference_map(p11, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
+                p12 = advect_reference_map(p12, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
+                p22 = advect_reference_map(p22, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
+                p11, p12 = extrapolate_reference_map(p11, p12, phi, dx, dy, NL)
+                p22, _ = extrapolate_reference_map(p22, np.zeros((N, N)), phi, dx, dy, NL)
+            if trace_free_L:     # tr(L) = MAC divergence = 0 (bug 1 fix)
+                L11, L12, L21, L22 = cell_velocity_gradient(u, v, dx, dy)
+            else:                # former construction: trace is not zero (det b_e drifts)
+                L11 = grad_central_x_2nd(u_c, dx); L12 = grad_central_y_2nd(u_c, dy)
+                L21 = grad_central_x_2nd(v_c, dx); L22 = grad_central_y_2nd(v_c, dy)
             p11, p12, p22 = logconf_local_step_strang(p11, p12, p22, L11, L12, L21, L22, tau, dt)
+            if material_band:
+                far = phi > w_max + 4.0 * dx
+                p11[far] = 0.0; p12[far] = 0.0; p22[far] = 0.0
             be11, be12, be22 = sym_exp(p11, p12, p22)
             trbe = 0.5 * (be11 + be22)
             mxx = G_ve * (be11 - trbe); mxy = G_ve * be12; myy = G_ve * (be22 - trbe)
@@ -127,11 +168,18 @@ def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
             sxx, sxy, syy = eqxx + mxx, eqxy + mxy, eqyy + myy
 
         H = smoothed_heaviside(phi, w_t)
-        Sxx = (1 - H) * sxx; Sxy = (1 - H) * sxy; Syy = (1 - H) * syy
-        divx = grad_central_x_2nd(Sxx, dx) + grad_central_y_2nd(Sxy, dy)
-        divy = grad_central_x_2nd(Sxy, dx) + grad_central_y_2nd(Syy, dy)
-        fu = np.zeros((N, N + 1)); fu[:, 1:-1] = 0.5 * (divx[:, 1:] + divx[:, :-1])
-        fv = np.zeros((N + 1, N)); fv[1:-1, :] = 0.5 * (divy[1:, :] + divy[:-1, :])
+        if c_ex is None:
+            wgt = 1 - H
+        else:
+            wgt = c_ex * (1 - H) + (1 - c_ex) * (1 - smoothed_heaviside(phi, 2.0 * w_t))
+        Sxx = wgt * sxx; Sxy = wgt * sxy; Syy = wgt * syy
+        if compact_force:    # bug 3 fix: compact face divergence (isotropic part = MAC gradient)
+            fu, fv = solid_force_faces(Sxx, Sxy, Syy, dx, dy)
+        else:
+            divx = grad_central_x_2nd(Sxx, dx) + grad_central_y_2nd(Sxy, dy)
+            divy = grad_central_x_2nd(Sxy, dx) + grad_central_y_2nd(Syy, dy)
+            fu = np.zeros((N, N + 1)); fu[:, 1:-1] = 0.5 * (divx[:, 1:] + divx[:, :-1])
+            fv = np.zeros((N + 1, N)); fv[1:-1, :] = 0.5 * (divy[1:, :] + divy[:-1, :])
         if imex:
             us, vs = momentum_predictor_freeslip_imex(u, v, nu, dx, dy, dt, fu=fu, fv=fv, rho=rho)
         else:
@@ -153,14 +201,17 @@ def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
             fb11, fb12, fb22, flndet = _FFt_from_xi(X1, X2, dx, dy)   # b = F F^T
             # stored elastic energy w = (G/2)(tr b - 2 - ln det b), same functional for
             # both strain descriptions; SLS = equilibrium (from F) + relaxing (from b_e)
-            Eel = 0.0; bevsF = 0.0
+            Eel = 0.0; bevsF = 0.0; Eel_s = 0.0
+            wsm = 1.0 - smoothed_heaviside(phi, w_t)       # smooth solid weight (sub-cell)
             if model in ("elastic", "sls"):
                 w_eq = 0.5 * mu_s * ((fb11 + fb22) - 2.0 - flndet)
                 Eel += float(np.sum(np.where(msk, w_eq, 0.0)) * dx * dy)
+                Eel_s += float(np.sum(wsm * w_eq) * dx * dy)
             if has_maxwell:
                 be11, be12, be22 = sym_exp(p11, p12, p22)
                 w_mx = 0.5 * G_ve * ((be11 + be22) - 2.0 - (p11 + p22))
                 Eel += float(np.sum(np.where(msk, w_mx, 0.0)) * dx * dy)
+                Eel_s += float(np.sum(wsm * w_mx) * dx * dy)
                 # strain-description drift: ||exp(psi) - F F^T||_F / ||F F^T||_F over the
                 # REGULARLY-deformed solid interior (0.5<J<2), so the metric measures the
                 # genuine transport difference between the two representations of F F^T and
@@ -173,7 +224,7 @@ def run_one(N, t_end, tau=np.inf, G_ve=0.1, R=0.15, x0=0.5, y0=0.7, mu_s=0.1,
             # non-stress-bearing reference map is extrapolated and J is meaningless)
             mi = phi < -2.0 * dx
             minJ = float(J[mi].min()) if mi.any() else 1.0
-            hist["t"].append(t); hist["KE"].append(KE); hist["Eel"].append(Eel)
+            hist["t"].append(t); hist["KE"].append(KE); hist["Eel"].append(Eel); hist["Eel_s"].append(Eel_s)
             hist["detbe_max"].append(detbe_max); hist["minJ"].append(minJ)
             hist["bevsF"].append(bevsF); hist["area"].append(float(np.sum(msk) * dx * dy) / area0)
             hist["areas"].append(float(np.sum(1.0 - H) * dx * dy) / areas0)  # smooth area (no quant. jitter)

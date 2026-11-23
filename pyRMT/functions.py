@@ -1366,6 +1366,24 @@ def pressure_projection_amg(a_star, b_star, dx, dy, dt, rho, velocity_bc, A=None
 def rebuild_phi_from_reference_map(X1, X2, phi_init_func):
     return phi_init_func(X1, X2)
 
+
+def advance_conformation(p11, p12, p22, uc, vc, Xg, Yg, dt, dx, dy, phi_new, scheme, w_cut,
+                         n_layers):
+    """Transport psi = log(b_e): advect, keep the solid values, extrapolate into the band.
+
+    The solid mask and the extrapolation use the SAME level set, the one rebuilt from the
+    already-advected reference map (phi_new). The drivers used to cut psi with the start-of-step
+    mask but extrapolate it with phi_new, so cells the interface had just moved into were
+    treated as known while holding psi = 0 (unstrained): a strip of spurious zero strain at the
+    advancing edge every step (bug 4). The stretch/relaxation step is applied separately."""
+    m = (phi_new <= 0).astype(float)
+    p11 = advect_reference_map(p11, uc, vc, Xg, Yg, dt, dx, dy, phi_new, scheme, w_cut) * m
+    p12 = advect_reference_map(p12, uc, vc, Xg, Yg, dt, dx, dy, phi_new, scheme, w_cut) * m
+    p22 = advect_reference_map(p22, uc, vc, Xg, Yg, dt, dx, dy, phi_new, scheme, w_cut) * m
+    p11, p12 = extrapolate_reference_map(p11, p12, phi_new, dx, dy, n_layers)
+    p22, _ = extrapolate_reference_map(p22, np.zeros_like(p22), phi_new, dx, dy, n_layers)
+    return p11, p12, p22
+
 def reinitialize_phi_PDE(phi_in, dx, dy, num_iters, apply_phi_BCs_func, dt_reinit_factor=0.5):
     phi = phi_in.copy()
     phi_initial_sign = phi_in / np.sqrt(phi_in**2 + dx**2)  # Avoid division by zero, ensure no NaNs.

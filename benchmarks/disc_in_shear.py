@@ -23,7 +23,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pyRMT.mac import (mac_grid, momentum_predictor, momentum_predictor_lid_imex,
                        project, poisson_eigs_neumann,
-                       divergence)
+                       divergence, cell_velocity_gradient)
 from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
     rebuild_phi_from_reference_map, solid_cauchy_stress, smoothed_heaviside,
     grad_central_x_2nd, grad_central_y_2nd)
@@ -32,6 +32,10 @@ from pyRMT.viscoelastic import logconf_local_step_strang, sym_exp
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "outputs", "shear")
 os.makedirs(OUT, exist_ok=True)
 
+
+
+# Bug 1 fix: build the strain-update velocity gradient so that tr(L) is the MAC divergence.
+TRACE_FREE_L = True
 
 def deformation(phi, Xc, Yc, dx, dy):
     """Taylor deformation D=(a-b)/(a+b) and orientation from the second-moment tensor
@@ -96,8 +100,11 @@ def run(N=48, Ca=0.1, model="elastic", tau=np.inf, G_ve=None, mu_f=0.02, U=0.5,
             p22 = advect_reference_map(p22, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
             p11, p12 = extrapolate_reference_map(p11, p12, phi, dx, dy, 3)
             p22, _ = extrapolate_reference_map(p22, np.zeros((Ny, Nx)), phi, dx, dy, 3)
-            L11 = grad_central_x_2nd(u_c, dx); L12 = grad_central_y_2nd(u_c, dy)
-            L21 = grad_central_x_2nd(v_c, dx); L22 = grad_central_y_2nd(v_c, dy)
+            if TRACE_FREE_L:     # tr(L) = MAC divergence = 0 (bug 1 fix)
+                L11, L12, L21, L22 = cell_velocity_gradient(u, v, dx, dy)
+            else:                # former construction: trace not zero, det(b_e) drifts
+                L11 = grad_central_x_2nd(u_c, dx); L12 = grad_central_y_2nd(u_c, dy)
+                L21 = grad_central_x_2nd(v_c, dx); L22 = grad_central_y_2nd(v_c, dy)
             p11, p12, p22 = logconf_local_step_strang(p11, p12, p22, L11, L12, L21, L22, tau, dt)
             be11, be12, be22 = sym_exp(p11, p12, p22); trbe = 0.5 * (be11 + be22)
             mxx = G_ve * (be11 - trbe); mxy = G_ve * be12; myy = G_ve * (be22 - trbe)
