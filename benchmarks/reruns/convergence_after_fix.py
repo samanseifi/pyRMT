@@ -17,6 +17,7 @@ Usage: python benchmarks/reruns/convergence_after_fix.py [tag]
                  1/16 / at the default 2-cell width.
   tag "matex1" / "matex2" : material band at the default width, with the band-width
                  extrapolation c=2 / c=4/3 (idea 1).
+  tag "final"  : the current driver defaults (bug fixes 1, 3, 4 on; band stress off), N=32-256.
   tag "dtsq"   : bug 1 fix only, but dt proportional to dx^2 (equal to the default step at N=32),
                  on N = 32, 64, 128: separates the temporal error from the spatial one.
 """

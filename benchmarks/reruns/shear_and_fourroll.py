@@ -5,7 +5,7 @@ Resumable: each finished run is cached; re-launching skips it.
   2. four-roll extension: all three cases, curves and frames from the SAME runs, bicubic."""
 import os, sys, time, io, contextlib, numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))); sys.path.insert(0, ROOT)
-OUT = os.path.join(ROOT, "outputs", "rerun_2026-11"); os.makedirs(OUT, exist_ok=True)
+OUT = os.path.join(ROOT, "outputs", os.environ.get("RERUN_DIR", "rerun_2026-11")); os.makedirs(OUT, exist_ok=True)
 NPZ = os.path.join(OUT, "shear.npz")
 def say(*a): print(time.strftime("%H:%M"), *a, flush=True)
 

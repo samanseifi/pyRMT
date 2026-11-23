@@ -3,7 +3,7 @@ transport-scheme change (new IMEX dt0 peak 6.5 vs old explicit/bilinear peak 9.8
 import os, sys, time, io, contextlib, numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))); sys.path.insert(0, ROOT)
 from benchmarks.mac_viscoelastic_extension import run as ext
-OUT = os.path.join(ROOT, "outputs", "rerun_2026-11", "dtquarter"); os.makedirs(OUT, exist_ok=True)
+OUT = os.path.join(ROOT, "outputs", os.environ.get("RERUN_DIR", "rerun_2026-11"), "dtquarter"); os.makedirs(OUT, exist_ok=True)
 dx = 1 / 128; dt0 = 0.3 * dx / np.sqrt(0.3)          # default IMEX step (elastic-wave limit, G=0.3)
 t0 = time.perf_counter()
 with contextlib.redirect_stdout(io.StringIO()) as b:

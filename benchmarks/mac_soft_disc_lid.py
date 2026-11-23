@@ -15,8 +15,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pyRMT.mac import (mac_grid, momentum_predictor, momentum_predictor_lid_imex,
                        momentum_predictor_lid_semilag, project, poisson_eigs_neumann,
                        divergence, advect_xi_conservative, resolve_integrator,
-                       cell_velocity_gradient)
-from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
+                       cell_velocity_gradient, solid_force_faces)
+from pyRMT.functions import (extrapolate_reference_map, advect_reference_map, advance_conformation,
     rebuild_phi_from_reference_map, solid_cauchy_stress, smoothed_heaviside,
     grad_central_x_2nd, grad_central_y_2nd, reinitialize_phi_fmm)
 from pyRMT.viscoelastic import logconf_local_step_strang, sym_exp
@@ -25,6 +25,14 @@ from pyRMT.viscoelastic import logconf_local_step_strang, sym_exp
 
 # Bug 1 fix: build the strain-update velocity gradient so that tr(L) is the MAC divergence.
 TRACE_FREE_L = True
+
+# Bug fixes 2-4 (see tests/test_solid_force.py, tests/test_conformation_transport.py).
+BAND_STRESS = False       # bug 2 fix: evaluate the reference-map stress across the blend band.
+                          # Off: with the layer-by-layer extrapolation the band reference map is
+                          # too noisy in deforming flows (J -> 0.12 in the lid case); it needs a
+                          # well-defined band field (see material_band in viscoelastic_disc_tg).
+COMPACT_FORCE = True      # compact face divergence of the stress (bug 3)
+CONSISTENT_MASK = True    # cut and extrapolate psi with the same level set (bug 4)
 
 def run(N=128, t_end=8.0, scheme="semilagrangian_cubic", w_cut_fac=0.0, detg_clamp=0.0,
         reinit=False, isochoric=False, out_root="outputs", imex=False, dt=None, write=True,
@@ -111,15 +119,20 @@ def run(N=128, t_end=8.0, scheme="semilagrangian_cubic", w_cut_fac=0.0, detg_cla
                 phi = reinitialize_phi_fmm(phi, dx, dy)
 
         sxx, sxy, syy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s, kappa, phi,
-                                               detg_clamp=detg_clamp, isochoric=isochoric)
+                                               detg_clamp=detg_clamp, isochoric=isochoric,
+                                               w_cut=(w_t if (BAND_STRESS and w_cut_fac == 0.0) else 0.0))
         if viscoelastic:
             # transport psi=log(b_e), stretch + relax, then use sigma = G dev(b_e).
             # tau->inf recovers the neo-Hookean stress (b_e -> F F^T); finite tau relaxes.
-            p11 = advect_reference_map(p11, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
-            p12 = advect_reference_map(p12, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
-            p22 = advect_reference_map(p22, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
-            p11, p12 = extrapolate_reference_map(p11, p12, phi, dx, dy, nl)
-            p22, _ = extrapolate_reference_map(p22, np.zeros((N, N)), phi, dx, dy, nl)
+            if CONSISTENT_MASK:
+                p11, p12, p22 = advance_conformation(p11, p12, p22, u_c, v_c, Xg, Yg, dt, dx, dy,
+                                                     phi, scheme, wc, nl)
+            else:
+                p11 = advect_reference_map(p11, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
+                p12 = advect_reference_map(p12, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
+                p22 = advect_reference_map(p22, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
+                p11, p12 = extrapolate_reference_map(p11, p12, phi, dx, dy, nl)
+                p22, _ = extrapolate_reference_map(p22, np.zeros((N, N)), phi, dx, dy, nl)
             if TRACE_FREE_L:     # tr(L) = MAC divergence = 0 (bug 1 fix)
                 L11, L12, L21, L22 = cell_velocity_gradient(u, v, dx, dy)
             else:                # former construction: trace not zero, det(b_e) drifts
@@ -131,10 +144,13 @@ def run(N=128, t_end=8.0, scheme="semilagrangian_cubic", w_cut_fac=0.0, detg_cla
             sxx = G_ve * (be11 - trbe); sxy = G_ve * be12; syy = G_ve * (be22 - trbe)
         H = smoothed_heaviside(phi, w_t)
         Sxx = (1 - H) * sxx; Sxy = (1 - H) * sxy; Syy = (1 - H) * syy
-        divx = grad_central_x_2nd(Sxx, dx) + grad_central_y_2nd(Sxy, dy)   # centres
-        divy = grad_central_x_2nd(Sxy, dx) + grad_central_y_2nd(Syy, dy)
-        fu = np.zeros((N, N + 1)); fu[:, 1:-1] = 0.5 * (divx[:, 1:] + divx[:, :-1])
-        fv = np.zeros((N + 1, N)); fv[1:-1, :] = 0.5 * (divy[1:, :] + divy[:-1, :])
+        if COMPACT_FORCE:
+            fu, fv = solid_force_faces(Sxx, Sxy, Syy, dx, dy)
+        else:
+            divx = grad_central_x_2nd(Sxx, dx) + grad_central_y_2nd(Sxy, dy)
+            divy = grad_central_x_2nd(Sxy, dx) + grad_central_y_2nd(Syy, dy)
+            fu = np.zeros((N, N + 1)); fu[:, 1:-1] = 0.5 * (divx[:, 1:] + divx[:, :-1])
+            fv = np.zeros((N + 1, N)); fv[1:-1, :] = 0.5 * (divy[1:, :] + divy[:-1, :])
 
         u_old, v_old = u, v
         cs2_arg = cs * cs if (use_elastic and stab) else 0.0

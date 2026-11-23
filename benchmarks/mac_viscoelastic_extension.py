@@ -27,6 +27,7 @@ from pyRMT.mac import (mac_grid, momentum_predictor_periodic,
                        momentum_predictor_periodic_imex,
                        momentum_predictor_periodic_imex_elastic, lap_eigs_periodic,
                        project_per, poisson_eigs_periodic, divergence_per, cell_velocity_gradient,
+                       solid_force_faces,
                        resolve_integrator)
 from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
     rebuild_phi_from_reference_map, smoothed_heaviside, grad_central_x_2nd, grad_central_y_2nd)
@@ -36,6 +37,10 @@ from pyRMT.viscoelastic import logconf_local_step, logconf_local_step_strang, sy
 
 # Bug 1 fix: build the strain-update velocity gradient so that tr(L) is the MAC divergence.
 TRACE_FREE_L = True
+
+# Bug fix 3 (see tests/test_solid_force.py). Bugs 2 and 4 do not occur here: no reference-map
+# stress, and psi is cut and extrapolated with the same level set.
+COMPACT_FORCE = True      # compact face divergence of the stress (bug 3)
 
 def _lam_max(b11, b12, b22):
     tr = 0.5 * (b11 + b22)
@@ -131,10 +136,13 @@ def run(N=128, t_end=12.0, tau=0.5, eps_rate=0.5, G=0.3, mu_f=0.05, rho=1.0,
 
         H = smoothed_heaviside(phi, w_t)
         Sxx = (1 - H) * G * be11; Sxy = (1 - H) * G * be12; Syy = (1 - H) * G * be22
-        divx = grad_central_x_2nd(Sxx, dx) + grad_central_y_2nd(Sxy, dy)
-        divy = grad_central_x_2nd(Sxy, dx) + grad_central_y_2nd(Syy, dy)
-        f_su = 0.5 * (divx + np.roll(divx, 1, 1))        # solid force -> x-faces
-        f_sv = 0.5 * (divy + np.roll(divy, 1, 0))        # solid force -> y-faces
+        if COMPACT_FORCE:
+            f_su, f_sv = solid_force_faces(Sxx, Sxy, Syy, dx, dy, periodic=True)
+        else:
+            divx = grad_central_x_2nd(Sxx, dx) + grad_central_y_2nd(Sxy, dy)
+            divy = grad_central_x_2nd(Sxy, dx) + grad_central_y_2nd(Syy, dy)
+            f_su = 0.5 * (divx + np.roll(divx, 1, 1))        # solid force -> x-faces
+            f_sv = 0.5 * (divy + np.roll(divy, 1, 0))        # solid force -> y-faces
         Hu = 0.5 * (H + np.roll(H, 1, 1)); Hv = 0.5 * (H + np.roll(H, 1, 0))
 
         if elastic_imex:

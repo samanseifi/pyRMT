@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pyRMT.mac import (mac_grid, momentum_predictor_periodic,
                        momentum_predictor_periodic_imex_elastic, project_per,
                        poisson_eigs_periodic, lap_eigs_periodic, divergence, contact_stress,
-                       cell_velocity_gradient)
+                       cell_velocity_gradient, solid_force_faces)
 from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
     rebuild_phi_from_reference_map, solid_cauchy_stress, smoothed_heaviside,
     grad_central_x_2nd, grad_central_y_2nd)
@@ -30,6 +30,14 @@ from pyRMT.viscoelastic import logconf_local_step_strang, sym_exp
 
 # Bug 1 fix: build the strain-update velocity gradient so that tr(L) is the MAC divergence.
 TRACE_FREE_L = True
+
+# Bug fixes 2-3 (see tests/test_solid_force.py). Bug 4 does not occur here: psi is cut and
+# extrapolated with the same (start-of-step) level set.
+BAND_STRESS = False       # bug 2 fix: evaluate the reference-map stress across the blend band.
+                          # Off: with the layer-by-layer extrapolation the band reference map is
+                          # too noisy in deforming flows (J -> 0.12 in the lid case); it needs a
+                          # well-defined band field (see material_band in viscoelastic_disc_tg).
+COMPACT_FORCE = True      # compact face divergence of the stress (bug 3)
 
 def _surface_gap(pa, pb, xc):
     """Distance between the two interfaces on the line of centres: right-most zero of phi_a
@@ -119,9 +127,16 @@ def run(N=128, t_end=2.4, V0=0.3, eta=2.0, mu_s=0.2, G_ve=0.6, tau=0.4,
     def sigma_disc(X1, X2, phi, p11, p12, p22):
         """Solid Cauchy stress from the CURRENT state (no transport/stretch here), and the
         stored elastic energy of the body, W = (mu/2)(tr b - 2 - ln det b) per branch."""
-        exx, exy, eyy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s, 0.0, phi)
-        inside = (phi <= 0) & (J > 0)                  # sigma = mu_s b here, so tr b = tr(sigma)/mu_s
-        W = 0.5 * np.sum((exx + eyy)[inside] - mu_s * (2.0 + 2.0 * np.log(J[inside]))) * dx * dy
+        exx, exy, eyy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s, 0.0, phi,
+                                               w_cut=(w_t if BAND_STRESS else 0.0))
+        # tr b and det b from the reference-map gradient directly (independent of the stress form):
+        # grad xi = G, F = G^{-1}, tr(F F^T) = |G|_F^2 / det(G)^2, det b = det(G)^-2
+        g11 = (np.roll(X1, -1, 1) - np.roll(X1, 1, 1)) / (2 * dx); g12 = (np.roll(X1, -1, 0) - np.roll(X1, 1, 0)) / (2 * dy)
+        g21 = (np.roll(X2, -1, 1) - np.roll(X2, 1, 1)) / (2 * dx); g22 = (np.roll(X2, -1, 0) - np.roll(X2, 1, 0)) / (2 * dy)
+        dG = g11 * g22 - g12 * g21
+        inside = (phi <= 0) & (dG > 0)
+        trb = (g11**2 + g12**2 + g21**2 + g22**2)[inside] / dG[inside]**2
+        W = 0.5 * mu_s * np.sum(trb - 2.0 + 2.0 * np.log(dG[inside])) * dx * dy
         if not sls:
             return exx, exy, eyy, W
         be11, be12, be22 = sym_exp(p11, p12, p22)
@@ -189,11 +204,14 @@ def run(N=128, t_end=2.4, V0=0.3, eta=2.0, mu_s=0.2, G_ve=0.6, tau=0.4,
         if eta > 0:
             txx, txy, tyy = contact_stress(pa, pb, eta, 2 * Gtot, eps, dx, dy)
             Sxx += txx; Sxy += txy; Syy += tyy
-        divx = grad_central_x_2nd(Sxx, dx) + grad_central_y_2nd(Sxy, dy)
-        divy = grad_central_x_2nd(Sxy, dx) + grad_central_y_2nd(Syy, dy)
-        # periodic x-face i is between cells i-1 and i; y-face j between cells j-1 and j
-        fu = 0.5 * (divx + np.roll(divx, 1, axis=1))
-        fv = 0.5 * (divy + np.roll(divy, 1, axis=0))
+        if COMPACT_FORCE:
+            fu, fv = solid_force_faces(Sxx, Sxy, Syy, dx, dy, periodic=True)
+        else:
+            divx = grad_central_x_2nd(Sxx, dx) + grad_central_y_2nd(Sxy, dy)
+            divy = grad_central_x_2nd(Sxy, dx) + grad_central_y_2nd(Syy, dy)
+            # periodic x-face i is between cells i-1 and i; y-face j between cells j-1 and j
+            fu = 0.5 * (divx + np.roll(divx, 1, axis=1))
+            fv = 0.5 * (divy + np.roll(divy, 1, axis=0))
 
         u_old, v_old = u, v
         if imex:

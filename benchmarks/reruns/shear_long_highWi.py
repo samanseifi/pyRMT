@@ -2,7 +2,7 @@
 import os, sys, time, io, contextlib, numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))); sys.path.insert(0, ROOT)
 from benchmarks.disc_in_shear import run as shear
-NPZ = os.path.join(ROOT, "outputs", "rerun_2026-11", "shear_long.npz")
+NPZ = os.path.join(ROOT, "outputs", os.environ.get("RERUN_DIR", "rerun_2026-11"), "shear_long.npz")
 store = dict(np.load(NPZ)) if os.path.isfile(NPZ) else {}
 gdot = 1.0
 for Wi in (2.0, 3.0, 4.0, 8.0):

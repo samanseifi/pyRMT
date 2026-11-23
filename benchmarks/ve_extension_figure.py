@@ -18,8 +18,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 2026-11 re-runs: IMEX at its default step dt0 (elastic-wave limit), bicubic transport; and the
 # elastic case again at dt0/4 to show its time-step sensitivity (curves only, no frames).
-D = os.path.join(_ROOT, "outputs", "rerun_2026-11", "mac_ve_extension")
-D_Q = os.path.join(_ROOT, "outputs", "rerun_2026-11", "dtquarter", "mac_ve_extension")
+D = os.path.join(_ROOT, "outputs", os.environ.get("RERUN_DIR", "rerun_2026-11"), "mac_ve_extension")
+D_Q = os.path.join(_ROOT, "outputs", os.environ.get("RERUN_DIR", "rerun_2026-11"), "dtquarter", "mac_ve_extension")
 
 
 def _frame(tag, idx):

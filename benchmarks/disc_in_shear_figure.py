@@ -11,7 +11,7 @@ Usage: python benchmarks/disc_in_shear_figure.py  ->  paper/figures/disc_in_shea
 import os, sys
 import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-D = os.path.join(ROOT, "outputs", "rerun_2026-11")
+D = os.path.join(ROOT, "outputs", os.environ.get("RERUN_DIR", "rerun_2026-11"))
 CAS = [0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4]
 WIS = [0.0, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0]
 TH_MIN_D = 0.08          # below this the two axes differ by < ~3 cells: orientation not resolved

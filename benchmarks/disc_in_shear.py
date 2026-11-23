@@ -23,8 +23,8 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pyRMT.mac import (mac_grid, momentum_predictor, momentum_predictor_lid_imex,
                        project, poisson_eigs_neumann,
-                       divergence, cell_velocity_gradient)
-from pyRMT.functions import (extrapolate_reference_map, advect_reference_map,
+                       divergence, cell_velocity_gradient, solid_force_faces)
+from pyRMT.functions import (extrapolate_reference_map, advect_reference_map, advance_conformation,
     rebuild_phi_from_reference_map, solid_cauchy_stress, smoothed_heaviside,
     grad_central_x_2nd, grad_central_y_2nd)
 from pyRMT.viscoelastic import logconf_local_step_strang, sym_exp
@@ -36,6 +36,14 @@ os.makedirs(OUT, exist_ok=True)
 
 # Bug 1 fix: build the strain-update velocity gradient so that tr(L) is the MAC divergence.
 TRACE_FREE_L = True
+
+# Bug fixes 2-4 (see tests/test_solid_force.py, tests/test_conformation_transport.py).
+BAND_STRESS = False       # bug 2 fix: evaluate the reference-map stress across the blend band.
+                          # Off: with the layer-by-layer extrapolation the band reference map is
+                          # too noisy in deforming flows (J -> 0.12 in the lid case); it needs a
+                          # well-defined band field (see material_band in viscoelastic_disc_tg).
+COMPACT_FORCE = True      # compact face divergence of the stress (bug 3)
+CONSISTENT_MASK = True    # cut and extrapolate psi with the same level set (bug 4)
 
 def deformation(phi, Xc, Yc, dx, dy):
     """Taylor deformation D=(a-b)/(a+b) and orientation from the second-moment tensor
@@ -93,13 +101,18 @@ def run(N=48, Ca=0.1, model="elastic", tau=np.inf, G_ve=None, mu_f=0.02, U=0.5,
         X2 = advect_reference_map(X2, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
         X1, X2 = extrapolate_reference_map(X1, X2, phi, dx, dy, 3)
         phi = rebuild_phi_from_reference_map(X1, X2, phi_init)
-        eqxx, eqxy, eqyy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s, 0.0, phi)
+        eqxx, eqxy, eqyy, J = solid_cauchy_stress(X1, X2, dx, dy, mu_s, 0.0, phi,
+                                                  w_cut=(w_t if BAND_STRESS else 0.0))
         if has_mx:
-            p11 = advect_reference_map(p11, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
-            p12 = advect_reference_map(p12, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
-            p22 = advect_reference_map(p22, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
-            p11, p12 = extrapolate_reference_map(p11, p12, phi, dx, dy, 3)
-            p22, _ = extrapolate_reference_map(p22, np.zeros((Ny, Nx)), phi, dx, dy, 3)
+            if CONSISTENT_MASK:
+                p11, p12, p22 = advance_conformation(p11, p12, p22, u_c, v_c, Xg, Yg, dt, dx, dy,
+                                                     phi, scheme, wc, 3)
+            else:
+                p11 = advect_reference_map(p11, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
+                p12 = advect_reference_map(p12, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
+                p22 = advect_reference_map(p22, u_c, v_c, Xg, Yg, dt, dx, dy, phi, scheme, wc) * sm
+                p11, p12 = extrapolate_reference_map(p11, p12, phi, dx, dy, 3)
+                p22, _ = extrapolate_reference_map(p22, np.zeros((Ny, Nx)), phi, dx, dy, 3)
             if TRACE_FREE_L:     # tr(L) = MAC divergence = 0 (bug 1 fix)
                 L11, L12, L21, L22 = cell_velocity_gradient(u, v, dx, dy)
             else:                # former construction: trace not zero, det(b_e) drifts
@@ -116,10 +129,13 @@ def run(N=48, Ca=0.1, model="elastic", tau=np.inf, G_ve=None, mu_f=0.02, U=0.5,
             sxx, sxy, syy = eqxx + mxx, eqxy + mxy, eqyy + myy
         H = smoothed_heaviside(phi, w_t)
         Sxx = (1 - H) * sxx; Sxy = (1 - H) * sxy; Syy = (1 - H) * syy
-        divx = grad_central_x_2nd(Sxx, dx) + grad_central_y_2nd(Sxy, dy)
-        divy = grad_central_x_2nd(Sxy, dx) + grad_central_y_2nd(Syy, dy)
-        fu = np.zeros((Ny, Nx + 1)); fu[:, 1:-1] = 0.5 * (divx[:, 1:] + divx[:, :-1])
-        fv = np.zeros((Ny + 1, Nx)); fv[1:-1, :] = 0.5 * (divy[1:, :] + divy[:-1, :])
+        if COMPACT_FORCE:
+            fu, fv = solid_force_faces(Sxx, Sxy, Syy, dx, dy)
+        else:
+            divx = grad_central_x_2nd(Sxx, dx) + grad_central_y_2nd(Sxy, dy)
+            divy = grad_central_x_2nd(Sxy, dx) + grad_central_y_2nd(Syy, dy)
+            fu = np.zeros((Ny, Nx + 1)); fu[:, 1:-1] = 0.5 * (divx[:, 1:] + divx[:, :-1])
+            fv = np.zeros((Ny + 1, Nx)); fv[1:-1, :] = 0.5 * (divy[1:, :] + divy[:-1, :])
         if imex:
             us, vs = momentum_predictor_lid_imex(u, v, nu, dx, dy, dt, U, fu=fu, fv=fv,
                                                  rho=rho, U_bot=-U)

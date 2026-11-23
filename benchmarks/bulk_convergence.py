@@ -86,11 +86,28 @@ def _orders(h, e):
     return res
 
 
-def main(recompute=True):
+def from_conv(path):
+    """Adapt a sweep file written by benchmarks/reruns/convergence_after_fix.py (fields sampled on
+    its finest grid) to the layout analyse() expects. The strain energy is the smooth-weighted one
+    (Eel_s), which measures the solid without cell-quantization noise."""
+    c = np.load(path); Ns = sorted(int(k[3:]) for k in c.files if k.startswith("sp_"))
+    ref = Ns[-1]; d = dict(ref=ref, coarse=np.array(Ns[:-1]), spref=c[f"sp_{ref}"], prref=c[f"pr_{ref}"],
+                          phiref=c["phig"], NS=np.array(Ns),
+                          KE=np.array([float(c[f"KE_{N}"]) for N in Ns]),
+                          SE=np.array([float(c[f"SEs_{N}"] if f"SEs_{N}" in c.files else c[f"SE_{N}"]) for N in Ns]))
+    for N in Ns[:-1]:
+        d[f"sp_{N}"] = c[f"sp_{N}"]; d[f"pr_{N}"] = c[f"pr_{N}"]
+    return d
+
+
+def main(recompute=True, conv_path=None):
     import matplotlib; matplotlib.use("Agg")
     sys.path.insert(0, os.path.join(ROOT, "benchmarks")); from _plotstyle import apply as _s; _s()
     import matplotlib.pyplot as plt
-    d = compute() if (recompute or not os.path.isfile(NPZ)) else dict(np.load(NPZ))
+    if conv_path:
+        d = from_conv(conv_path)
+    else:
+        d = compute() if (recompute or not os.path.isfile(NPZ)) else dict(np.load(NPZ))
     r = analyse(d); h = r["h"]
     print(f"  bulk (> {DELTA} from the interface) = {100 * r['bulk_frac']:.1f}% of the domain")
     for nm, key in (("full velocity", "full_v"), ("bulk velocity", "bulk_v"), ("full pressure", "full_p"),
@@ -123,4 +140,5 @@ def main(recompute=True):
 
 
 if __name__ == "__main__":
-    main(recompute="--plot-only" not in sys.argv)
+    conv = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--from-conv=")), None)
+    main(recompute="--plot-only" not in sys.argv, conv_path=conv)
