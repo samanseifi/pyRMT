@@ -94,3 +94,37 @@ def laplacian_jump_correction(phi, gx, gy, dx, dy, gxx=None, gyy=None):
         else:
             C[:-1, :] += lo; C[1:, :] += hi
     return C
+
+
+def divergence_jump_correction_per(pu, gux, pv, gvy, dx, dy):
+    """Immersed-interface correction to the periodic MAC divergence of a velocity whose normal
+    derivatives jump across phi = 0 (the velocity itself is continuous).
+
+    Cell (j, i) lies between x-faces i and i+1 (u) and y-faces j and j+1 (v). If the interface
+    crosses between the two faces at fraction theta from the left face, the face difference is
+    h (u_x^- theta + u_x^+ (1 - theta)); the one-sided derivative on the cell centre's side is
+    recovered by adding g theta (centre on the right side) or subtracting g (1 - theta) (centre on
+    the left side), g = jump of du/dx right minus left. pu, pv: level set at the u / v points;
+    gux, gvy: jumps of du/dx, dv/dy outside minus inside at those points.
+    Returns C (Ny, Nx): div_true ~= div_MAC + C."""
+    C = np.zeros_like(pu)
+    for p, g, h, ax in ((pu, gux, dx, 1), (pv, gvy, dy, 0)):
+        a = p; b = np.roll(p, -1, ax)                       # the two faces of each cell
+        ga = g; gb = np.roll(g, -1, ax)
+        cr = (a <= 0) != (b <= 0)
+        th = np.where(cr, a / np.where(cr, a - b, 1.0), 0.0)
+        sgn = np.where(a <= 0, 1.0, -1.0)                    # right-minus-left orientation
+        gc = np.where(cr, sgn * ((1 - th) * ga + th * gb), 0.0)
+        C += np.where(cr, np.where(th < 0.5, gc * th, -gc * (1 - th)), 0.0) / 1.0
+    return C
+
+
+def project_per_with_jumps(u_star, v_star, dx, dy, eig, div_corr):
+    """Periodic exact projection with a corrected divergence (div_MAC + div_corr) as the source.
+    The returned velocity has corrected divergence zero; q is the projection scalar."""
+    from pyRMT.mac import divergence_per, solve_poisson_periodic
+    div = divergence_per(u_star, v_star, dx, dy) + div_corr
+    q = solve_poisson_periodic(div, eig)
+    u = u_star - (q - np.roll(q, 1, 1)) / dx
+    v = v_star - (q - np.roll(q, 1, 0)) / dy
+    return u, v, q
