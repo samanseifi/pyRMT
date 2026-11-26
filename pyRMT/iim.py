@@ -54,7 +54,7 @@ def project_with_jump(u_star, v_star, dx, dy, dt, rho, eig, phi, jump):
     return u, v, q
 
 
-def laplacian_jump_correction(phi, gx, gy, dx, dy, gxx=None, gyy=None):
+def laplacian_jump_correction(phi, gx, gy, dx, dy, gxx=None, gyy=None, w=None):
     """Immersed-interface correction to the 5-point Laplacian of a field that is continuous
     across phi = 0 but whose first derivatives jump there (stage 2: tangential traction).
 
@@ -72,6 +72,10 @@ def laplacian_jump_correction(phi, gx, gy, dx, dy, gxx=None, gyy=None):
     points drops from O(1) to O(h):
         Lap_k     += -g (1 - theta)/h - gxx (1 - theta)^2 / 2
         Lap_{k+1} += -g theta/h       + gxx theta^2 / 2
+    Optional w: jump (outside minus inside) of the field's VALUE. Needed for the intermediate
+    velocity of a projection method, which is discontinuous by (dt/rho)[grad p] across the
+    interface even though the end-of-step velocity is continuous:
+        Lap_k     += -w / h^2,      Lap_{k+1} += +w / h^2
     Returns the additive correction C (Ny, Nx): Lap_true ~= Lap_5pt(u) + C."""
     C = np.zeros_like(phi)
     for ax, g, g2, h in ((1, gx, gxx, dx), (0, gy, gyy, dy)):
@@ -89,6 +93,11 @@ def laplacian_jump_correction(phi, gx, gy, dx, dy, gxx=None, gyy=None):
             g2b = g2[:, 1:] if ax == 1 else g2[1:, :]
             g2c = np.where(cr, sgn * ((1 - th) * g2a + th * g2b), 0.0)
             lo = lo - g2c * (1 - th) ** 2 / 2.0; hi = hi + g2c * th ** 2 / 2.0
+        if w is not None:                                        # value jump
+            wa = w[:, :-1] if ax == 1 else w[:-1, :]
+            wb = w[:, 1:] if ax == 1 else w[1:, :]
+            wc = np.where(cr, sgn * ((1 - th) * wa + th * wb), 0.0)
+            lo = lo - wc / h ** 2; hi = hi + wc / h ** 2
         if ax == 1:
             C[:, :-1] += lo; C[:, 1:] += hi
         else:
@@ -184,21 +193,33 @@ def _pressure_face_jumps_per(phi, jump, jgrad=None, h=None):
 
 
 def sharp_step_per(u, v, dx, dy, dt, nu, rho, lap_eig, peig, phi_c, J, f_u=None, f_v=None,
-                   conserve=True, J2=None):
+                   conserve=True, J2=None, G_old=None):
     """One semi-implicit step with sharp interface jumps (periodic MAC grid, constant nu, rho).
 
     u, v (Ny, Nx): face velocities after explicit advection (and any bulk force already added).
     phi_c: cell-centred level set; J: traction_jumps(...) evaluated on cell centres.
       1. implicit viscosity  (I - dt nu Lap) u* = u + dt nu C_u   (C: IIM Laplacian correction)
       2. projection with the jump-corrected divergence and the pressure jump [p] (ghost fluid)
-    All corrections are right-hand-side terms, so both solves stay direct FFT solves."""
+    All corrections are right-hand-side terms, so both solves stay direct FFT solves.
+
+    G_old = (Gx, Gy): the jump-corrected pressure gradient on the faces from the previous step
+    (incremental pressure form). The viscous solve then acts on u* = u^{n+1} + (dt/rho)(G_new -
+    G_old), which is continuous across the interface up to O(dt^2); without it u* carries jumps
+    (dt/rho)[grad p], (dt/rho)[grad grad p], ... of every order, and the result depends on dt at
+    O(dt [grad p]). With G_old given, the function returns (u, v, p, (Gx, Gy))."""
     from pyRMT.mac import solve_helmholtz_periodic, solve_poisson_periodic, divergence_per
     pu, pv = _to_u(phi_c), _to_v(phi_c)
     k2 = {} if J2 is None else J2
+    # The intermediate velocity u* = u^{n+1} + (dt/rho) grad p is DISCONTINUOUS across the
+    # interface by (dt/rho)[grad p] (a splitting artifact: [grad p] != 0 whenever the traction
+    # varies along the interface), so the viscous solve needs the value-jump correction too.
+    inc = G_old is not None
     Cu = laplacian_jump_correction(pu, _to_u(J["ux"]), _to_u(J["uy"]), dx, dy,
-                                   gxx=_to_u(k2["uxx"]) if k2 else None, gyy=_to_u(k2["uyy"]) if k2 else None)
+                                   gxx=_to_u(k2["uxx"]) if k2 else None, gyy=_to_u(k2["uyy"]) if k2 else None,
+                                   w=(dt / rho) * _to_u(k2["px"]) if (k2 and not inc) else None)
     Cv = laplacian_jump_correction(pv, _to_v(J["vx"]), _to_v(J["vy"]), dx, dy,
-                                   gxx=_to_v(k2["vxx"]) if k2 else None, gyy=_to_v(k2["vyy"]) if k2 else None)
+                                   gxx=_to_v(k2["vxx"]) if k2 else None, gyy=_to_v(k2["vyy"]) if k2 else None,
+                                   w=(dt / rho) * _to_v(k2["py"]) if (k2 and not inc) else None)
     ru = u + dt * nu * Cu + (dt * f_u / rho if f_u is not None else 0.0)
     rv = v + dt * nu * Cv + (dt * f_v / rho if f_v is not None else 0.0)
     # p solves div(grad_c p) = (rho/dt) div_c(u*), with the corrected face gradient
@@ -217,18 +238,26 @@ def sharp_step_per(u, v, dx, dy, dt, nu, rho, lap_eig, peig, phi_c, J, f_u=None,
             m = ph <= 0
             if m.any():
                 r[m] -= net / m.sum()
-    us = solve_helmholtz_periodic(ru, lap_eig, dt * nu)
-    vs = solve_helmholtz_periodic(rv, lap_eig, dt * nu)
+    if inc:        # incremental form: old pressure gradient inside the viscous solve ...
+        us = solve_helmholtz_periodic(ru - (dt / rho) * G_old[0], lap_eig, dt * nu) + (dt / rho) * G_old[0]
+        vs = solve_helmholtz_periodic(rv - (dt / rho) * G_old[1], lap_eig, dt * nu) + (dt / rho) * G_old[1]
+    else:          # ... and added back, so the projection below still solves for the total pressure
+        us = solve_helmholtz_periodic(ru, lap_eig, dt * nu)
+        vs = solve_helmholtz_periodic(rv, lap_eig, dt * nu)
     dc = divergence_jump_correction_per(pu, _to_u(J["ux"]), pv, _to_v(J["vy"]), dx, dy)
     div = divergence_per(us, vs, dx, dy) + dc
     corr = (np.roll(gxj, -1, 1) - gxj) / dx + (np.roll(gyj, -1, 0) - gyj) / dy
     p = solve_poisson_periodic((rho / dt) * div + corr, peig)
-    un = us - (dt / rho) * ((p - np.roll(p, 1, 1)) / dx - gxj)
-    vn = vs - (dt / rho) * ((p - np.roll(p, 1, 0)) / dy - gyj)
+    Gx = (p - np.roll(p, 1, 1)) / dx - gxj
+    Gy = (p - np.roll(p, 1, 0)) / dy - gyj
+    un = us - (dt / rho) * Gx
+    vn = vs - (dt / rho) * Gy
+    if inc:
+        return un, vn, p, (Gx, Gy)
     return un, vn, p
 
 
-def bulk_solid_force_per(phi, sxx, sxy, syy, dx, dy):
+def bulk_solid_force_per(phi, sxx, sxy, syy, dx, dy, mode="cells"):
     """Bulk solid force chi * div(sigma_s) on the periodic MAC faces, for the sharp formulation.
 
     The divergence is the compact face divergence of the (smoothly extended) solid stress, kept
@@ -238,6 +267,10 @@ def bulk_solid_force_per(phi, sxx, sxy, syy, dx, dy):
     fluid once its stress becomes non-uniform, and the interface traction injects energy."""
     from pyRMT.mac import solid_force_faces
     fu, fv = solid_force_faces(sxx, sxy, syy, dx, dy, periodic=True)
+    if mode == "face":            # the face point itself is inside (uses the extended stress)
+        fu = np.where(_to_u(phi) <= 0, fu, 0.0)
+        fv = np.where(_to_v(phi) <= 0, fv, 0.0)
+        return fu, fv
     ins = phi <= 0
     fu = np.where(ins & np.roll(ins, 1, 1), fu, 0.0)
     fv = np.where(ins & np.roll(ins, 1, 0), fv, 0.0)

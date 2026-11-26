@@ -29,6 +29,9 @@ U = (0.2, 0.08); NU, RHO, MU_S, STRETCH, R, C0, T_END = 0.05, 1.0, 0.5, 1.15, 0.
 DT_FACTOR = 1.0                     # multiplies the step 0.25 h / |U|
 BULK = True                         # include the bulk solid force chi div(sigma) in the sharp step
 SECOND = True                       # second-order jumps: [p_n], [grad p] and second-derivative jumps
+STRESS_CENTRAL = False              # interface-cell stress from central differences of the extended map
+INCREMENTAL = True                  # incremental pressure form (keeps the intermediate velocity continuous)
+BULK_MODE = "cells"                 # bulk force on faces with both cells inside | "face": face point inside
 
 
 def run(N, method, fields=False, snap_times=()):
@@ -44,6 +47,7 @@ def run(N, method, fields=False, snap_times=()):
     dt = DT_FACTOR * 0.25 * h / max(np.hypot(*U), 0.215); nstep = int(round(T_END / dt)); dt = T_END / nstep
     jp_, ip_ = int((C0[1]) / h), int((C0[0] + STRETCH * R + 0.03) / h)       # probe ahead of the disc
     hist = []; snaps = []; sq = list(snap_times)
+    G = (np.zeros((N, N)), np.zeros((N, N)))       # jump-corrected pressure gradient (incremental form)
     for k in range(nstep):
         uc = 0.5 * (u + np.roll(u, -1, 1)); vc = 0.5 * (v + np.roll(v, -1, 0))
         phi = phi0(X1, X2); m = (phi <= 0).astype(float)
@@ -51,7 +55,8 @@ def run(N, method, fields=False, snap_times=()):
         X2 = advect_reference_map(X2, uc, vc, Xg, Yg, dt, h, h, phi, "semilagrangian_cubic", 0.0) * m
         X1, X2 = extrapolate_reference_map(X1, X2, phi, h, h, 4)
         phi = phi0(X1, X2)
-        sxx, sxy, syy, J = solid_cauchy_stress(X1, X2, h, h, MU_S, 0.0, phi, isochoric=True, detg_clamp=3.0)
+        sxx, sxy, syy, J = solid_cauchy_stress(X1, X2, h, h, MU_S, 0.0, phi, isochoric=True, detg_clamp=3.0,
+                                               w_cut=(1e-9 if STRESS_CENTRAL else 0.0))
         ua, va = momentum_predictor_periodic_imex(u, v, 0.0, h, h, dt, leig)     # explicit advection only
         if method == "smeared":
             H = smoothed_heaviside(phi, 2 * h)
@@ -65,13 +70,21 @@ def run(N, method, fields=False, snap_times=()):
             S1, S2 = extrapolate_reference_map(sxx, sxy, phi, h, h, 3)
             S3, _ = extrapolate_reference_map(syy, np.zeros_like(syy), phi, h, h, 3)
             Jm = traction_jumps(phi, S1, S2, S3, RHO * NU)
-            fb = bulk_solid_force_per(phi, S1, S2, S3, h, h) if BULK else (None, None)
+            fb = bulk_solid_force_per(phi, S1, S2, S3, h, h, mode=BULK_MODE) if BULK else (None, None)
             J2 = None
             if SECOND:
                 dsx = np.gradient(S1, h, axis=1) + np.gradient(S2, h, axis=0)
                 dsy = np.gradient(S2, h, axis=1) + np.gradient(S3, h, axis=0)
                 J2 = second_order_jumps(phi, Jm, dsx, dsy, mu=RHO * NU, h=h)
-            u, v, p = sharp_step_per(ua, va, h, h, dt, NU, RHO, leig, peig, phi, Jm, f_u=fb[0], f_v=fb[1], J2=J2)
+            if INCREMENTAL:
+                if k == 0:      # initialise the pressure gradient: sweep the first step, discard the velocity
+                    for _ in range(3):
+                        _, _, _, G = sharp_step_per(ua, va, h, h, dt, NU, RHO, leig, peig, phi, Jm,
+                                                    f_u=fb[0], f_v=fb[1], J2=J2, G_old=G)
+                u, v, p, G = sharp_step_per(ua, va, h, h, dt, NU, RHO, leig, peig, phi, Jm,
+                                            f_u=fb[0], f_v=fb[1], J2=J2, G_old=G)
+            else:
+                u, v, p = sharp_step_per(ua, va, h, h, dt, NU, RHO, leig, peig, phi, Jm, f_u=fb[0], f_v=fb[1], J2=J2)
         hist.append(((k + 1) * dt, p[jp_, ip_] - p.mean(), 0.5 * np.mean((u - U[0]) ** 2 + (v - U[1]) ** 2),
                      max(np.abs(u - U[0]).max(), np.abs(v - U[1]).max()), float(phi[jp_, ip_])))
         while sq and (k + 1) * dt >= sq[0] - 1e-12:
