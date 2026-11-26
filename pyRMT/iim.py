@@ -158,7 +158,7 @@ def traction_jumps(phi, sxx, sxy, syy, mu):
     return dict(jp=-tn, ux=ttx * nx / mu, uy=ttx * ny / mu, vx=tty * nx / mu, vy=tty * ny / mu)
 
 
-def _pressure_face_jumps_per(phi, jump):
+def _pressure_face_jumps_per(phi, jump, jgrad=None, h=None):
     """Periodic version of _face_jumps for cell-centred phi and [q]: returns (cx, cy), the jump
     part of the face gradient on x-faces (left of cell i) and y-faces (below cell j)."""
     out = []
@@ -169,12 +169,22 @@ def _pressure_face_jumps_per(phi, jump):
         th = np.where(cr, a / np.where(cr, a - b, 1.0), 0.0)
         jc = np.where(cr, (1 - th) * ja + th * jb, 0.0)
         s = np.where(a <= 0, 1.0, -1.0)
-        out.append(np.where(cr, s * jc, 0.0))
+        if jgrad is None:
+            out.append(np.where(cr, s * jc, 0.0))
+        else:
+            # second order: the jump of dp/dx_ax (j1) shifts the one-sided face gradient. With
+            # j0 = s[p], j1 = s[p_ax] (right minus left), the face (midway) lies on the right
+            # side if theta < 1/2:  grad = (q_R - q_L - j0 + j1 theta h)/h, else
+            # grad = (q_R - q_L - j0 - j1 (1 - theta) h)/h.  Returned as h * (jump part).
+            g = jgrad[0] if ax == 1 else jgrad[1]
+            ga = np.roll(g, 1, ax); j1 = s * np.where(cr, (1 - th) * ga + th * g, 0.0)
+            j0 = s * jc
+            out.append(np.where(cr, np.where(th < 0.5, j0 - j1 * th * h, j0 + j1 * (1 - th) * h), 0.0))
     return out
 
 
 def sharp_step_per(u, v, dx, dy, dt, nu, rho, lap_eig, peig, phi_c, J, f_u=None, f_v=None,
-                   conserve=True):
+                   conserve=True, J2=None):
     """One semi-implicit step with sharp interface jumps (periodic MAC grid, constant nu, rho).
 
     u, v (Ny, Nx): face velocities after explicit advection (and any bulk force already added).
@@ -184,13 +194,16 @@ def sharp_step_per(u, v, dx, dy, dt, nu, rho, lap_eig, peig, phi_c, J, f_u=None,
     All corrections are right-hand-side terms, so both solves stay direct FFT solves."""
     from pyRMT.mac import solve_helmholtz_periodic, solve_poisson_periodic, divergence_per
     pu, pv = _to_u(phi_c), _to_v(phi_c)
-    Cu = laplacian_jump_correction(pu, _to_u(J["ux"]), _to_u(J["uy"]), dx, dy)
-    Cv = laplacian_jump_correction(pv, _to_v(J["vx"]), _to_v(J["vy"]), dx, dy)
+    k2 = {} if J2 is None else J2
+    Cu = laplacian_jump_correction(pu, _to_u(J["ux"]), _to_u(J["uy"]), dx, dy,
+                                   gxx=_to_u(k2["uxx"]) if k2 else None, gyy=_to_u(k2["uyy"]) if k2 else None)
+    Cv = laplacian_jump_correction(pv, _to_v(J["vx"]), _to_v(J["vy"]), dx, dy,
+                                   gxx=_to_v(k2["vxx"]) if k2 else None, gyy=_to_v(k2["vyy"]) if k2 else None)
     ru = u + dt * nu * Cu + (dt * f_u / rho if f_u is not None else 0.0)
     rv = v + dt * nu * Cv + (dt * f_v / rho if f_v is not None else 0.0)
     # p solves div(grad_c p) = (rho/dt) div_c(u*), with the corrected face gradient
     # grad_c p = (p_R - p_L - s [p]) / h on crossed faces; the known jump part goes to the RHS.
-    cx, cy = _pressure_face_jumps_per(phi_c, J["jp"])
+    cx, cy = _pressure_face_jumps_per(phi_c, J["jp"], None if J2 is None else (J2["px"], J2["py"]), dx)
     gxj = cx / dx; gyj = cy / dy                                  # jump part of the face gradient
     if conserve:
         # The interface corrections do not sum to exactly zero net force on the discrete grid,
@@ -229,3 +242,39 @@ def bulk_solid_force_per(phi, sxx, sxy, syy, dx, dy):
     fu = np.where(ins & np.roll(ins, 1, 1), fu, 0.0)
     fv = np.where(ins & np.roll(ins, 1, 0), fv, 0.0)
     return fu, fv
+
+
+def second_order_jumps(phi, J, divsig_x=None, divsig_y=None, mu=1.0, h=1.0, dp=None):
+    """Higher-order jump conditions (outside minus inside), cell-centred, for second-order IIM.
+
+    Inputs: phi (level set), J = traction_jumps(...) (first-derivative jumps of u, v and [p]),
+    optionally the solid's bulk force div(sigma_s) evaluated inside and extended (it vanishes in
+    the fluid, so [f] = -div(sigma_s)), and dp = the tangential traction G.tau (if None it is
+    recovered from J). With n the outward normal, tau = (-n_y, n_x), kappa = div(n),
+    A_i = [d u_i/dn] (continuous velocity => tangential derivatives continuous), and
+    [p_n] = -d/ds (G.tau)  (tangential momentum balance at the interface),
+    [grad p] = [p_n] n + d[p]/ds tau,  [Lap u_i] = ([d_i p] + div(sigma_s)_i) / mu,
+    the Cartesian second-derivative jumps are
+        [u_nn] = [Lap u] - kappa A,  [u_tt] = kappa A,  [u_nt] = dA/ds,
+        [u_xx] = n_x^2 [u_nn] + 2 n_x t_x [u_nt] + t_x^2 [u_tt]   (and likewise for yy).
+    Returns dict with uxx, uyy, vxx, vyy (velocity) and px, py ([d p/dx], [d p/dy])."""
+    gy, gx = np.gradient(phi, h)
+    nr = np.sqrt(gx ** 2 + gy ** 2) + 1e-300; nx, ny = gx / nr, gy / nr
+    tx, ty = -ny, nx
+    kap = np.gradient(nx, h, axis=1) + np.gradient(ny, h, axis=0)
+    dds = lambda f: tx * np.gradient(f, h, axis=1) + ty * np.gradient(f, h, axis=0)
+    if dp is None:                       # G.tau = mu * (A . tau) since mu A = G_tau tau
+        dp = mu * (J["ux"] * nx * tx + J["vx"] * nx * ty + J["uy"] * ny * tx + J["vy"] * ny * ty)
+    pn = -dds(dp)
+    ps = dds(J["jp"])
+    px = pn * nx + ps * tx; py = pn * ny + ps * ty
+    out = dict(px=px, py=py)
+    fx = divsig_x if divsig_x is not None else 0.0
+    fy = divsig_y if divsig_y is not None else 0.0
+    for c, gpi, fi in (("u", px, fx), ("v", py, fy)):
+        A = J[c + "x"] * nx + J[c + "y"] * ny          # [d u_c / dn]
+        lap = (gpi + fi) / mu
+        unn = lap - kap * A; utt = kap * A; unt = dds(A)
+        out[c + "xx"] = nx ** 2 * unn + 2 * nx * tx * unt + tx ** 2 * utt
+        out[c + "yy"] = ny ** 2 * unn + 2 * ny * ty * unt + ty ** 2 * utt
+    return out

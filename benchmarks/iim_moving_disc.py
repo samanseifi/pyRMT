@@ -23,14 +23,15 @@ from pyRMT.mac import (poisson_eigs_periodic, lap_eigs_periodic, solve_helmholtz
                        momentum_predictor_periodic_imex, solid_force_faces)
 from pyRMT.functions import (extrapolate_reference_map, advect_reference_map, solid_cauchy_stress,
                              smoothed_heaviside)
-from pyRMT.iim import traction_jumps, sharp_step_per, bulk_solid_force_per
+from pyRMT.iim import traction_jumps, sharp_step_per, bulk_solid_force_per, second_order_jumps
 
 U = (0.2, 0.08); NU, RHO, MU_S, STRETCH, R, C0, T_END = 0.05, 1.0, 0.5, 1.15, 0.15, (0.35, 0.45), 1.2
 DT_FACTOR = 1.0                     # multiplies the step 0.25 h / |U|
 BULK = True                         # include the bulk solid force chi div(sigma) in the sharp step
+SECOND = True                       # second-order jumps: [p_n], [grad p] and second-derivative jumps
 
 
-def run(N, method, fields=False):
+def run(N, method, fields=False, snap_times=()):
     h = 1.0 / N; xc = (np.arange(N) + 0.5) * h; X, Y = np.meshgrid(xc, xc)
     Xg, Yg = np.meshgrid(np.arange(N) * h, np.arange(N) * h)
     phi0 = lambda a, b: np.hypot(a - C0[0], b - C0[1]) - R
@@ -40,9 +41,9 @@ def run(N, method, fields=False):
     X1, X2 = extrapolate_reference_map(X1 * m, X2 * m, phi, h, h, 4)
     u = np.full((N, N), U[0]); v = np.full((N, N), U[1])
     leig = lap_eigs_periodic(N, N, h, h); peig = poisson_eigs_periodic(N, N, h, h)
-    dt = DT_FACTOR * 0.25 * h / np.hypot(*U); nstep = int(round(T_END / dt)); dt = T_END / nstep
+    dt = DT_FACTOR * 0.25 * h / max(np.hypot(*U), 0.215); nstep = int(round(T_END / dt)); dt = T_END / nstep
     jp_, ip_ = int((C0[1]) / h), int((C0[0] + STRETCH * R + 0.03) / h)       # probe ahead of the disc
-    hist = []
+    hist = []; snaps = []; sq = list(snap_times)
     for k in range(nstep):
         uc = 0.5 * (u + np.roll(u, -1, 1)); vc = 0.5 * (v + np.roll(v, -1, 0))
         phi = phi0(X1, X2); m = (phi <= 0).astype(float)
@@ -65,11 +66,21 @@ def run(N, method, fields=False):
             S3, _ = extrapolate_reference_map(syy, np.zeros_like(syy), phi, h, h, 3)
             Jm = traction_jumps(phi, S1, S2, S3, RHO * NU)
             fb = bulk_solid_force_per(phi, S1, S2, S3, h, h) if BULK else (None, None)
-            u, v, p = sharp_step_per(ua, va, h, h, dt, NU, RHO, leig, peig, phi, Jm, f_u=fb[0], f_v=fb[1])
+            J2 = None
+            if SECOND:
+                dsx = np.gradient(S1, h, axis=1) + np.gradient(S2, h, axis=0)
+                dsy = np.gradient(S2, h, axis=1) + np.gradient(S3, h, axis=0)
+                J2 = second_order_jumps(phi, Jm, dsx, dsy, mu=RHO * NU, h=h)
+            u, v, p = sharp_step_per(ua, va, h, h, dt, NU, RHO, leig, peig, phi, Jm, f_u=fb[0], f_v=fb[1], J2=J2)
         hist.append(((k + 1) * dt, p[jp_, ip_] - p.mean(), 0.5 * np.mean((u - U[0]) ** 2 + (v - U[1]) ** 2),
                      max(np.abs(u - U[0]).max(), np.abs(v - U[1]).max()), float(phi[jp_, ip_])))
+        while sq and (k + 1) * dt >= sq[0] - 1e-12:
+            ucs = 0.5 * (u + np.roll(u, -1, 1)); vcs = 0.5 * (v + np.roll(v, -1, 0))
+            snaps.append(dict(t=sq.pop(0), uc=ucs - U[0], vc=vcs - U[1], p=p - p.mean(), phi=phi0(X1, X2)))
         if not np.all(np.isfinite(u)):
             break
+    if snap_times:
+        return np.array(hist), snaps
     if not fields:
         return np.array(hist)
     # end-of-run fields for convergence studies (cell-centred speed components, pressure, level set,
