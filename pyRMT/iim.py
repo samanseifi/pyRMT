@@ -173,7 +173,8 @@ def _pressure_face_jumps_per(phi, jump):
     return out
 
 
-def sharp_step_per(u, v, dx, dy, dt, nu, rho, lap_eig, peig, phi_c, J, f_u=None, f_v=None):
+def sharp_step_per(u, v, dx, dy, dt, nu, rho, lap_eig, peig, phi_c, J, f_u=None, f_v=None,
+                   conserve=True):
     """One semi-implicit step with sharp interface jumps (periodic MAC grid, constant nu, rho).
 
     u, v (Ny, Nx): face velocities after explicit advection (and any bulk force already added).
@@ -187,13 +188,25 @@ def sharp_step_per(u, v, dx, dy, dt, nu, rho, lap_eig, peig, phi_c, J, f_u=None,
     Cv = laplacian_jump_correction(pv, _to_v(J["vx"]), _to_v(J["vy"]), dx, dy)
     ru = u + dt * nu * Cu + (dt * f_u / rho if f_u is not None else 0.0)
     rv = v + dt * nu * Cv + (dt * f_v / rho if f_v is not None else 0.0)
-    us = solve_helmholtz_periodic(ru, lap_eig, dt * nu)
-    vs = solve_helmholtz_periodic(rv, lap_eig, dt * nu)
-    dc = divergence_jump_correction_per(pu, _to_u(J["ux"]), pv, _to_v(J["vy"]), dx, dy)
     # p solves div(grad_c p) = (rho/dt) div_c(u*), with the corrected face gradient
     # grad_c p = (p_R - p_L - s [p]) / h on crossed faces; the known jump part goes to the RHS.
     cx, cy = _pressure_face_jumps_per(phi_c, J["jp"])
     gxj = cx / dx; gyj = cy / dy                                  # jump part of the face gradient
+    if conserve:
+        # The interface corrections do not sum to exactly zero net force on the discrete grid,
+        # which makes the body and the periodic flow drift (a grid-dependent spurious momentum).
+        # Their net effect over the step is known in advance: the forcing in ru/rv plus the jump
+        # part of the pressure gradient, which enters the velocity update as +dt/rho * gxj.
+        # Remove it uniformly over the solid's faces, before the solves (the Helmholtz solve and
+        # the raw projection gradient both preserve the mean), so total momentum is conserved.
+        for r, g, ph, du in ((ru, gxj, pu, u), (rv, gyj, pv, v)):
+            net = np.sum(r - du) + (dt / rho) * np.sum(g)
+            m = ph <= 0
+            if m.any():
+                r[m] -= net / m.sum()
+    us = solve_helmholtz_periodic(ru, lap_eig, dt * nu)
+    vs = solve_helmholtz_periodic(rv, lap_eig, dt * nu)
+    dc = divergence_jump_correction_per(pu, _to_u(J["ux"]), pv, _to_v(J["vy"]), dx, dy)
     div = divergence_per(us, vs, dx, dy) + dc
     corr = (np.roll(gxj, -1, 1) - gxj) / dx + (np.roll(gyj, -1, 0) - gyj) / dy
     p = solve_poisson_periodic((rho / dt) * div + corr, peig)

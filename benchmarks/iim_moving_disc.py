@@ -30,7 +30,7 @@ DT_FACTOR = 1.0                     # multiplies the step 0.25 h / |U|
 BULK = True                         # include the bulk solid force chi div(sigma) in the sharp step
 
 
-def run(N, method):
+def run(N, method, fields=False):
     h = 1.0 / N; xc = (np.arange(N) + 0.5) * h; X, Y = np.meshgrid(xc, xc)
     Xg, Yg = np.meshgrid(np.arange(N) * h, np.arange(N) * h)
     phi0 = lambda a, b: np.hypot(a - C0[0], b - C0[1]) - R
@@ -70,7 +70,19 @@ def run(N, method):
                      max(np.abs(u - U[0]).max(), np.abs(v - U[1]).max()), float(phi[jp_, ip_])))
         if not np.all(np.isfinite(u)):
             break
-    return np.array(hist)
+    if not fields:
+        return np.array(hist)
+    # end-of-run fields for convergence studies (cell-centred speed components, pressure, level set,
+    # disc centroid with the smooth weight, stored elastic energy of the disc)
+    uc = 0.5 * (u + np.roll(u, -1, 1)); vc = 0.5 * (v + np.roll(v, -1, 0))
+    phi = phi0(X1, X2); w = 1 - smoothed_heaviside(phi, 2 * h)
+    g11 = (np.roll(X1, -1, 1) - np.roll(X1, 1, 1)) / (2 * h); g12 = (np.roll(X1, -1, 0) - np.roll(X1, 1, 0)) / (2 * h)
+    g21 = (np.roll(X2, -1, 1) - np.roll(X2, 1, 1)) / (2 * h); g22 = (np.roll(X2, -1, 0) - np.roll(X2, 1, 0)) / (2 * h)
+    dG = g11 * g22 - g12 * g21; ins = (phi <= 0) & (dG > 0)
+    trb = np.where(ins, (g11**2 + g12**2 + g21**2 + g22**2) / np.where(ins, dG, 1.0)**2, 2.0)
+    Wsm = 0.5 * MU_S * np.sum(w * np.where(ins, trb - 2.0, 0.0)) * h * h
+    return np.array(hist), dict(uc=uc - U[0], vc=vc - U[1], p=p - p.mean(), phi=phi,
+                                cx=float((w * X).sum() / w.sum()), cy=float((w * Y).sum() / w.sum()), W=Wsm)
 
 
 def noise(y):
