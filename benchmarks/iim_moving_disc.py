@@ -34,7 +34,8 @@ INCREMENTAL = True                  # incremental pressure form (keeps the inter
 SWEPT = True                        # move the stored pressure gradient across faces the interface swept
 STRESS_EXT = "interior"             # "interior": stress from cells with a full solid stencil, extended
                                     # outward (second order at the interface) | "solid": all solid cells
-BULK_MODE = "cells"                 # bulk force on faces with both cells inside | "face": face point inside
+BULK_MODE = "face"                  # bulk force wherever the face point is inside (pointwise, consistent
+                                    # with the jump corrections) | "cells": only faces with both cells inside
 
 
 def run(N, method, fields=False, snap_times=()):

@@ -105,7 +105,7 @@ def laplacian_jump_correction(phi, gx, gy, dx, dy, gxx=None, gyy=None, w=None):
     return C
 
 
-def divergence_jump_correction_per(pu, gux, pv, gvy, dx, dy):
+def divergence_jump_correction_per(pu, gux, pv, gvy, dx, dy, guxx=None, gvyy=None, phi_c=None):
     """Immersed-interface correction to the periodic MAC divergence of a velocity whose normal
     derivatives jump across phi = 0 (the velocity itself is continuous).
 
@@ -115,16 +115,29 @@ def divergence_jump_correction_per(pu, gux, pv, gvy, dx, dy):
     recovered by adding g theta (centre on the right side) or subtracting g (1 - theta) (centre on
     the left side), g = jump of du/dx right minus left. pu, pv: level set at the u / v points;
     gux, gvy: jumps of du/dx, dv/dy outside minus inside at those points.
+    Optional guxx, gvyy: jumps of d2u/dx2, d2v/dy2 (outside minus inside). With g2 the jump right
+    minus left, the face difference picks up g2 (1 - theta)^2 h / 2 more, so the corrections become
+        centre on the right:  + g theta - g2 theta^2 h / 2
+        centre on the left:   - g (1 - theta) - g2 (1 - theta)^2 h / 2
+    and the divergence constraint on cut cells is second order instead of first.
+    Optional phi_c: level set at the cell centres. The side of the centre is then taken from its
+    sign for BOTH directions (instead of theta < 1/2 separately along x and along y, which can
+    disagree when the interface passes close to the centre and leaves an O(1) error in that cell).
     Returns C (Ny, Nx): div_true ~= div_MAC + C."""
     C = np.zeros_like(pu)
-    for p, g, h, ax in ((pu, gux, dx, 1), (pv, gvy, dy, 0)):
+    for p, g, g2, h, ax in ((pu, gux, guxx, dx, 1), (pv, gvy, gvyy, dy, 0)):
         a = p; b = np.roll(p, -1, ax)                       # the two faces of each cell
         ga = g; gb = np.roll(g, -1, ax)
         cr = (a <= 0) != (b <= 0)
         th = np.where(cr, a / np.where(cr, a - b, 1.0), 0.0)
         sgn = np.where(a <= 0, 1.0, -1.0)                    # right-minus-left orientation
         gc = np.where(cr, sgn * ((1 - th) * ga + th * gb), 0.0)
-        C += np.where(cr, np.where(th < 0.5, gc * th, -gc * (1 - th)), 0.0) / 1.0
+        right = (th < 0.5) if phi_c is None else ((phi_c <= 0) != (a <= 0))   # centre beyond the crossing
+        lo = -gc * (1 - th); hi = gc * th
+        if g2 is not None:
+            g2c = np.where(cr, sgn * ((1 - th) * g2 + th * np.roll(g2, -1, ax)), 0.0)
+            lo = lo - 0.5 * g2c * (1 - th) ** 2 * h; hi = hi - 0.5 * g2c * th ** 2 * h
+        C += np.where(cr, np.where(right, hi, lo), 0.0)
     return C
 
 
@@ -142,6 +155,10 @@ def project_per_with_jumps(u_star, v_star, dx, dy, eig, div_corr):
 # ---------------------------------------------------------------------------------------------
 # Stage 3: jumps from the solid stress, and one sharp step on the periodic MAC grid.
 # ---------------------------------------------------------------------------------------------
+
+DIV_SECOND = False       # second-derivative jumps in the cut-cell divergence correction (no measurable gain)
+DIV_CENTRE_SIDE = True   # side of a cut cell's centre from phi at the centre, same for x and y
+
 
 def _to_u(f):   # cell centres -> periodic x-faces (face i left of cell i)
     return 0.5 * (f + np.roll(f, 1, 1))
@@ -253,7 +270,10 @@ def sharp_step_per(u, v, dx, dy, dt, nu, rho, lap_eig, peig, phi_c, J, f_u=None,
     else:          # ... and added back, so the projection below still solves for the total pressure
         us = solve_helmholtz_periodic(ru, lap_eig, dt * nu)
         vs = solve_helmholtz_periodic(rv, lap_eig, dt * nu)
-    dc = divergence_jump_correction_per(pu, _to_u(J["ux"]), pv, _to_v(J["vy"]), dx, dy)
+    dc = divergence_jump_correction_per(pu, _to_u(J["ux"]), pv, _to_v(J["vy"]), dx, dy,
+                                        guxx=_to_u(k2["uxx"]) if (k2 and DIV_SECOND) else None,
+                                        gvyy=_to_v(k2["vyy"]) if (k2 and DIV_SECOND) else None,
+                                        phi_c=phi_c if DIV_CENTRE_SIDE else None)
     div = divergence_per(us, vs, dx, dy) + dc
     corr = (np.roll(gxj, -1, 1) - gxj) / dx + (np.roll(gyj, -1, 0) - gyj) / dy
     p = solve_poisson_periodic((rho / dt) * div + corr, peig)

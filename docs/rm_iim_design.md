@@ -62,3 +62,29 @@ viscosity uniform, as in the one-fluid model):
   only, over at most 1–2 cells.
 - Moving interface: cells changing side between steps need a fresh-cell treatment (as in
   sharp-interface IB methods).
+
+## Status (2026-11-26): pressure
+
+- Static eigenstress ellipse, direct steady solve (`benchmarks/iim_eigenstress_pressure.py`):
+  the sharp pressure is second order both far from the interface and up to 1.5 cells from it
+  (near-interface max error 3.8e-3 at N = 128, 9.7e-4 at N = 256); the smeared pressure is second
+  order only outside its band (5.4e-2 at N = 128 at the same distance). Velocity: sharp max error
+  3.7e-4, 9.5e-5 at N = 64, 128 (order 2), smeared 2.5e-3, 1.5e-3 (order 0.8).
+- An earlier impression that the sharp bulk pressure was much worse than the smeared one was a
+  test artefact: the smeared scheme's non-incremental projection scalar is a Helmholtz-smoothed
+  pressure, and the reference pressure had a Gibbs error of 1e-4. Second-derivative pressure
+  jumps in the cut-face gradient were tried and gave no gain (not kept).
+- Moving disc: the pressure level inside the solid jittered in time with amplitude ~ 1/dt (the
+  classic moving sharp-interface pressure noise). Cause: the cut-cell divergence correction took
+  the side of the cell centre separately along x and y. Fixed by taking it from the level set
+  at the centre (`DIV_CENTRE_SIDE`); jitter at N = 64, quarter step 4.3e-3 -> 2.3e-4, now
+  independent of dt (`benchmarks/iim_pressure_jitter.py`).
+- Bulk solid force now pointwise (every face inside the solid, using the extended stress),
+  which is what the jump corrections assume: the momentum-conservation fix-up force is 3x
+  smaller and the kinetic-energy order rises from 1.6 to 2.2 (E = KE + W: 2.7; no energy injection).
+- With both changes (dt ~ h^2, 32/64 vs 64/128, t = 0.2): bulk pressure order 2.2 (3.0e-4,
+  smeared 3.3e-4), velocity L2 order 2.1 (1.6e-4, smeared 4.7e-4 at order 1.4).
+- Open: late in the decay (t = 1, energy down 300x) the pressure inside the solid keeps a
+  non-converging error of about 5e-4 (0.3% of the initial pressure scale; smeared 1e-4). It
+  changes with the time step alone at fixed N, i.e. it is noise in the interface stress taken
+  from the reference map near the interface, not a discretisation error of the jump conditions.

@@ -5,6 +5,7 @@ E = KE + W. Viscosity is the only sink, so E must decrease monotonically; an inc
 numerical energy injection. Grids N = 32, 64, 128 with dt ~ h^2 (so the spatial order shows).
 Reported: successive differences of KE, W and E at several times, their order, the largest
 single-step increase of E, and the energy remaining at the end.
+Usage: python benchmarks/iim_energy_convergence.py [methods, e.g. sharp] [bulk force mode: cells|face]
 """
 import os, sys
 import numpy as np
@@ -16,7 +17,9 @@ TS = (0.1, 0.2, 0.4, 0.7, 1.0)
 
 
 def main():
-    for meth in ("smeared", "sharp"):
+    if len(sys.argv) > 2:
+        T.BULK_MODE = sys.argv[2]
+    for meth in (sys.argv[1].split(",") if len(sys.argv) > 1 else ("smeared", "sharp")):
         H = {}
         for N, f in ((32, 1.0), (64, 0.5), (128, 0.25)):
             T.DT_FACTOR = f; H[N] = T.run(N, meth)
