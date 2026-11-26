@@ -31,6 +31,9 @@ BULK = True                         # include the bulk solid force chi div(sigma
 SECOND = True                       # second-order jumps: [p_n], [grad p] and second-derivative jumps
 STRESS_CENTRAL = False              # interface-cell stress from central differences of the extended map
 INCREMENTAL = True                  # incremental pressure form (keeps the intermediate velocity continuous)
+SWEPT = True                        # move the stored pressure gradient across faces the interface swept
+STRESS_EXT = "interior"             # "interior": stress from cells with a full solid stencil, extended
+                                    # outward (second order at the interface) | "solid": all solid cells
 BULK_MODE = "cells"                 # bulk force on faces with both cells inside | "face": face point inside
 
 
@@ -67,8 +70,17 @@ def run(N, method, fields=False, snap_times=()):
             p = p                                                                # projection scalar = pressure
         else:
             # stress on the solid cells, extended 3 layers outward so it is known at the interface
-            S1, S2 = extrapolate_reference_map(sxx, sxy, phi, h, h, 3)
-            S3, _ = extrapolate_reference_map(syy, np.zeros_like(syy), phi, h, h, 3)
+            if STRESS_EXT == "interior":
+                # interface cells use a one-sided (first-order) gradient of the map; keep only cells
+                # whose 5-point stencil is inside the solid (central, second order) and extend those
+                ins = phi <= 0
+                good = ins & np.roll(ins, 1, 0) & np.roll(ins, -1, 0) & np.roll(ins, 1, 1) & np.roll(ins, -1, 1)
+                pg = np.where(good, -1.0, 1.0)
+                S1, S2 = extrapolate_reference_map(sxx * good, sxy * good, pg, h, h, 5)
+                S3, _ = extrapolate_reference_map(syy * good, np.zeros_like(syy), pg, h, h, 5)
+            else:
+                S1, S2 = extrapolate_reference_map(sxx, sxy, phi, h, h, 3)
+                S3, _ = extrapolate_reference_map(syy, np.zeros_like(syy), phi, h, h, 3)
             Jm = traction_jumps(phi, S1, S2, S3, RHO * NU)
             fb = bulk_solid_force_per(phi, S1, S2, S3, h, h, mode=BULK_MODE) if BULK else (None, None)
             J2 = None
@@ -83,6 +95,8 @@ def run(N, method, fields=False, snap_times=()):
                                                     f_u=fb[0], f_v=fb[1], J2=J2, G_old=G)
                 u, v, p, G = sharp_step_per(ua, va, h, h, dt, NU, RHO, leig, peig, phi, Jm,
                                             f_u=fb[0], f_v=fb[1], J2=J2, G_old=G)
+                if not SWEPT:
+                    G = G[:2]
             else:
                 u, v, p = sharp_step_per(ua, va, h, h, dt, NU, RHO, leig, peig, phi, Jm, f_u=fb[0], f_v=fb[1], J2=J2)
         hist.append(((k + 1) * dt, p[jp_, ip_] - p.mean(), 0.5 * np.mean((u - U[0]) ** 2 + (v - U[1]) ** 2),

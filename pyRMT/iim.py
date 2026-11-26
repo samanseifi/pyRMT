@@ -214,6 +214,15 @@ def sharp_step_per(u, v, dx, dy, dt, nu, rho, lap_eig, peig, phi_c, J, f_u=None,
     # interface by (dt/rho)[grad p] (a splitting artifact: [grad p] != 0 whenever the traction
     # varies along the interface), so the viscous solve needs the value-jump correction too.
     inc = G_old is not None
+    if inc and len(G_old) == 4 and J2 is not None:
+        # Faces the interface swept across since the last step: the stored gradient there is the
+        # one-sided gradient of the OTHER side. Move it to the current side with [grad p]
+        # (outside minus inside), otherwise u* carries a (dt/rho)[grad p] glitch on those faces.
+        su_old, sv_old = G_old[2], G_old[3]
+        su, sv = pu <= 0, pv <= 0
+        gxo = G_old[0] + np.where(su & ~su_old, -1.0, 0.0) * _to_u(J2["px"]) + np.where(~su & su_old, 1.0, 0.0) * _to_u(J2["px"])
+        gyo = G_old[1] + np.where(sv & ~sv_old, -1.0, 0.0) * _to_v(J2["py"]) + np.where(~sv & sv_old, 1.0, 0.0) * _to_v(J2["py"])
+        G_old = (gxo, gyo)
     Cu = laplacian_jump_correction(pu, _to_u(J["ux"]), _to_u(J["uy"]), dx, dy,
                                    gxx=_to_u(k2["uxx"]) if k2 else None, gyy=_to_u(k2["uyy"]) if k2 else None,
                                    w=(dt / rho) * _to_u(k2["px"]) if (k2 and not inc) else None)
@@ -253,7 +262,7 @@ def sharp_step_per(u, v, dx, dy, dt, nu, rho, lap_eig, peig, phi_c, J, f_u=None,
     un = us - (dt / rho) * Gx
     vn = vs - (dt / rho) * Gy
     if inc:
-        return un, vn, p, (Gx, Gy)
+        return un, vn, p, (Gx, Gy, pu <= 0, pv <= 0)
     return un, vn, p
 
 
