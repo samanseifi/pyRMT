@@ -100,7 +100,8 @@ def run(N, method, fields=False, snap_times=()):
             else:
                 u, v, p = sharp_step_per(ua, va, h, h, dt, NU, RHO, leig, peig, phi, Jm, f_u=fb[0], f_v=fb[1], J2=J2)
         hist.append(((k + 1) * dt, p[jp_, ip_] - p.mean(), 0.5 * np.mean((u - U[0]) ** 2 + (v - U[1]) ** 2),
-                     max(np.abs(u - U[0]).max(), np.abs(v - U[1]).max()), float(phi[jp_, ip_])))
+                     max(np.abs(u - U[0]).max(), np.abs(v - U[1]).max()), float(phi[jp_, ip_]),
+                     elastic_energy(X1, X2, phi, h)))
         while sq and (k + 1) * dt >= sq[0] - 1e-12:
             ucs = 0.5 * (u + np.roll(u, -1, 1)); vcs = 0.5 * (v + np.roll(v, -1, 0))
             snaps.append(dict(t=sq.pop(0), uc=ucs - U[0], vc=vcs - U[1], p=p - p.mean(), phi=phi0(X1, X2)))
@@ -121,6 +122,17 @@ def run(N, method, fields=False, snap_times=()):
     Wsm = 0.5 * MU_S * np.sum(w * np.where(ins, trb - 2.0, 0.0)) * h * h
     return np.array(hist), dict(uc=uc - U[0], vc=vc - U[1], p=p - p.mean(), phi=phi,
                                 cx=float((w * X).sum() / w.sum()), cy=float((w * Y).sum() / w.sum()), W=Wsm)
+
+
+def elastic_energy(X1, X2, phi, h):
+    """Stored elastic energy of the disc, W = (mu_s/2) int (tr b - 2), b = F F^T from the reference
+    map, with the smooth solid weight 1 - H (sub-cell, the same functional for both methods)."""
+    g11 = (np.roll(X1, -1, 1) - np.roll(X1, 1, 1)) / (2 * h); g12 = (np.roll(X1, -1, 0) - np.roll(X1, 1, 0)) / (2 * h)
+    g21 = (np.roll(X2, -1, 1) - np.roll(X2, 1, 1)) / (2 * h); g22 = (np.roll(X2, -1, 0) - np.roll(X2, 1, 0)) / (2 * h)
+    dG = g11 * g22 - g12 * g21; ok = (phi < 2 * h) & (dG > 0)
+    trb = np.where(ok, (g11 ** 2 + g12 ** 2 + g21 ** 2 + g22 ** 2) / np.where(ok, dG, 1.0) ** 2, 2.0)
+    w = 1 - smoothed_heaviside(phi, 2 * h)
+    return float(0.5 * MU_S * np.sum(w * (trb - 2.0)) * h * h)
 
 
 def noise(y):
