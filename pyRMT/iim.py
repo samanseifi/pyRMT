@@ -128,3 +128,91 @@ def project_per_with_jumps(u_star, v_star, dx, dy, eig, div_corr):
     u = u_star - (q - np.roll(q, 1, 1)) / dx
     v = v_star - (q - np.roll(q, 1, 0)) / dy
     return u, v, q
+
+
+# ---------------------------------------------------------------------------------------------
+# Stage 3: jumps from the solid stress, and one sharp step on the periodic MAC grid.
+# ---------------------------------------------------------------------------------------------
+
+def _to_u(f):   # cell centres -> periodic x-faces (face i left of cell i)
+    return 0.5 * (f + np.roll(f, 1, 1))
+
+
+def _to_v(f):   # cell centres -> periodic y-faces
+    return 0.5 * (f + np.roll(f, 1, 0))
+
+
+def traction_jumps(phi, sxx, sxy, syy, mu):
+    """Interface jump conditions from the solid Cauchy stress sigma_s (cell-centred, valid in a
+    band around phi = 0, e.g. extrapolated from the solid side).
+
+    Total-traction continuity with a continuous velocity gives (outside minus inside)
+        [p] = -n.sigma_s.n,        [du/dn] = (I - n n) sigma_s n / mu,
+    and, since tangential derivatives are continuous, [d u_i/d x_j] = [d u_i/d n] n_j.
+    Returns a dict of cell-centred fields: jp, and the derivative jumps of u and v."""
+    gy, gx = np.gradient(phi)                     # periodic not needed: only used near the disc
+    nrm = np.sqrt(gx ** 2 + gy ** 2) + 1e-300; nx, ny = gx / nrm, gy / nrm
+    tx = sxx * nx + sxy * ny; ty = sxy * nx + syy * ny          # sigma_s n
+    tn = tx * nx + ty * ny
+    ttx, tty = tx - tn * nx, ty - tn * ny                        # tangential part
+    return dict(jp=-tn, ux=ttx * nx / mu, uy=ttx * ny / mu, vx=tty * nx / mu, vy=tty * ny / mu)
+
+
+def _pressure_face_jumps_per(phi, jump):
+    """Periodic version of _face_jumps for cell-centred phi and [q]: returns (cx, cy), the jump
+    part of the face gradient on x-faces (left of cell i) and y-faces (below cell j)."""
+    out = []
+    for ax in (1, 0):
+        a = np.roll(phi, 1, ax); b = phi                         # left/lower cell, this cell
+        ja = np.roll(jump, 1, ax); jb = jump
+        cr = (a <= 0) != (b <= 0)
+        th = np.where(cr, a / np.where(cr, a - b, 1.0), 0.0)
+        jc = np.where(cr, (1 - th) * ja + th * jb, 0.0)
+        s = np.where(a <= 0, 1.0, -1.0)
+        out.append(np.where(cr, s * jc, 0.0))
+    return out
+
+
+def sharp_step_per(u, v, dx, dy, dt, nu, rho, lap_eig, peig, phi_c, J, f_u=None, f_v=None):
+    """One semi-implicit step with sharp interface jumps (periodic MAC grid, constant nu, rho).
+
+    u, v (Ny, Nx): face velocities after explicit advection (and any bulk force already added).
+    phi_c: cell-centred level set; J: traction_jumps(...) evaluated on cell centres.
+      1. implicit viscosity  (I - dt nu Lap) u* = u + dt nu C_u   (C: IIM Laplacian correction)
+      2. projection with the jump-corrected divergence and the pressure jump [p] (ghost fluid)
+    All corrections are right-hand-side terms, so both solves stay direct FFT solves."""
+    from pyRMT.mac import solve_helmholtz_periodic, solve_poisson_periodic, divergence_per
+    pu, pv = _to_u(phi_c), _to_v(phi_c)
+    Cu = laplacian_jump_correction(pu, _to_u(J["ux"]), _to_u(J["uy"]), dx, dy)
+    Cv = laplacian_jump_correction(pv, _to_v(J["vx"]), _to_v(J["vy"]), dx, dy)
+    ru = u + dt * nu * Cu + (dt * f_u / rho if f_u is not None else 0.0)
+    rv = v + dt * nu * Cv + (dt * f_v / rho if f_v is not None else 0.0)
+    us = solve_helmholtz_periodic(ru, lap_eig, dt * nu)
+    vs = solve_helmholtz_periodic(rv, lap_eig, dt * nu)
+    dc = divergence_jump_correction_per(pu, _to_u(J["ux"]), pv, _to_v(J["vy"]), dx, dy)
+    # p solves div(grad_c p) = (rho/dt) div_c(u*), with the corrected face gradient
+    # grad_c p = (p_R - p_L - s [p]) / h on crossed faces; the known jump part goes to the RHS.
+    cx, cy = _pressure_face_jumps_per(phi_c, J["jp"])
+    gxj = cx / dx; gyj = cy / dy                                  # jump part of the face gradient
+    div = divergence_per(us, vs, dx, dy) + dc
+    corr = (np.roll(gxj, -1, 1) - gxj) / dx + (np.roll(gyj, -1, 0) - gyj) / dy
+    p = solve_poisson_periodic((rho / dt) * div + corr, peig)
+    un = us - (dt / rho) * ((p - np.roll(p, 1, 1)) / dx - gxj)
+    vn = vs - (dt / rho) * ((p - np.roll(p, 1, 0)) / dy - gyj)
+    return un, vn, p
+
+
+def bulk_solid_force_per(phi, sxx, sxy, syy, dx, dy):
+    """Bulk solid force chi * div(sigma_s) on the periodic MAC faces, for the sharp formulation.
+
+    The divergence is the compact face divergence of the (smoothly extended) solid stress, kept
+    only on faces whose two neighbouring cells are both inside the solid (phi <= 0). Faces that
+    cross the interface carry no bulk force: there the traction enters through the jump
+    conditions, so nothing is counted twice. Without this term the solid interior responds like
+    fluid once its stress becomes non-uniform, and the interface traction injects energy."""
+    from pyRMT.mac import solid_force_faces
+    fu, fv = solid_force_faces(sxx, sxy, syy, dx, dy, periodic=True)
+    ins = phi <= 0
+    fu = np.where(ins & np.roll(ins, 1, 1), fu, 0.0)
+    fv = np.where(ins & np.roll(ins, 1, 0), fv, 0.0)
+    return fu, fv
