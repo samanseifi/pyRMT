@@ -156,6 +156,7 @@ def project_per_with_jumps(u_star, v_star, dx, dy, eig, div_corr):
 # Stage 3: jumps from the solid stress, and one sharp step on the periodic MAC grid.
 # ---------------------------------------------------------------------------------------------
 
+PN_BULK = True           # bulk-force term -div(sigma_s).n in the jump of the normal pressure gradient
 DIV_SECOND = False       # second-derivative jumps in the cut-cell divergence correction (no measurable gain)
 DIV_CENTRE_SIDE = True   # side of a cut cell's centre from phi at the centre, same for x and y
 
@@ -209,8 +210,29 @@ def _pressure_face_jumps_per(phi, jump, jgrad=None, h=None):
     return out
 
 
+def _helm_freeslip(rhs, coef, dx, dy, ax):
+    """(I - coef Lap) x = rhs on the free-slip box for a face field stored in the periodic layout
+    (N, N): along `ax` the faces are nodes with the wall face at index 0 (value 0, Dirichlet),
+    along the other axis they are cell-centred with zero normal gradient. Direct solve:
+    DST-I along `ax` (interior faces 1..N-1), DCT-II along the other axis."""
+    from scipy.fft import dst, idst, dct, idct
+    ot = 1 - ax; N = rhs.shape[ax]; No = rhs.shape[ot]; ha, ho = (dx, dy) if ax == 1 else (dy, dx)
+    r = rhs[:, 1:] if ax == 1 else rhs[1:, :]
+    la = -(2.0 - 2.0 * np.cos(np.pi * np.arange(1, N) / N)) / ha ** 2
+    lo = -(2.0 - 2.0 * np.cos(np.pi * np.arange(No) / No)) / ho ** 2
+    lam = (la[None, :] + lo[:, None]) if ax == 1 else (la[:, None] + lo[None, :])
+    xh = dct(dst(r, type=1, axis=ax, norm="ortho"), type=2, axis=ot, norm="ortho") / (1.0 - coef * lam)
+    x = idst(idct(xh, type=2, axis=ot, norm="ortho"), type=1, axis=ax, norm="ortho")
+    out = np.zeros_like(rhs)
+    if ax == 1:
+        out[:, 1:] = x
+    else:
+        out[1:, :] = x
+    return out
+
+
 def sharp_step_per(u, v, dx, dy, dt, nu, rho, lap_eig, peig, phi_c, J, f_u=None, f_v=None,
-                   conserve=True, J2=None, G_old=None):
+                   conserve=True, J2=None, G_old=None, bc="periodic"):
     """One semi-implicit step with sharp interface jumps (periodic MAC grid, constant nu, rho).
 
     u, v (Ny, Nx): face velocities after explicit advection (and any bulk force already added).
@@ -223,8 +245,23 @@ def sharp_step_per(u, v, dx, dy, dt, nu, rho, lap_eig, peig, phi_c, J, f_u=None,
     (incremental pressure form). The viscous solve then acts on u* = u^{n+1} + (dt/rho)(G_new -
     G_old), which is continuous across the interface up to O(dt^2); without it u* carries jumps
     (dt/rho)[grad p], (dt/rho)[grad grad p], ... of every order, and the result depends on dt at
-    O(dt [grad p]). With G_old given, the function returns (u, v, p, (Gx, Gy))."""
-    from pyRMT.mac import solve_helmholtz_periodic, solve_poisson_periodic, divergence_per
+    O(dt [grad p]). With G_old given, the function returns (u, v, p, (Gx, Gy)).
+
+    bc = "freeslip": the free-slip box (normal velocity zero at the walls, zero normal gradient
+    of the tangential velocity), for an interface that stays away from the walls. u and v are
+    passed in the same (Ny, Nx) layout, u[:, 0] and v[0, :] being the (zero) wall faces -- the
+    periodic wrap then reproduces the walled divergence exactly. peig must be the Neumann
+    eigenvalues (pyRMT.mac.poisson_eigs_neumann); lap_eig is not used. Only the two direct solves
+    and the wall faces of the pressure gradient differ from the periodic case."""
+    from pyRMT.mac import (solve_helmholtz_periodic, solve_poisson_periodic, divergence_per,
+                           solve_poisson_neumann)
+    if bc == "periodic":
+        helm_u = helm_v = lambda r: solve_helmholtz_periodic(r, lap_eig, dt * nu)
+        pois = lambda r: solve_poisson_periodic(r, peig)
+    else:
+        helm_u = lambda r: _helm_freeslip(r, dt * nu, dx, dy, 1)
+        helm_v = lambda r: _helm_freeslip(r, dt * nu, dx, dy, 0)
+        pois = lambda r: solve_poisson_neumann(r - r.mean(), peig)
     pu, pv = _to_u(phi_c), _to_v(phi_c)
     k2 = {} if J2 is None else J2
     # The intermediate velocity u* = u^{n+1} + (dt/rho) grad p is DISCONTINUOUS across the
@@ -265,20 +302,22 @@ def sharp_step_per(u, v, dx, dy, dt, nu, rho, lap_eig, peig, phi_c, J, f_u=None,
             if m.any():
                 r[m] -= net / m.sum()
     if inc:        # incremental form: old pressure gradient inside the viscous solve ...
-        us = solve_helmholtz_periodic(ru - (dt / rho) * G_old[0], lap_eig, dt * nu) + (dt / rho) * G_old[0]
-        vs = solve_helmholtz_periodic(rv - (dt / rho) * G_old[1], lap_eig, dt * nu) + (dt / rho) * G_old[1]
+        us = helm_u(ru - (dt / rho) * G_old[0]) + (dt / rho) * G_old[0]
+        vs = helm_v(rv - (dt / rho) * G_old[1]) + (dt / rho) * G_old[1]
     else:          # ... and added back, so the projection below still solves for the total pressure
-        us = solve_helmholtz_periodic(ru, lap_eig, dt * nu)
-        vs = solve_helmholtz_periodic(rv, lap_eig, dt * nu)
+        us = helm_u(ru)
+        vs = helm_v(rv)
     dc = divergence_jump_correction_per(pu, _to_u(J["ux"]), pv, _to_v(J["vy"]), dx, dy,
                                         guxx=_to_u(k2["uxx"]) if (k2 and DIV_SECOND) else None,
                                         gvyy=_to_v(k2["vyy"]) if (k2 and DIV_SECOND) else None,
                                         phi_c=phi_c if DIV_CENTRE_SIDE else None)
     div = divergence_per(us, vs, dx, dy) + dc
     corr = (np.roll(gxj, -1, 1) - gxj) / dx + (np.roll(gyj, -1, 0) - gyj) / dy
-    p = solve_poisson_periodic((rho / dt) * div + corr, peig)
+    p = pois((rho / dt) * div + corr)
     Gx = (p - np.roll(p, 1, 1)) / dx - gxj
     Gy = (p - np.roll(p, 1, 0)) / dy - gyj
+    if bc != "periodic":                                          # no correction of the wall faces
+        Gx[:, 0] = 0.0; Gy[0, :] = 0.0
     un = us - (dt / rho) * Gx
     vn = vs - (dt / rho) * Gy
     if inc:
@@ -314,7 +353,7 @@ def second_order_jumps(phi, J, divsig_x=None, divsig_y=None, mu=1.0, h=1.0, dp=N
     the fluid, so [f] = -div(sigma_s)), and dp = the tangential traction G.tau (if None it is
     recovered from J). With n the outward normal, tau = (-n_y, n_x), kappa = div(n),
     A_i = [d u_i/dn] (continuous velocity => tangential derivatives continuous), and
-    [p_n] = -d/ds (G.tau)  (tangential momentum balance at the interface),
+    [p_n] = -d/ds (G.tau) - div(sigma_s).n,
     [grad p] = [p_n] n + d[p]/ds tau,  [Lap u_i] = ([d_i p] + div(sigma_s)_i) / mu,
     the Cartesian second-derivative jumps are
         [u_nn] = [Lap u] - kappa A,  [u_tt] = kappa A,  [u_nt] = dA/ds,
@@ -327,12 +366,14 @@ def second_order_jumps(phi, J, divsig_x=None, divsig_y=None, mu=1.0, h=1.0, dp=N
     dds = lambda f: tx * np.gradient(f, h, axis=1) + ty * np.gradient(f, h, axis=0)
     if dp is None:                       # G.tau = mu * (A . tau) since mu A = G_tau tau
         dp = mu * (J["ux"] * nx * tx + J["vx"] * nx * ty + J["uy"] * ny * tx + J["vy"] * ny * ty)
-    pn = -dds(dp)
+    fx = divsig_x if divsig_x is not None else 0.0
+    fy = divsig_y if divsig_y is not None else 0.0
+    # [p_n] = mu n.[Lap u] + [f.n]: the kinematic part is -d(G.tau)/ds (from div u = 0 on both
+    # sides), and the bulk force exists only inside, so [f.n] = -div(sigma_s).n.
+    pn = -dds(dp) - ((fx * nx + fy * ny) if PN_BULK else 0.0)
     ps = dds(J["jp"])
     px = pn * nx + ps * tx; py = pn * ny + ps * ty
     out = dict(px=px, py=py)
-    fx = divsig_x if divsig_x is not None else 0.0
-    fy = divsig_y if divsig_y is not None else 0.0
     for c, gpi, fi in (("u", px, fx), ("v", py, fy)):
         A = J[c + "x"] * nx + J[c + "y"] * ny          # [d u_c / dn]
         lap = (gpi + fi) / mu

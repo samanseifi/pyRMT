@@ -119,21 +119,24 @@ def run(N, method, fields=False, snap_times=()):
     g11 = (np.roll(X1, -1, 1) - np.roll(X1, 1, 1)) / (2 * h); g12 = (np.roll(X1, -1, 0) - np.roll(X1, 1, 0)) / (2 * h)
     g21 = (np.roll(X2, -1, 1) - np.roll(X2, 1, 1)) / (2 * h); g22 = (np.roll(X2, -1, 0) - np.roll(X2, 1, 0)) / (2 * h)
     dG = g11 * g22 - g12 * g21; ins = (phi <= 0) & (dG > 0)
-    trb = np.where(ins, (g11**2 + g12**2 + g21**2 + g22**2) / np.where(ins, dG, 1.0)**2, 2.0)
-    Wsm = 0.5 * MU_S * np.sum(w * np.where(ins, trb - 2.0, 0.0)) * h * h
+    Wsm = elastic_energy(X1, X2, phi, h)
     return np.array(hist), dict(uc=uc - U[0], vc=vc - U[1], p=p - p.mean(), phi=phi,
                                 cx=float((w * X).sum() / w.sum()), cy=float((w * Y).sum() / w.sum()), W=Wsm)
 
 
 def elastic_energy(X1, X2, phi, h):
-    """Stored elastic energy of the disc, W = (mu_s/2) int (tr b - 2), b = F F^T from the reference
-    map, with the smooth solid weight 1 - H (sub-cell, the same functional for both methods)."""
+    """Stored elastic energy of the disc, W = (mu_s/2) int (tr b - 2 - ln det b), b = F F^T from
+    the reference map, with the smooth solid weight 1 - H (sub-cell, the same functional for both
+    methods). The ln det b term makes the integrand non-negative and second order in the error of
+    det F; without it a 1e-4 error in det F is a first-order, sign-indefinite contribution that
+    swamps the energy once the disc has relaxed."""
     g11 = (np.roll(X1, -1, 1) - np.roll(X1, 1, 1)) / (2 * h); g12 = (np.roll(X1, -1, 0) - np.roll(X1, 1, 0)) / (2 * h)
     g21 = (np.roll(X2, -1, 1) - np.roll(X2, 1, 1)) / (2 * h); g22 = (np.roll(X2, -1, 0) - np.roll(X2, 1, 0)) / (2 * h)
     dG = g11 * g22 - g12 * g21; ok = (phi < 2 * h) & (dG > 0)
     trb = np.where(ok, (g11 ** 2 + g12 ** 2 + g21 ** 2 + g22 ** 2) / np.where(ok, dG, 1.0) ** 2, 2.0)
     w = 1 - smoothed_heaviside(phi, 2 * h)
-    return float(0.5 * MU_S * np.sum(w * (trb - 2.0)) * h * h)
+    lndetb = np.where(ok, -2.0 * np.log(np.where(ok, dG, 1.0)), 0.0)
+    return float(0.5 * MU_S * np.sum(w * (trb - 2.0 - lndetb)) * h * h)
 
 
 def noise(y):
