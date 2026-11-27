@@ -20,7 +20,7 @@ import iim_eigenstress_pressure as EP
 import iim_vortex_disc as V
 
 OUTDIR = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "paper", "figures")
-CB, CS = "tab:blue", "tab:red"                    # blended, sharp
+CB, CS = "blue", "red"                            # blended, sharp (classic colours, as in the other paper figures)
 
 
 def static_data():
