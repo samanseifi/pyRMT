@@ -11,7 +11,7 @@ high-wavenumber pressure modes slowly at large dt.
 Reference pressure: p_hat = s (kx^2 - ky^2)/k^2 chi_hat. p is harmonic on each side of the
 interface, so a Gaussian mean of width sigma leaves it unchanged away from the interface
 (mean-value property) while making the Fourier sum converge exponentially (no Gibbs error
-beyond about 6 sigma = 0.012 from the interface).
+beyond about 6 sigma = 0.006 from the interface, which is 1.5 cells at N = 256).
 
 Reported: velocity error (max, L2) and pressure error far from the interface (> 0.04) and near
 it (> 1.5 cells and > 0.012). Usage: python benchmarks/iim_eigenstress_pressure.py
@@ -27,7 +27,7 @@ import pyRMT.iim as I
 from pyRMT.mac import poisson_eigs_periodic, solve_poisson_periodic, divergence_per, solid_force_faces
 from pyRMT.functions import smoothed_heaviside
 
-M, MU, SIGMA = E.M, E.MU, 0.002
+M, MU, SIGMA = E.M, E.MU, 0.001
 
 
 def reference_p():

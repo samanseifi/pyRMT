@@ -4,7 +4,8 @@
                           near-interface pressure error vs N, blended and sharp; (b) pressure along
                           the line through the ellipse centre (N = 64), with the exact pressure.
   disc_tg_convergence.png disc in the Taylor-Green vortex, successive-grid differences, blended and
-                          sharp: (a) velocity, (b) pressure, (c) energies and disc position.
+                          sharp: (a) velocity, (b) pressure (cells more than 1.5 cells from the interface, and the bulk),
+                          (c) energies and disc position.
 
 Reads the cached vortex runs of iim_vortex_disc.py (run that first, up to N = 256).
 Usage: python benchmarks/iim_paper_figures.py [output directory]
@@ -63,7 +64,7 @@ def report(st, vx):
             print(f"  {m:8s} {nm:11s} " + " ".join(f"{x:.2e}" for x in r[:, k]) + "  orders " + od(r[:, k]))
     print("VORTEX differences " + ", ".join(f"{a}/{2*a}" for a in vx["NS"][:-1]))
     for m in ("smeared", "sharp"):
-        for q in ("vel_L2", "vel_max", "vel_bulk", "p_L2", "p_bulk", "KE", "W", "centroid"):
+        for q in ("vel_L2", "vel_max", "vel_bulk", "p_L2", "p_off", "p_bulk", "KE", "W", "centroid"):
             e = vx[m][q]; print(f"  {m:8s} {q:9s} " + " ".join(f"{x:.2e}" for x in e) + "  orders " + od(e))
         print(f"  {m:8s} KE " + " ".join(f"{x:.6f}" for x in vx[m]["KEv"]) + " | W " + " ".join(f"{x:.4e}" for x in vx[m]["Wv"])
               + " | centroid " + " ".join(f"({a:.5f},{b:.5f})" for a, b in vx[m]["c"]))
@@ -96,9 +97,9 @@ def main():
     fig.tight_layout(); out = os.path.join(OUTDIR, "sharp_static.png"); fig.savefig(out); plt.close(fig); print("saved", out)
 
     h = vx["h"]
-    fig, ax = plt.subplots(1, 3, figsize=(14.5, 4.4))
+    fig, ax = plt.subplots(1, 3, figsize=(14.5, 5.6))
     for a, items, ttl in ((ax[0], (("vel_L2", "o-", "whole domain"), ("vel_bulk", "s--", "bulk")), "(a) velocity"),
-                          (ax[1], (("p_L2", "o-", "whole domain"), ("p_bulk", "s--", "bulk")), "(b) pressure"),
+                          (ax[1], (("p_off", "o-", "off the interface"), ("p_bulk", "s--", "bulk")), "(b) pressure"),
                           (ax[2], (("KE", "o-", "kinetic energy"), ("W", "s--", "strain energy"), ("centroid", "^:", "disc position")),
                            "(c) energies and position")):
         for m in ("smeared", "sharp"):
@@ -107,7 +108,8 @@ def main():
         ref = vx["smeared"][items[0][0]][0]
         a.loglog(h, 1.6 * ref * (h / h[0]) ** 2, "k:", lw=1, label="second order")
         a.loglog(h, 1.6 * ref * (h / h[0]), "k-.", lw=1, label="first order")
-        a.invert_xaxis(); a.set_xlabel(r"$\Delta x$ of the coarser grid"); a.set_title(ttl); a.legend(fontsize=8, loc="lower left")
+        a.invert_xaxis(); a.set_xlabel(r"$\Delta x$ of the coarser grid"); a.set_title(ttl)
+        a.legend(fontsize=8.5, loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=2)
     ax[0].set_ylabel(r"$\|f_N-f_{2N}\|$")
     fig.tight_layout(); out = os.path.join(OUTDIR, "disc_tg_convergence.png"); fig.savefig(out); plt.close(fig); print("saved", out)
 

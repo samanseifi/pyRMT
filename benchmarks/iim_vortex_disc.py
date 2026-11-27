@@ -173,12 +173,16 @@ rms = lambda a: float(np.sqrt(np.mean(a ** 2)))
 def differences(fa, fb, N):
     s = fa["phi"] <= 0
     dist = np.where(s, ndi.distance_transform_edt(s), ndi.distance_transform_edt(~s)) / N
-    mb = dist > 0.06
+    mb = dist > 0.06; off = dist > 1.5 / N          # bulk; everything except the cells cut by the interface
     # velocity COMPONENTS, not the speed: |u| has a cone point at every stagnation point, where
     # comparing magnitudes between grids gives an O(h) difference that is not an error of the flow
     dv = np.hypot(fa["uc"] - restrict(fb["uc"]), fa["vc"] - restrict(fb["vc"])); pa, pb = fa["p"], restrict(fb["p"])
     dp = (pa - pa[mb].mean()) - (pb - pb[mb].mean())
-    return dict(vel_L2=rms(dv), vel_max=float(np.abs(dv).max()), vel_bulk=rms(dv[mb]), p_L2=rms(dp), p_bulk=rms(dp[mb]),
+    # p_off: the pressure away from the cut cells. Over the whole domain two grids' pressures differ at
+    # O(h^1/2) in L2 for ANY method with a sharp jump (the jump sits in different cells), so p_L2 says
+    # nothing about the accuracy of a sharp scheme.
+    return dict(vel_L2=rms(dv), vel_max=float(np.abs(dv).max()), vel_bulk=rms(dv[mb]), p_L2=rms(dp), p_off=rms(dp[off]),
+                p_bulk=rms(dp[mb]),
                 KE=abs(float(fa["KE"]) - float(fb["KE"])), W=abs(float(fa["W"]) - float(fb["W"])),
                 centroid=float(np.hypot(fa["cx"] - fb["cx"], fa["cy"] - fb["cy"])))
 
