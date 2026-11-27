@@ -107,8 +107,9 @@ def run_sharp(N, fac, t_end=24.0, log_every=2.0):
     return np.array(traj)
 
 
-def run_blended(N, fac, t_end=24.0):
-    from benchmarks.mac_soft_disc_lid import run
+def run_blended(N, fac, t_end=24.0, band=2.0):
+    import benchmarks.mac_soft_disc_lid as L
+    L.BAND_CELLS = band; run = L.run
     h = 1.0 / N; dt = fac * min(0.3 * h, 0.2 * h * h / (MU_F / RHO))
     with contextlib.redirect_stdout(io.StringIO()):
         tr = run(N=N, t_end=t_end, dt=dt, integrator="imex-sl", scheme=SCHEME, mu_s=G, viscoelastic=True,
@@ -118,11 +119,12 @@ def run_blended(N, fac, t_end=24.0):
 
 def cached(method, N, fac, t_end=24.0):
     os.makedirs(OUT, exist_ok=True)
+    band = float(method[len("blended_w"):]) if method.startswith("blended_w") else 2.0   # e.g. blended_w1
     fn = os.path.join(OUT, f"{method}_N{N}_f{fac:g}_t{t_end:g}.npy")
     if os.path.isfile(fn):
         return np.load(fn)
     t0 = time.perf_counter()
-    tr = (run_sharp if method == "sharp" else run_blended)(N, fac, t_end)
+    tr = run_sharp(N, fac, t_end) if method == "sharp" else run_blended(N, fac, t_end, band)
     print(f"  {method} N={N} fac={fac}: {len(tr)} steps, {time.perf_counter() - t0:.0f}s wall", flush=True)
     np.save(fn, tr); return tr
 

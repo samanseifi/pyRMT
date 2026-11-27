@@ -33,6 +33,7 @@ BAND_STRESS = False       # bug 2 fix: evaluate the reference-map stress across 
                           # well-defined band field (see material_band in viscoelastic_disc_tg).
 COMPACT_FORCE = True      # compact face divergence of the stress (bug 3)
 CONSISTENT_MASK = True    # cut and extrapolate psi with the same level set (bug 4)
+BAND_CELLS = 2.0          # half-width of the blend band in cells (the paper's value)
 DETG_CLAMP = 3.0          # with COMPACT_FORCE: bound the local J = 1/det(grad xi) to [1/3, 3]. The compact
                           # force no longer averages away isolated interface cells with a corrupt
                           # extrapolated gradient (J spiked 1.6 -> 23 in one step at t~19.9, N=128);
@@ -53,7 +54,7 @@ def run(N=128, t_end=8.0, scheme="semilagrangian_cubic", w_cut_fac=0.0, detg_cla
     phi = phi_init(Xc, Yc); sm = (phi <= 0).astype(float)
 
     kappa, rho = 0.0, 1.0             # mu_s from the argument (default 0.1 = Sugiyama case)
-    mu_f = 0.01; nu = mu_f / rho; w_t = 2.0 * dx; U_lid = 1.0
+    mu_f = 0.01; nu = mu_f / rho; w_t = BAND_CELLS * dx; U_lid = 1.0
     nl = 3
     # central2/weno5 advect the band, so their stencils need a buffer of
     # extrapolated values; auto-set one. The conservative (Jain Eq.26) scheme
