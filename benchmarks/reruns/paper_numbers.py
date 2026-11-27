@@ -107,7 +107,7 @@ def momentum():
     for N in (96, 128):
         with quiet():
             h = np.asarray(run(N=N, t_end=1.6, model="elastic", mu_s=0.8, V0=0.9, V0b=0.5, Rb=0.09, mu_f=0.005, eta=2.0,
-                               sep=0.30, R=0.12, integrator="imex", eps=1 / 32, ordering="sequential"))
+                               sep=0.30, R=0.12, integrator="imex", stab=False, eps=1 / 32, ordering="sequential"))
         p0 = np.hypot(h[0, 5], h[0, 6])
         print(f"unequal discs N={N}: |p| {p0:.4e}  max relative drift {np.hypot(h[:, 5] - h[0, 5], h[:, 6] - h[0, 6]).max() / p0:.2e}"
               f"  min gap {h[:, 3].min():.4f}", flush=True)

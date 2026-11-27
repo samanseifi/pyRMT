@@ -39,7 +39,9 @@ def main():
     import matplotlib.pyplot as plt
     el, ve = load()
     Del = np.array([e[0] for e in el]); th = np.array([e[3] for e in el])
-    Dve = np.array([v[0] for v in ve]); lo = Dve - [v[1] for v in ve]; hi = np.array([v[2] for v in ve]) - Dve
+    Dve = np.array([v[0] for v in ve])
+    # bars span the residual oscillation; clip at zero (a run with no oscillation left can give -1e-17)
+    lo = np.maximum(Dve - [v[1] for v in ve], 0.0); hi = np.maximum(np.array([v[2] for v in ve]) - Dve, 0.0)
     D_lo = Del[CAS.index(0.1)]; D_hi = Del[CAS.index(0.2)]
     print("elastic D:", dict(zip(CAS, np.round(Del, 4))))
     print("elastic theta:", dict(zip(CAS, np.round(th, 1))))
