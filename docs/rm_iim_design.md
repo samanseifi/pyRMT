@@ -88,3 +88,30 @@ viscosity uniform, as in the one-fluid model):
   non-converging error of about 5e-4 (0.3% of the initial pressure scale; smeared 1e-4). It
   changes with the time step alone at fixed N, i.e. it is noise in the interface stress taken
   from the reference map near the interface, not a discretisation error of the jump conditions.
+
+## Status (2026-11-27): band extension, free-slip box, vortex case
+
+- The band extension sets the order of the transport. Every cell the solid moves into takes its
+  value from the extension and keeps it. With the plane fit this is an O(dx^2) error per newly
+  covered layer and an O(dx) lag of the interface in total (about half a cell for the disc in
+  the vortex at t = 0.6; dt-independent; both methods). The quadratic fit
+  (`pyRMT.functions.EXTRAP_ORDER = 2`, now the default) removes it:
+  frozen-vortex centroid error 0.19 -> 0.01 cells; `tests/test_extension_order.py`.
+- `sharp_step_per(bc="freeslip")` and `benchmarks/iim_vortex_disc.py`: the paper's convergence
+  case. Successive differences 32/64, 64/128, 128/256 (velocity components; pressure off the cut
+  cells), sharp vs blended:
+    velocity L2    1.0e-3, 2.9e-4, 9.9e-5 (1.8, 1.5)   vs 1.9e-3, 1.0e-3, 5.1e-4 (0.9, 1.0)
+    velocity bulk  6.8e-4, 1.3e-4, 3.6e-5 (2.4, 1.8)   vs 1.5e-3, 4.9e-4, 2.0e-4 (1.7, 1.3)
+    pressure off   3.9e-3, 5.3e-4, 1.3e-4 (2.9, 2.0)   vs 6.7e-4, 4.2e-4, 2.7e-4 (0.7, 0.6)
+    kinetic energy 2.7e-4, 6.4e-5, 1.3e-5 (2.1, 2.3)   vs 3.7e-4, 9.9e-5, 2.7e-5 (1.9, 1.8)
+  The two methods approach each other at first order (velocity gap 2.0e-3, 9.4e-4, 4.2e-4 at
+  N = 64, 128, 256), i.e. the blended error measured against the sharp solution.
+- From N ~ 128 the sharp scheme's spatial error is no larger than the first-order time error:
+  halving dt on a fixed grid changes the velocity by 4.5e-5 (N=128) and 2.3e-5 (N=256). The next
+  accuracy gain needs a second-order time integrator.
+- Finite relaxation time (tau = 0.25) and the reference-map stress give the same orders.
+- [p_n] now includes the bulk force: [p_n] = -d(G.tau)/ds - div(sigma_s).n
+  (`benchmarks/iim_nonuniform_stress.py`).
+- Cost: about 1.3-1.4x a blended step at N = 128 in this implementation (extra stress extension).
+- Not done: several bodies, walls crossed by the interface, contact, rotational pressure update
+  for large viscous steps.
