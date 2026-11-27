@@ -232,7 +232,7 @@ def _helm_freeslip(rhs, coef, dx, dy, ax):
 
 
 def sharp_step_per(u, v, dx, dy, dt, nu, rho, lap_eig, peig, phi_c, J, f_u=None, f_v=None,
-                   conserve=True, J2=None, G_old=None, bc="periodic"):
+                   conserve=True, J2=None, G_old=None, bc="periodic", U_lid=0.0):
     """One semi-implicit step with sharp interface jumps (periodic MAC grid, constant nu, rho).
 
     u, v (Ny, Nx): face velocities after explicit advection (and any bulk force already added).
@@ -247,6 +247,10 @@ def sharp_step_per(u, v, dx, dy, dt, nu, rho, lap_eig, peig, phi_c, J, f_u=None,
     (dt/rho)[grad p], (dt/rho)[grad grad p], ... of every order, and the result depends on dt at
     O(dt [grad p]). With G_old given, the function returns (u, v, p, (Gx, Gy)).
 
+    bc = "lid": no-slip box with the top wall moving at U_lid (same layout as "freeslip"; the
+    viscous solves are the direct DST-I/DST-II wall solves of pyRMT.mac). Use conserve=False: the
+    walls exchange momentum with the fluid.
+
     bc = "freeslip": the free-slip box (normal velocity zero at the walls, zero normal gradient
     of the tangential velocity), for an interface that stays away from the walls. u and v are
     passed in the same (Ny, Nx) layout, u[:, 0] and v[0, :] being the (zero) wall faces -- the
@@ -258,6 +262,16 @@ def sharp_step_per(u, v, dx, dy, dt, nu, rho, lap_eig, peig, phi_c, J, f_u=None,
     if bc == "periodic":
         helm_u = helm_v = lambda r: solve_helmholtz_periodic(r, lap_eig, dt * nu)
         pois = lambda r: solve_poisson_periodic(r, peig)
+    elif bc == "lid":
+        # no-slip walls, top wall moving at U_lid: Dirichlet in both directions for both
+        # components; the lid enters as the right-hand-side inhomogeneity of the top u row.
+        from pyRMT.mac import _dst_solve_u, _dst_solve_v
+        def helm_u(r):
+            q = r[:, 1:].copy(); q[-1, :] += dt * nu * 2.0 * U_lid / dy ** 2
+            out = np.zeros_like(r); out[:, 1:] = _dst_solve_u(q, dt * nu, dx, dy); return out
+        def helm_v(r):
+            out = np.zeros_like(r); out[1:, :] = _dst_solve_v(r[1:, :], dt * nu, dx, dy); return out
+        pois = lambda r: solve_poisson_neumann(r - r.mean(), peig)
     else:
         helm_u = lambda r: _helm_freeslip(r, dt * nu, dx, dy, 1)
         helm_v = lambda r: _helm_freeslip(r, dt * nu, dx, dy, 0)
